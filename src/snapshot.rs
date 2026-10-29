@@ -1708,7 +1708,7 @@ fn every_setting_has_a_row() {
 fn settings_window_text_fits() {
     let _lang = i18n::restore_on_drop();
     let longest = (0..weather::CITIES.len()).max_by_key(|&i| weather::CITIES[i].0.len()).unwrap();
-    let states: [(&str, fn(&mut App)); 10] = [
+    let states: [(&str, fn(&mut App)); 13] = [
         ("defaults", |_| {}),
         ("longest city", |a| a.cfg.weather_city = (0..weather::CITIES.len()).max_by_key(|&i| weather::CITIES[i].0.len()).unwrap()),
         ("hotkeys off", |a| a.cfg.slide_hotkeys = false),
@@ -1731,6 +1731,9 @@ fn settings_window_text_fits() {
             a.cfg.adhan = adhan::FILE;
             a.cfg.adhan_file = r"C:\Users\me\Music\Adzan Makkah.mp3".into();
         }),
+        ("update: checking", |a| a.update_busy = true),
+        ("update: available", |a| a.update = Some(release_with_installer("10.20.30"))),
+        ("update: downloading", |a| show_toast(a, ToastKind::Update(update::Note::Downloading(63)))),
     ];
     assert!(longest > 0);
     for lang in 0..i18n::LANGS.len() {
@@ -1919,4 +1922,53 @@ fn adhan_file_row_follows_the_choice() {
     sw_press(&mut a, Hit::Pick(Rid::Adhan, adhan::OFF as usize));
     assert_eq!(a.cfg.adhan, adhan::OFF);
     assert!(file_row(&a).is_none());
+}
+
+/// About > Updates: checks on request (like the menu item), installs or downloads the release found, and has no
+/// button while a check or a download runs.
+#[test]
+fn about_page_updates() {
+    use settingswin::Hit;
+    let about = settingswin::SECS.len() - 1;
+    let mut a = sw_shot("settingswin-about-updates", page(about));
+    let _ = update::fetches();
+    sw_press(&mut a, Hit::Update);
+    assert_eq!(update::fetches(), vec![true], "a manual check: it always answers with a toast");
+    assert!(a.update_busy);
+    assert!(settingswin::hit_center(&a, Hit::Update).is_none(), "no second check while one runs");
+    a.on_update(true, Some(release("0.0.1")));
+    assert!(update_note(&a) == Some(update::Note::UpToDate), "the answer is the usual toast");
+
+    // a newer release with an installer: the button installs it (the download itself is `update_install`, covered by
+    // update_install_flow; starting one here would leave its busy flag set for that test), and has no button while
+    // the download runs
+    let r = release_with_installer("99.0.0");
+    let mut a = sw_shot("settingswin-about-update-available", |a| {
+        a.update = Some(r.clone());
+        a.sw_show_page(about);
+    });
+    assert!(settingswin::hit_center(&a, Hit::Update).is_some());
+    assert_eq!(a.sw_update_action(), Some(settingswin::UpdateAction::Install(r.clone())));
+    show_toast(&mut a, ToastKind::Update(update::Note::Downloading(40)));
+    settingswin::render(&mut a);
+    assert_eq!(a.sw_update_action(), None);
+    assert!(settingswin::hit_center(&a, Hit::Update).is_none(), "no button while downloading");
+
+    // without an installer: Download opens the release page
+    let plain = release("99.0.0");
+    let mut a = sw_shot("settingswin-about-update-download", |a| {
+        a.update = Some(plain.clone());
+        a.sw_show_page(about);
+    });
+    let _ = sys::opened();
+    sw_press(&mut a, Hit::Update);
+    assert_eq!(sys::opened(), vec![plain.url]);
+    assert!(update::installs().is_empty());
+
+    let _lang = i18n::restore_on_drop();
+    sw_shot("id-settingswin-about-update-available", |a| {
+        indonesian(a);
+        a.update = Some(release_with_installer("99.0.0"));
+        a.sw_show_page(about);
+    });
 }

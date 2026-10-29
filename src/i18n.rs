@@ -412,6 +412,8 @@ const ID_TEXT: &[(&str, &str)] = &[
     ("What is left today", "Sisa acara hari ini"),
     ("Today's prayer times", "Waktu sholat hari ini"),
     ("Downloads", "Unduhan"),
+    ("Checking\u{2026}", "Memeriksa\u{2026}"),
+    ("Checks GitHub for a newer release", "Memeriksa GitHub untuk rilis yang lebih baru"),
 ];
 
 #[cfg(test)]

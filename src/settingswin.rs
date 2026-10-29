@@ -138,6 +138,17 @@ pub(crate) enum Hit {
     SlideToggle(usize),
     /// Move slide `i` up (true) or down in the order.
     SlideMove(usize, bool),
+    /// About > Updates: check now, or install / download the release found.
+    Update,
+}
+
+/// What the About > Updates button does (`App::sw_update_action`).
+#[derive(Clone, PartialEq, Debug)]
+pub(crate) enum UpdateAction {
+    Check,
+    Install(update::Release),
+    /// A release without an installer: open its page.
+    Open(String),
 }
 
 /// Animated toggle knobs: one per setting, and one per slide in the slide list.
@@ -170,6 +181,8 @@ pub(crate) struct Win {
     pub(crate) autostart: bool,
     /// The dictionary's Delete was pressed once: a second press within `CONFIRM_SECS` deletes it.
     pub(crate) dict_confirm: Option<Instant>,
+    /// The update state last drawn (checking, release found, download progress): redraw when it changes.
+    update_seen: (bool, Option<String>, Option<u8>),
 }
 
 impl Win {
@@ -193,6 +206,7 @@ impl Win {
             tracking: false,
             autostart: false,
             dict_confirm: None,
+            update_seen: (false, None, None),
         }
     }
 
@@ -394,9 +408,48 @@ impl App {
 
     /// Things that change by themselves and need a redraw now and then: the dictionary download and the
     /// "press again" buttons timing out.
-    fn sw_slow_redraw(&self) -> bool {
+    fn sw_slow_redraw(&mut self) -> bool {
         let recent = |t: Option<Instant>| t.is_some_and(|t| t.elapsed().as_secs_f32() < 4.0);
-        matches!(dict::state(), dict::Dl::Running(_)) || recent(self.sw.dict_confirm) || recent(self.cal_confirm) || recent(self.cal_paste_err)
+        let upd = (self.update_busy, self.update.as_ref().map(|r| r.version.clone()), self.update_downloading());
+        let upd_changed = upd != self.sw.update_seen;
+        self.sw.update_seen = upd;
+        upd_changed
+            || self.update_busy
+            || matches!(dict::state(), dict::Dl::Running(_))
+            || recent(self.sw.dict_confirm)
+            || recent(self.cal_confirm)
+            || recent(self.cal_paste_err)
+    }
+
+    /// The installer download's progress while the update toast shows it.
+    fn update_downloading(&self) -> Option<u8> {
+        match self.toast.as_ref().map(|t| &t.kind) {
+            Some(ToastKind::Update(update::Note::Downloading(p))) => Some(*p),
+            _ => None,
+        }
+    }
+
+    /// What the About > Updates button does now: install (or download) the release already found, else check. None
+    /// while a check or a download runs (no button then).
+    pub(crate) fn sw_update_action(&self) -> Option<UpdateAction> {
+        if self.update_busy || self.update_downloading().is_some() {
+            return None;
+        }
+        Some(match &self.update {
+            Some(r) if r.installer.is_some() => UpdateAction::Install(r.clone()),
+            Some(r) => UpdateAction::Open(r.url.clone()),
+            None => UpdateAction::Check,
+        })
+    }
+
+    /// About > Updates button. The answer shows as the usual update toast.
+    fn sw_update_button(&mut self) {
+        match self.sw_update_action() {
+            Some(UpdateAction::Install(r)) => self.update_install(&r),
+            Some(UpdateAction::Open(url)) => sys::open_url(&url),
+            Some(UpdateAction::Check) => self.update_check_now(),
+            None => {}
+        }
     }
 
     fn sw_step(&mut self) {
@@ -551,6 +604,7 @@ impl App {
                     self.slide_swap(i, i + 1);
                 }
             }
+            Hit::Update => self.sw_update_button(),
             Hit::Close | Hit::Minimize => {}
         }
         // the notch shows the change too (accent, size, language, slides...)
@@ -972,7 +1026,10 @@ impl Draw {
 
         match sec {
             Sec::Slides => y = self.slides(a, g, y),
-            Sec::About => y = self.about(g, y),
+            Sec::About => {
+                y = self.about(g, y);
+                y = self.updates(a, g, y);
+            }
             _ => {
                 for (head, rows) in a.sw_groups(sec) {
                     y = self.group(a, g, head, &rows, y);
@@ -1202,6 +1259,47 @@ impl Draw {
         }
         g.txt_c("github.com/dirgaastya/hesewake-notch", cx, ly + 10.0, 12.0, g.acc.bright, 1.0, 400.0, false);
         y + h + 22.0
+    }
+}
+
+impl Draw {
+    /// About > Updates: the running version or the release found, and a button to check, install or download.
+    fn updates(&mut self, a: &App, g: &mut Gfx, y: f32) -> f32 {
+        Self::header(g, tr("Updates"), y);
+        let y = y + 22.0;
+        Self::card(g, y, ROW_H);
+        let (label, sub) = if let Some(p) = a.update_downloading() {
+            (tr("Downloading update").to_string(), i18n::fill(tr("Please wait \u{b7} {}%"), &[&p]))
+        } else if let Some(r) = &a.update {
+            (i18n::fill(tr("Version {} is available"), &[&r.version]), tr("Release notes and installer").to_string())
+        } else {
+            let sub = if a.update_busy { tr("Checking\u{2026}") } else { tr("Checks GitHub for a newer release") };
+            (i18n::fill(tr("Version {}"), &[&update::CURRENT]), sub.to_string())
+        };
+        let button = a.sw_update_action().map(|act| match act {
+            UpdateAction::Install(_) => tr("Install"),
+            UpdateAction::Open(_) => tr("Download"),
+            UpdateAction::Check => tr("Check for updates"),
+        });
+        let right = X1 - 16.0;
+        let cy = y + ROW_H / 2.0;
+        let mut text_r = right;
+        if let Some(b) = button {
+            let bw = g.width_ex(b, 12.5, true).ceil() + 30.0;
+            let bx = right - bw;
+            let hot = self.is_hover(Hit::Update);
+            let (fill, text) = (g.acc.bright, g.acc.pale);
+            g.fill(&rrect(bx, cy - 15.0, bw, 30.0, 15.0), &rgb(fill, if hot { 0.32 } else { 0.2 }));
+            g.txt_c(b, bx + bw / 2.0, cy + ty(0.0, 12.5), 12.5, text, 1.0, bw, true);
+            self.hit(bx, cy - 15.0, bw, 30.0, Hit::Update);
+            text_r = bx;
+        }
+        let tw = (text_r - X0 - 32.0).max(40.0);
+        self.check(g, &label, 14.0, true, tw);
+        self.check(g, &sub, 12.0, false, tw);
+        g.txtb(&label, X0 + 16.0, y + 11.0, 14.0, [255, 255, 255], 1.0, tw);
+        g.txt(&sub, X0 + 16.0, y + 31.0, 12.0, TEXT_FAINT, 1.0, tw + 2.0);
+        y + ROW_H + 22.0
     }
 }
 
