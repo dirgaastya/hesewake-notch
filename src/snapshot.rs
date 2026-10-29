@@ -146,10 +146,8 @@ fn test_app(s: f32) -> App {
         out_scroll: 0,
         out_t: past,
         out_acc: 0,
-        order: slides::visible_order(&slides::effective(&cfg.slides, cfg.prayer_on), false),
-        settings_open: false,
-        settings_prev: None,
-        sui: settingsview::SettingsUi::new(),
+        order: slides::visible_order(&slides::effective(&cfg.slides, cfg.prayer_on)),
+        sw: settingswin::Win::new(),
         sys_ui: sysview::SysUi::new(),
         weather_idx: 0,
         cfg,
@@ -296,81 +294,6 @@ fn snap_slide_music_empty() {
     shot("slide-music-empty", 1.0, |a| open_slide(a, SlideId::Music));
 }
 
-/// Open Settings on tab `tab`. Toggle knobs are snapped to their real state while the slide is still hidden,
-/// just like when the app opens Settings.
-fn open_settings_tab(a: &mut App, tab: u8) {
-    a.open_settings();
-    a.sui.tab = tab;
-    a.settings_ui_step(0.0);
-    a.hover = true;
-}
-
-#[test]
-fn snap_settings() {
-    for tab in 0..4u8 {
-        shot(&format!("settings-tab{tab}"), 1.0, |a| open_settings_tab(a, tab));
-    }
-}
-
-/// Settings › Widgets with a long city name: the stepper grows to the left instead of cutting the name.
-#[test]
-fn snap_settings_long_city() {
-    for (name, city) in [("settings-city-short", "Jakarta"), ("settings-city-long", "Balikpapan"), ("settings-city-longest", "Bandar Lampung")] {
-        let i = weather::CITIES.iter().position(|c| c.0 == city).unwrap();
-        shot(name, 1.0, |a| {
-            a.cfg.weather_city = i;
-            open_settings_tab(a, 3);
-        });
-    }
-}
-
-/// Every stepper value is shown in full (no ellipsis) and never runs into its row's label: all cities, the
-/// lyric timing extremes, every notch size and idle display.
-#[test]
-fn stepper_values_fit_without_cutting() {
-    let _lang = i18n::restore_on_drop();
-    let mut a = test_app(1.0);
-    let mut g = Gfx::new(1.0);
-    let mut check = |a: &App, tab: u8| {
-        for r in a.settings_rows(tab) {
-            let settingsview::RowKind::Stepper(v) = &r.kind else { continue };
-            let f = settingsview::stepper_fit(&mut g, &r, v);
-            assert_eq!(&f.value, v, "{:?}: value was cut", r.label);
-            let label_end = 12.0 + g.width_ex(r.label, 12.0, true).max(g.width(r.sub, 11.0));
-            assert!(f.minus_x - 9.0 >= label_end + 4.0 - 0.01, "{:?} = {v:?}: the - button overlaps the label", r.label);
-            assert!(f.size >= 9.0, "{:?} = {v:?}: text too small", r.label);
-        }
-    };
-    for i in 0..weather::CITIES.len() {
-        a.cfg.weather_city = i;
-        check(&a, 4);
-    }
-    for lead in [settings::LEAD_MIN, settings::LEAD_MAX] {
-        a.cfg.lyric_lead_ms = lead;
-        check(&a, 1);
-    }
-    for lang in 0..i18n::LANGS.len() {
-        i18n::set(lang);
-        for n in 0..scale::SIZES.len() {
-            a.cfg.notch_size = n;
-            a.cfg.idle_display = n % settings::IDLE_DISPLAY_LABELS.len();
-            check(&a, 1);
-        }
-        for m in 0..monitors::mode_count() {
-            a.cfg.monitor = m;
-            check(&a, 1);
-        }
-        for ac in 0..accent::ACCENTS.len() {
-            a.cfg.accent = ac;
-            check(&a, 4);
-        }
-        for l in 0..i18n::LANGS.len() {
-            a.cfg.lang = l;
-            check(&a, 2);
-        }
-    }
-}
-
 // ---------------------------------------------------------------- calendar
 
 /// Jakarta time, UTC+7.
@@ -482,25 +405,6 @@ fn countdown_shows_whichever_comes_first() {
     assert_eq!(a.upcoming(), None);
 }
 
-/// Settings > Slides holds 10 slides in rows of 3: the wheel brings the 4th row into view, and its cells work.
-#[test]
-fn slides_grid_scrolls_to_the_tenth_slide() {
-    let mut a = test_app(1.0);
-    open_settings_tab(&mut a, 0);
-    assert_eq!(a.cfg.slides.len(), SlideId::USER.len());
-    assert!(settingsview::slide_cells_visible(9, 0).is_none(), "the 10th slide starts below the grid");
-    assert!(a.settings_slides_wheel(true));
-    assert_eq!(a.sui.slides_scroll, 1);
-    assert!(!a.settings_slides_wheel(true), "only one extra row");
-    let (x, y) = settingsview::slide_cells_visible(9, 1).expect("visible after scrolling");
-    assert!(settingsview::slide_cells_visible(0, 1).is_none(), "the first row scrolled out");
-    let was = a.cfg.slides[9].1;
-    a.settings_click(x + settingsview::SC_W - 10.0, y + 10.0);
-    assert_eq!(a.cfg.slides[9].1, !was, "its toggle works");
-    assert!(a.settings_slides_wheel(false));
-    assert_eq!(a.sui.slides_scroll, 0);
-}
-
 /// A day with meetings: one running with a Meet link, then two more today.
 fn with_meetings(a: &mut App) {
     let now = now_s();
@@ -547,14 +451,10 @@ fn snap_calendar() {
         a.cal = vec![event("Standup", now_s() + 30 * 3600, 15, None)];
         open_slide(a, SlideId::Agenda);
     });
-    shot("settings-calendar-off", 1.0, |a| open_settings_tab(a, 3));
-    shot("settings-calendar-synced", 1.0, |a| {
+    sw_shot("settingswin-calendar-off", page(CALENDAR));
+    sw_shot("settingswin-calendar-synced", |a| {
         with_meetings(a);
-        open_settings_tab(a, 3);
-    });
-    shot("settings-slides-scrolled", 1.0, |a| {
-        open_settings_tab(a, 0);
-        a.sui.slides_scroll = 1;
+        a.sw_show_page(CALENDAR);
     });
     let id = |a: &mut App| {
         a.cfg.lang = i18n::ID;
@@ -570,151 +470,11 @@ fn snap_calendar() {
         id(a);
         show_toast(a, ToastKind::Meeting { title: "Daily Standup".into(), at: now_s(), link: Some("https://meet.google.com/abc".into()) })
     });
-    shot("id-settings-calendar", 1.0, |a| {
+    sw_shot("id-settingswin-calendar", |a| {
         id(a);
         with_meetings(a);
-        open_settings_tab(a, 3);
+        a.sw_show_page(CALENDAR);
     });
-}
-
-/// The Calendar row in Settings > Widgets: Paste reads the clipboard, and every state's text fits, in both languages.
-#[test]
-fn calendar_row_pastes_and_fits_in_every_state() {
-    let _lang = i18n::restore_on_drop();
-    let mut a = test_app(1.0);
-    let row = |a: &App| a.settings_rows(3).into_iter().position(|r| r.label == i18n::tr("Calendar")).expect("Calendar row");
-    let i = row(&a);
-    let (cx, cy) = settingsview::cell_pos(i);
-    calendar::TEST_CLIPBOARD.with(|c| *c.borrow_mut() = Some("https://calendar.google.com/x/basic.ics".into()));
-    a.settings_click_rows(3, cx + settingsview::CELL_W - 30.0, cy + 17.0);
-    assert_eq!(a.cal_link.as_deref(), Some("https://calendar.google.com/x/basic.ics"), "Paste took the link from the clipboard");
-
-    let mut g = Gfx::new(1.0);
-    for lang in 0..i18n::LANGS.len() {
-        i18n::set(lang);
-        let states: [(&str, fn(&mut App)); 6] = [
-            ("no link", |a| a.cal_link = None),
-            ("nothing on the clipboard", |a| {
-                a.cal_link = None;
-                a.cal_paste_err = Some(Instant::now());
-            }),
-            ("loading", |a| {
-                a.cal_link = Some("https://x.com/a.ics".into());
-                a.cal_status = calendar::CalStatus::Loading;
-            }),
-            ("ready", |a| {
-                a.cal_status = calendar::CalStatus::Ready;
-                a.cal = (0..12).map(|k| event("Meeting", now_s() + k * 60, 10, None)).collect();
-            }),
-            ("failed", |a| a.cal_status = calendar::CalStatus::Failed),
-            ("confirm remove", |a| a.cal_confirm = Some(Instant::now())),
-        ];
-        for (name, set) in states {
-            set(&mut a);
-            let r = a.settings_rows(3).swap_remove(row(&a));
-            let w = settingsview::text_w(&r.kind);
-            assert!(g.width_ex(r.label, 12.0, true) <= w && g.width(r.sub, 11.0) <= w, "lang {lang}, {name}: {:?} / {:?}", r.label, r.sub);
-            let settingsview::RowKind::Button(b) = &r.kind else { panic!("{name}: a button") };
-            assert!(g.width_ex(b, 11.0, true) <= 46.0, "lang {lang}, {name}: button {b:?}");
-        }
-    }
-}
-
-/// Short values keep the old stepper; "Bandar Lampung" moves the "-" button left and clicking it still steps back.
-#[test]
-fn moved_minus_button_is_still_clickable() {
-    let mut a = test_app(1.0);
-    let row = |a: &App| a.settings_rows(3).into_iter().position(|r| r.label == "City").unwrap();
-    let i = row(&a);
-    let minus_x = |a: &mut App| {
-        let r = a.settings_rows(3).swap_remove(i);
-        let settingsview::RowKind::Stepper(v) = &r.kind else { unreachable!() };
-        settingsview::stepper_fit(a.gfx.as_mut().unwrap(), &r, v).minus_x
-    };
-    a.cfg.weather_city = 0; // Jakarta
-    assert_eq!(minus_x(&mut a), settingsview::STEP_PLUS_X - settingsview::STEP_MIN_SPAN);
-
-    let long = weather::CITIES.iter().position(|c| c.0 == "Bandar Lampung").unwrap();
-    a.cfg.weather_city = long;
-    let mx = minus_x(&mut a);
-    assert!(mx < settingsview::STEP_PLUS_X - settingsview::STEP_MIN_SPAN, "the - button should move left");
-    let (cx, cy) = settingsview::cell_pos(i);
-    a.settings_click_rows(3, cx + mx, cy + 17.0);
-    assert_eq!(a.cfg.weather_city, long - 1, "clicking the moved - button steps back");
-    a.cfg.weather_city = long;
-    a.settings_click_rows(3, cx + settingsview::STEP_PLUS_X, cy + 17.0);
-    assert_eq!(a.cfg.weather_city, (long + 1) % weather::CITIES.len(), "+ still steps forward");
-}
-
-/// Every slide name fits in its Settings > Slides cell instead of running into the chevrons.
-#[test]
-fn slide_names_fit_settings_cells() {
-    let _lang = i18n::restore_on_drop();
-    let mut g = Gfx::new(1.0);
-    for lang in 0..i18n::LANGS.len() {
-        i18n::set(lang);
-        for id in SlideId::USER {
-            let w = g.width_ex(id.short_label(), 11.0, true);
-            assert!(w <= settingsview::SLIDE_NAME_W, "{:?} is {w:.1} px wide", id.short_label());
-        }
-    }
-}
-
-/// Every Settings row's label and sub-label fit to the left of its control (no ellipsis needed).
-#[test]
-fn settings_text_fits_cells() {
-    let _lang = i18n::restore_on_drop();
-    let a = test_app(1.0);
-    let mut g = Gfx::new(1.0);
-    for lang in 0..i18n::LANGS.len() {
-        i18n::set(lang);
-        for tab in 1..=3u8 {
-            for r in a.settings_rows(tab) {
-                let w = settingsview::text_w(&r.kind);
-                let (lw, sw) = (g.width_ex(r.label, 12.0, true), g.width(r.sub, 11.0));
-                assert!(lw <= w, "tab {tab}: label {:?} {lw:.1} px > {w} px", r.label);
-                assert!(sw <= w, "tab {tab}: sub {:?} {sw:.1} px > {w} px", r.sub);
-            }
-        }
-    }
-}
-
-/// The Settings tabs sit right of the title and inside the notch, in every language.
-#[test]
-fn settings_tabs_fit_next_to_the_title() {
-    let _lang = i18n::restore_on_drop();
-    let mut g = Gfx::new(1.0);
-    for lang in 0..i18n::LANGS.len() {
-        i18n::set(lang);
-        let tabs = settingsview::tab_rects(&mut g);
-        let title_end = LX + g.width_ex(i18n::tr("Settings"), 15.0, true);
-        assert!(tabs[0].0 >= title_end + 8.0, "lang {lang}: tabs start at {:.1}, title ends at {title_end:.1}", tabs[0].0);
-        let (x, w) = tabs[tabs.len() - 1];
-        assert!(x + w <= RX + 0.01, "lang {lang}: tabs end at {:.1} > {RX}", x + w);
-    }
-}
-
-/// The Language row in Settings > General switches the whole UI right away, and back.
-#[test]
-fn language_row_switches_the_ui() {
-    let _lang = i18n::restore_on_drop();
-    let mut a = test_app(1.0);
-    let i = a.settings_rows(1).iter().position(|r| r.label == "Language").expect("Language row in General");
-    let (cx, cy) = settingsview::cell_pos(i);
-    a.settings_click_rows(1, cx + settingsview::STEP_PLUS_X, cy + 17.0);
-    assert_eq!(a.cfg.lang, i18n::ID);
-    assert_eq!(i18n::current(), i18n::ID, "applied right away");
-    assert_eq!(a.settings_rows(1)[i].label, "Bahasa");
-    assert_eq!(a.settings_rows(3)[1].label, "Kota");
-    assert_eq!(SlideId::Todo.label(), "Tugas");
-    assert_eq!(clock::day_short(1), "Sen");
-    assert_eq!(clock::month(4), "Mei");
-    assert_eq!(timer::fmt_preset(90 * 60), "1 j 30 mnt");
-    a.settings_click_rows(1, cx + settingsview::STEP_PLUS_X, cy + 17.0);
-    assert_eq!(a.cfg.lang, i18n::EN);
-    assert_eq!(a.settings_rows(3)[1].label, "City");
-    assert_eq!(clock::day_short(1), "Mon");
-    assert_eq!(timer::fmt_preset(90 * 60), "1 h 30 min");
 }
 
 /// The main screens in Indonesian, for review.
@@ -725,12 +485,6 @@ fn snap_indonesian() {
         a.cfg.lang = i18n::ID;
         i18n::set(i18n::ID);
     };
-    for tab in 0..4u8 {
-        shot(&format!("id-settings-tab{tab}"), 1.0, |a| {
-            id(a);
-            open_settings_tab(a, tab);
-        });
-    }
     for (name, slide) in [("id-todo", SlideId::Todo), ("id-water", SlideId::Water), ("id-system", SlideId::System), ("id-notifs", SlideId::Notifications), ("id-music", SlideId::Music), ("id-clipboard", SlideId::Clipboard), ("id-ledge", SlideId::Ledge), ("id-scrap", SlideId::Scrap)] {
         shot(name, 1.0, |a| {
             id(a);
@@ -795,16 +549,16 @@ fn snap_prayer() {
         a.tm.start(Instant::now() - Duration::from_secs(61));
     });
     shot("toast-prayer", 1.0, |a| show_toast(a, ToastKind::Prayer { idx: 2, at: 15 * 60 + 12 }));
-    // the "Prayer times" row in Settings > Extras: see settings-tab3
+    // the "Prayer times" row in Settings > Weather & prayer: see settingswin-7-weather
 }
 
 #[test]
 fn snap_accents() {
     for (i, ac) in accent::ACCENTS.iter().enumerate() {
         let n = ac.name.to_lowercase();
-        shot(&format!("accent-{n}-settings"), 1.0, |a| {
+        sw_shot(&format!("accent-{n}-settingswin"), |a| {
             a.cfg.accent = i;
-            open_settings_tab(a, 1);
+            a.sw_show_page(LOOK);
         });
         shot(&format!("accent-{n}-todo"), 1.0, |a| {
             a.cfg.accent = i;
@@ -840,12 +594,12 @@ fn accent_changes_the_rendered_slide() {
 
 #[test]
 fn snap_slide_hotkeys() {
-    // Settings > Slides with each slide's shortcut, and General with the "Slide hotkeys" toggle
-    shot("hotkeys-settings-slides", 1.0, |a| open_settings_tab(a, 0));
-    shot("hotkeys-settings-general", 1.0, |a| open_settings_tab(a, 1));
-    shot("hotkeys-settings-slides-off", 1.0, |a| {
+    // the Slides page with each slide's shortcut, and General with the "Slide hotkeys" toggle
+    sw_shot("hotkeys-settingswin-slides", page(SLIDES));
+    sw_shot("hotkeys-settingswin-general", page(GENERAL));
+    sw_shot("hotkeys-settingswin-slides-off", |a| {
         a.cfg.slide_hotkeys = false;
-        open_settings_tab(a, 0);
+        a.sw_show_page(SLIDES);
     });
     // Ctrl+Alt+3 from the idle notch
     shot("hotkeys-open-third", 1.0, |a| {
@@ -1062,20 +816,6 @@ fn mute_from_elsewhere_shows_in_the_notch() {
     assert!(dot > 0.0 && dot < muted, "unmuted and in use: the orange dot again ({dot} < {muted})");
 }
 
-/// Settings > Alerts has the "Mic mute key" toggle, on by default.
-#[test]
-fn mic_hotkey_row_in_alerts() {
-    let mut a = test_app(1.0);
-    let rows = a.settings_rows(2);
-    let i = rows.iter().position(|r| r.label == "Mic mute key").expect("row in Alerts");
-    assert!(matches!(rows[i].kind, settingsview::RowKind::Toggle(true)), "on by default");
-    open_settings_tab(&mut a, 2);
-    assert!(a.settings_rows_wheel(true), "the 8th row sits below the grid until it scrolls");
-    let (cx, cy) = settingsview::row_cell_visible(i, a.sui.rows_scroll).expect("visible after scrolling");
-    a.settings_click_rows(2, cx + settingsview::CELL_W - 20.0, cy + 17.0);
-    assert!(!a.cfg.mic_hotkey);
-}
-
 /// The mic HUD's name and state fit side by side in every language.
 #[test]
 fn mic_hud_text_fits() {
@@ -1217,19 +957,6 @@ fn update_toast_download_opens_the_release() {
 }
 
 #[test]
-fn update_row_in_alerts() {
-    let mut a = test_app(1.0);
-    let i = a.settings_rows(2).iter().position(|r| r.label == "Update notice").expect("Update notice row in Alerts");
-    open_settings_tab(&mut a, 2);
-    assert!(settingsview::row_cell_visible(i, 0).is_none(), "the 7th row starts below the grid");
-    assert!(a.settings_rows_wheel(true));
-    let (cx, cy) = settingsview::row_cell_visible(i, a.sui.rows_scroll).expect("visible after scrolling");
-    assert!(a.cfg.update_check, "on by default");
-    a.settings_click_rows(2, cx + settingsview::CELL_W - 30.0, cy + 17.0);
-    assert!(!a.cfg.update_check);
-}
-
-#[test]
 fn snap_update_toasts() {
     let _lang = i18n::restore_on_drop();
     for (lang, prefix) in [(i18n::EN, "update"), (i18n::ID, "id-update")] {
@@ -1237,41 +964,12 @@ fn snap_update_toasts() {
         shot(&format!("{prefix}-toast-available"), 1.0, |a| show_toast(a, ToastKind::Update(update::Note::Available(release("0.9.0")))));
         shot(&format!("{prefix}-toast-up-to-date"), 1.0, |a| show_toast(a, ToastKind::Update(update::Note::UpToDate)));
         shot(&format!("{prefix}-toast-failed"), 1.0, |a| show_toast(a, ToastKind::Update(update::Note::Failed)));
-        shot(&format!("{prefix}-settings-alerts"), 1.0, |a| open_settings_tab(a, 2));
+        sw_shot(&format!("{prefix}-settingswin-general"), |a| {
+            a.cfg.lang = lang;
+            a.sw_show_page(GENERAL);
+        });
     }
     shot("update-toast-available", 1.5, |a| show_toast(a, ToastKind::Update(update::Note::Available(release("0.9.0")))));
-}
-
-/// General has 9 rows: the first six show, the wheel brings the rest into view, and rows keep working there.
-#[test]
-fn rows_tab_scrolls_to_the_last_rows() {
-    let mut a = test_app(1.0);
-    open_settings_tab(&mut a, 1);
-    assert_eq!(a.settings_rows(1).len(), 9);
-    assert!(a.rows_scrollable());
-    assert!(settingsview::row_cell_visible(8, 0).is_none(), "the 9th row starts below the grid");
-    assert!(a.settings_rows_wheel(true));
-    assert!(a.settings_rows_wheel(true));
-    assert_eq!(a.sui.rows_scroll, 2, "9 rows = 5 rows of cells, 3 show");
-    assert!(!a.settings_rows_wheel(true), "nothing left to scroll");
-    assert!(settingsview::row_cell_visible(0, a.sui.rows_scroll).is_none(), "the first row scrolled out");
-    assert!(settingsview::row_cell_visible(8, a.sui.rows_scroll).is_some(), "the last row is in view");
-    let (x, y) = settingsview::row_cell_visible(6, a.sui.rows_scroll).expect("Minimal notch is visible");
-    let was = a.minimal;
-    a.settings_click_rows(1, x + settingsview::CELL_W - 30.0, y + 17.0);
-    assert_eq!(a.minimal, !was, "its toggle works after scrolling");
-    shot("settings-general-scrolled", 1.0, |a| {
-        open_settings_tab(a, 1);
-        a.settings_rows_wheel(true);
-        a.settings_rows_wheel(true);
-    });
-    assert!(a.settings_rows_wheel(false));
-    assert!(a.settings_rows_wheel(false));
-    assert_eq!(a.sui.rows_scroll, 0);
-    // changing tab starts at the top again
-    a.settings_rows_wheel(true);
-    a.settings_set_tab(2);
-    assert_eq!(a.sui.rows_scroll, 0);
 }
 
 // ---------------------------------------------------------------- audio output switcher
@@ -1663,11 +1361,16 @@ fn ledge_rows_show_the_download_in_its_folder() {
     assert!(!a.dl_ledge_click(x + 40.0, downloads::ledge_row(2).1 + 10.0), "below the last row");
 }
 
+/// Settings > HUD & alerts has "Download progress", on by default; turning it off clears the running downloads.
 #[test]
-fn download_rows_in_alerts() {
-    let a = test_app(1.0);
-    let i = a.settings_rows(2).iter().position(|r| r.label == "Download progress").expect("row in Alerts");
-    assert!(matches!(a.settings_rows(2)[i].kind, settingsview::RowKind::Toggle(true)), "on by default");
+fn download_row_in_alerts() {
+    let mut a = sw_shot("settingswin-test-downloads", page(ALERTS));
+    assert!(settingswin::rows_on(&a, ALERTS).iter().any(|r| r.0 == opts::Rid::Downloads && r.1 == "Download progress"));
+    assert!(a.opt_on(opts::Rid::Downloads), "on by default");
+    a.dl_apply(vec![dl("movie.mkv", 800_000_000, 4_100_000)], Vec::new());
+    sw_press(&mut a, settingswin::Hit::Press(opts::Rid::Downloads));
+    assert!(!a.cfg.downloads);
+    assert!(a.dls.is_empty(), "nothing left in the notch or on Ledge");
 }
 
 #[test]
@@ -1724,17 +1427,18 @@ fn prayer_day(a: &mut App) {
 /// The Prayer slide is in the carousel only while prayer times are on, and the slide hotkey numbers follow.
 #[test]
 fn prayer_slide_follows_the_prayer_times_setting() {
-    let mut a = test_app(1.0);
+    // weather off: with it on, the page would fetch the weather over the network
+    let mut a = sw_shot("settingswin-test-prayer", |a| {
+        a.cfg.weather_on = false;
+        a.sw_show_page(WEATHER);
+    });
     assert!(a.order.contains(&SlideId::Prayer), "on by default");
-    let i = a.settings_rows(3).iter().position(|r| r.label == "Prayer times").expect("row in Widgets");
-    let (cx, cy) = settingsview::cell_pos(i);
-    a.sui.tab = 3;
-    a.settings_click_rows(3, cx + settingsview::CELL_W - 20.0, cy + 17.0);
+    sw_press(&mut a, settingswin::Hit::Press(opts::Rid::Prayer));
     assert!(!a.cfg.prayer_on);
     assert!(!a.order.contains(&SlideId::Prayer), "gone with prayer times off");
     let p = a.cfg.slides.iter().position(|&(s, _)| s == SlideId::Prayer).unwrap();
     assert_eq!(hotkeys::number(&a.slide_cfg(), p), None, "and no hotkey number");
-    a.settings_click_rows(3, cx + settingsview::CELL_W - 20.0, cy + 17.0);
+    sw_press(&mut a, settingswin::Hit::Press(opts::Rid::Prayer));
     assert!(a.order.contains(&SlideId::Prayer), "back");
 }
 
@@ -1874,14 +1578,19 @@ fn snap_prayer_slide() {
             a.adhan_until = Some(Instant::now() + Duration::from_secs(60));
             show_toast(a, ToastKind::Prayer { idx: 2, at: 892 });
         });
-        shot(&format!("{pre}prayer-settings-widgets"), 1.0, |a| {
+        // the Weather & prayer page scrolled down to the prayer rows, with an adhan file picked
+        let mut a = sw_shot(&format!("{pre}prayer-settingswin-top"), |a| {
             set(a);
             a.cfg.adhan = adhan::FILE;
             a.cfg.adhan_file = "C:\\Users\\me\\Music\\Adzan Makkah.mp3".into();
-            open_settings_tab(a, 3);
-            a.settings_rows_wheel(true);
-            a.settings_rows_wheel(true);
+            a.sw_show_page(WEATHER);
         });
+        settingswin::scroll_to_end(&mut a);
+        settingswin::render(&mut a);
+        assert!(settingswin::cut(&a).is_empty(), "{pre}: cut {:?}", settingswin::cut(&a));
+        if let (Some(dir), Some(pm)) = (std::env::var_os("SNAPSHOT_DIR"), settingswin::canvas(&a)) {
+            pm.save_png(std::path::Path::new(&dir).join(format!("{pre}prayer-settingswin@100.png"))).expect("save png");
+        }
     }
     shot("prayer-slide", 1.5, |a| {
         prayer_day(a);
@@ -1912,4 +1621,302 @@ fn snap_prayer_slide() {
         a.cfg.ramadan = true;
         a.cfg.weather_on = false;
     });
+}
+
+// ---------------------------------------------------------------- Settings window
+
+/// Settings window pages, in sidebar order.
+const GENERAL: usize = 0;
+const LOOK: usize = 1;
+const SLIDES: usize = 2;
+const SCREENS: usize = 3;
+const MUSIC: usize = 4;
+const ALERTS: usize = 6;
+const WEATHER: usize = 7;
+const CALENDAR: usize = 8;
+
+/// Draw the Settings window (setup picks the page) and save it as `<name>@100.png` when asked.
+fn sw_shot(name: &str, setup: impl FnOnce(&mut App)) -> App {
+    let mut a = test_app(1.0);
+    setup(&mut a);
+    settingswin::render(&mut a);
+    let pm = settingswin::canvas(&a).expect("canvas");
+    assert_eq!((pm.width(), pm.height()), (820, 560), "{name}");
+    if let Some(dir) = std::env::var_os("SNAPSHOT_DIR") {
+        std::fs::create_dir_all(&dir).expect("create snapshot folder");
+        pm.save_png(std::path::Path::new(&dir).join(format!("{name}@100.png"))).expect("save png");
+    }
+    a
+}
+
+fn page(i: usize) -> impl FnOnce(&mut App) {
+    move |a: &mut App| a.sw_show_page(i)
+}
+
+fn indonesian(a: &mut App) {
+    a.cfg.lang = i18n::ID;
+    i18n::set(i18n::ID);
+}
+
+/// Click on `hit` in the last drawn frame (it must be there), the way the window does.
+fn sw_press(a: &mut App, hit: settingswin::Hit) {
+    let (x, y) = settingswin::hit_center(a, hit).unwrap_or_else(|| panic!("{hit:?} is not on the page"));
+    assert_eq!(a.sw_hit(x, y), Some(hit), "the click at the centre of {hit:?} lands on it");
+    a.sw_click(hit);
+    settingswin::render(a);
+}
+
+#[test]
+fn snap_settings_window() {
+    for (i, sec) in settingswin::SECS.iter().enumerate() {
+        let a = sw_shot(&format!("settingswin-{i}-{sec:?}").to_lowercase(), page(i));
+        assert!(settingswin::hit_center(&a, settingswin::Hit::Nav(i)).is_some(), "{sec:?}: sidebar item");
+        assert!(settingswin::hit_center(&a, settingswin::Hit::Close).is_some());
+    }
+    let _lang = i18n::restore_on_drop();
+    for (i, sec) in settingswin::SECS.iter().enumerate() {
+        sw_shot(&format!("id-settingswin-{i}-{sec:?}").to_lowercase(), |a| {
+            indonesian(a);
+            a.sw_show_page(i);
+        });
+    }
+}
+
+/// Every setting has a row (toggle, choice, stepper or button) on one of the window's pages.
+#[test]
+fn every_setting_has_a_row() {
+    let a = test_app(1.0);
+    let rows: Vec<opts::Rid> = (0..settingswin::SECS.len()).flat_map(|i| settingswin::rows_on(&a, i)).map(|r| r.0).collect();
+    for r in opts::Rid::ALL {
+        // the dictionary row only shows while there is something to do with it (get it, or delete a downloaded one)
+        if r == opts::Rid::Dictionary && dict::removable().is_none() && romaji::available() {
+            continue;
+        }
+        // the adhan file row only shows with the adhan set to "File" (see adhan_file_row_follows_the_choice)
+        if r == opts::Rid::AdhanFile {
+            continue;
+        }
+        assert!(rows.contains(&r), "{r:?} has no row in the Settings window");
+    }
+    let mut seen = std::collections::HashSet::new();
+    assert!(rows.iter().all(|r| seen.insert(*r)), "a setting shows on two rows");
+}
+
+/// No label, description, slide name or choice is cut, on any page, in either language: also with the longest city,
+/// every calendar state and the slide hotkeys off.
+#[test]
+fn settings_window_text_fits() {
+    let _lang = i18n::restore_on_drop();
+    let longest = (0..weather::CITIES.len()).max_by_key(|&i| weather::CITIES[i].0.len()).unwrap();
+    let states: [(&str, fn(&mut App)); 10] = [
+        ("defaults", |_| {}),
+        ("longest city", |a| a.cfg.weather_city = (0..weather::CITIES.len()).max_by_key(|&i| weather::CITIES[i].0.len()).unwrap()),
+        ("hotkeys off", |a| a.cfg.slide_hotkeys = false),
+        ("calendar: nothing on the clipboard", |a| a.cal_paste_err = Some(Instant::now())),
+        ("calendar: loading", |a| {
+            a.cal_link = Some("https://x.com/a.ics".into());
+            a.cal_status = calendar::CalStatus::Loading;
+        }),
+        ("calendar: ready", with_meetings),
+        ("calendar: failed", |a| {
+            a.cal_link = Some("https://x.com/a.ics".into());
+            a.cal_status = calendar::CalStatus::Failed;
+        }),
+        ("calendar: press again to remove", |a| {
+            with_meetings(a);
+            a.cal_confirm = Some(Instant::now());
+        }),
+        ("adhan: file, none picked", |a| a.cfg.adhan = adhan::FILE),
+        ("adhan: file picked", |a| {
+            a.cfg.adhan = adhan::FILE;
+            a.cfg.adhan_file = r"C:\Users\me\Music\Adzan Makkah.mp3".into();
+        }),
+    ];
+    assert!(longest > 0);
+    for lang in 0..i18n::LANGS.len() {
+        i18n::set(lang);
+        for (name, set) in states {
+            for i in 0..settingswin::SECS.len() {
+                let mut a = test_app(1.0);
+                a.cfg.lang = lang;
+                set(&mut a);
+                a.sw_show_page(i);
+                settingswin::render(&mut a);
+                assert!(settingswin::cut(&a).is_empty(), "lang {lang}, {name}, page {i}: cut {:?}", settingswin::cut(&a));
+            }
+        }
+    }
+}
+
+/// Toggles and choices change the setting right away (and the notch with it), and a second press puts it back.
+#[test]
+fn settings_window_changes_apply_right_away() {
+    use opts::Rid;
+    use settingswin::Hit;
+    let mut a = sw_shot("settingswin-test-look", page(LOOK));
+    sw_press(&mut a, Hit::Press(Rid::Minimal));
+    assert!(a.minimal && a.cfg.minimal, "minimal notch on");
+    assert_eq!(anim::target(&a), THIN, "the idle notch is a thin line now");
+    sw_press(&mut a, Hit::Press(Rid::Minimal));
+    assert!(!a.minimal);
+    sw_press(&mut a, Hit::Pick(Rid::Accent, 3));
+    assert_eq!(a.cfg.accent, 3);
+    assert_eq!(a.gfx.as_ref().unwrap().acc.main, accent::get(3).main, "the notch was redrawn in the new accent");
+    sw_press(&mut a, Hit::Pick(Rid::IdleDisplay, 2));
+    assert_eq!(a.cfg.idle_display, 2);
+    assert!(a.idle_phase() == IdlePhase::Eye, "eyes right away");
+    assert!(settingswin::hit_center(&a, Hit::Pick(Rid::NotchSize, 5)).is_some(), "200%");
+
+    let mut a = sw_shot("settingswin-test-screens", page(SCREENS));
+    sw_press(&mut a, Hit::Press(Rid::ThinMaximized));
+    assert!(a.cfg.busy_on_maximized);
+    assert!(settingswin::hit_center(&a, Hit::Step(Rid::Monitor, true)).is_some());
+
+    let mut a = sw_shot("settingswin-test-general", page(GENERAL));
+    sw_press(&mut a, Hit::Press(Rid::SlideHotkeys));
+    assert!(!a.cfg.slide_hotkeys);
+    sw_press(&mut a, Hit::Press(Rid::UpdateCheck));
+    assert!(!a.cfg.update_check, "update notice was on by default");
+    assert!(settingswin::hit_center(&a, Hit::Press(Rid::Autostart)).is_some());
+
+    let mut a = sw_shot("settingswin-test-music", page(MUSIC));
+    sw_press(&mut a, Hit::Step(Rid::LyricTiming, true));
+    assert_eq!(a.cfg.lyric_lead_ms, settings::Settings::default().lyric_lead_ms + settings::LEAD_STEP);
+    sw_press(&mut a, Hit::Press(Rid::Romaji));
+    assert!(a.cfg.romaji_lyrics);
+
+    let mut a = sw_shot("settingswin-test-alerts", page(ALERTS));
+    for (r, get) in [
+        (Rid::HudVolume, (|a: &App| a.cfg.hud_volume) as fn(&App) -> bool),
+        (Rid::HudBrightness, |a| a.cfg.hud_brightness),
+        (Rid::LockKeys, |a| a.cfg.lock_toast),
+        (Rid::PrivacyDot, |a| a.cfg.privacy_dot),
+        (Rid::MicMute, |a| a.cfg.mic_hotkey),
+    ] {
+        let was = get(&a);
+        sw_press(&mut a, Hit::Press(r));
+        assert_eq!(get(&a), !was, "{r:?}");
+    }
+
+    // weather off first: with it on, a new city would fetch the weather over the network
+    let mut a = sw_shot("settingswin-test-weather", |a| {
+        a.cfg.weather_on = false;
+        a.sw_show_page(WEATHER);
+    });
+    sw_press(&mut a, Hit::Step(Rid::City, true));
+    assert_eq!(a.cfg.weather_city, 1);
+    sw_press(&mut a, Hit::Step(Rid::City, false));
+    assert_eq!(a.cfg.weather_city, 0);
+    sw_press(&mut a, Hit::Press(Rid::Prayer));
+    assert!(!a.cfg.prayer_on);
+    assert!(settingswin::hit_center(&a, Hit::Press(Rid::Weather)).is_some());
+}
+
+/// A long city name widens the stepper to the left; its "-" button still takes the click.
+#[test]
+fn long_city_stepper_still_clickable() {
+    use settingswin::Hit;
+    let i = weather::CITIES.iter().position(|c| c.0 == "Bandar Lampung").unwrap();
+    let mut a = sw_shot("settingswin-city-longest", |a| {
+        a.cfg.weather_on = false;
+        a.cfg.weather_city = i;
+        a.sw_show_page(WEATHER);
+    });
+    sw_press(&mut a, Hit::Step(opts::Rid::City, false));
+    assert_eq!(a.cfg.weather_city, i - 1);
+}
+
+/// The Language choice switches the whole UI right away, and back.
+#[test]
+fn language_choice_switches_the_ui() {
+    use settingswin::Hit;
+    let _lang = i18n::restore_on_drop();
+    let mut a = sw_shot("settingswin-test-language", page(GENERAL));
+    sw_press(&mut a, Hit::Pick(opts::Rid::Language, i18n::ID));
+    assert_eq!(a.cfg.lang, i18n::ID);
+    assert_eq!(i18n::current(), i18n::ID, "applied right away");
+    assert!(settingswin::rows_on(&a, GENERAL).iter().any(|r| r.1 == "Bahasa"));
+    assert!(settingswin::rows_on(&a, WEATHER).iter().any(|r| r.1 == "Kota"));
+    assert_eq!(SlideId::Todo.label(), "Tugas");
+    assert_eq!(clock::day_short(1), "Sen");
+    assert_eq!(timer::fmt_preset(90 * 60), "1 j 30 mnt");
+    sw_press(&mut a, Hit::Pick(opts::Rid::Language, i18n::EN));
+    assert_eq!(a.cfg.lang, i18n::EN);
+    assert!(settingswin::rows_on(&a, WEATHER).iter().any(|r| r.1 == "City"));
+    assert_eq!(clock::day_short(1), "Mon");
+}
+
+/// The Calendar button pastes the link from the clipboard; pressed twice it removes it.
+#[test]
+fn calendar_button_pastes_and_removes() {
+    use settingswin::Hit;
+    let mut a = sw_shot("settingswin-test-calendar", page(CALENDAR));
+    calendar::TEST_CLIPBOARD.with(|c| *c.borrow_mut() = Some("https://calendar.google.com/x/basic.ics".into()));
+    sw_press(&mut a, Hit::Press(opts::Rid::Calendar));
+    assert_eq!(a.cal_link.as_deref(), Some("https://calendar.google.com/x/basic.ics"), "Paste took the link from the clipboard");
+    sw_press(&mut a, Hit::Press(opts::Rid::Calendar));
+    assert!(a.cal_link.is_some(), "the first press only asks to press again");
+    sw_press(&mut a, Hit::Press(opts::Rid::Calendar));
+    assert!(a.cal_link.is_none(), "removed");
+}
+
+/// The Slides page lists all ten slides; it scrolls to the last one, whose toggle and arrows work.
+#[test]
+fn slides_page_scrolls_to_the_last_slide() {
+    use settingswin::Hit;
+    let mut a = sw_shot("settingswin-test-slides", page(SLIDES));
+    let n = a.cfg.slides.len();
+    assert_eq!(n, SlideId::USER.len(), "every slide is listed");
+    assert!(settingswin::content_h(&a) > 560.0, "the slide list is taller than the window");
+    assert!(settingswin::hit_center(&a, Hit::SlideToggle(n - 1)).is_none(), "the last slide starts below the window");
+    assert!(settingswin::hit_center(&a, Hit::SlideMove(0, true)).is_none(), "the first slide can't move up");
+    settingswin::scroll_to_end(&mut a);
+    settingswin::render(&mut a);
+    assert!(settingswin::hit_center(&a, Hit::SlideMove(n - 1, false)).is_none(), "the last slide can't move down");
+    // the slide before last (the last one is Prayer, which also follows the prayer times setting)
+    let i = n - 2;
+    let it = a.cfg.slides[i];
+    sw_press(&mut a, Hit::SlideToggle(i));
+    assert_eq!(a.cfg.slides[i].1, !it.1);
+    assert_eq!(a.order.contains(&it.0), !it.1, "the carousel follows");
+    sw_press(&mut a, Hit::SlideMove(i, true));
+    assert_eq!(a.cfg.slides[i - 1].0, it.0, "moved up");
+}
+
+/// The last enabled slide can't be turned off (the carousel never ends up empty).
+#[test]
+fn one_slide_always_stays_on() {
+    let mut a = test_app(1.0);
+    for i in 0..a.cfg.slides.len() {
+        a.slide_toggle(i);
+    }
+    assert_eq!(a.cfg.slides.iter().filter(|s| s.1).count(), 1);
+    assert_eq!(a.order.len(), 1);
+}
+
+/// The Adhan sound choice: "File" adds the file row (Choose, before a file is picked; the dialog itself only runs in
+/// the app), the picked file shows by name (Change), and Off takes the row away again.
+#[test]
+fn adhan_file_row_follows_the_choice() {
+    use opts::Rid;
+    use settingswin::Hit;
+    let file_row = |a: &App| settingswin::rows_on(a, WEATHER).into_iter().find(|r| r.0 == Rid::AdhanFile);
+    let mut a = sw_shot("settingswin-test-adhan", |a| {
+        a.cfg.weather_on = false;
+        a.sw_show_page(WEATHER);
+    });
+    settingswin::scroll_to_end(&mut a);
+    settingswin::render(&mut a);
+    assert!(file_row(&a).is_none(), "off by default: no file row");
+    sw_press(&mut a, Hit::Pick(Rid::Adhan, adhan::FILE as usize));
+    assert_eq!(a.cfg.adhan, adhan::FILE);
+    assert!(file_row(&a).is_some(), "the file row is there");
+    a.adhan_picked(Some(r"C:\Users\me\Music\Adzan Makkah.mp3".into()));
+    assert_eq!(settingswin::row_sub(&a, WEATHER, Rid::AdhanFile).as_deref(), Some("Adzan Makkah.mp3"), "the file's name, not its folder");
+    settingswin::scroll_to_end(&mut a);
+    settingswin::render(&mut a);
+    assert!(settingswin::hit_center(&a, Hit::Press(Rid::AdhanFile)).is_some(), "Change");
+    sw_press(&mut a, Hit::Pick(Rid::Adhan, adhan::OFF as usize));
+    assert_eq!(a.cfg.adhan, adhan::OFF);
+    assert!(file_row(&a).is_none());
 }

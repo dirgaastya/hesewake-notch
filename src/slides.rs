@@ -1,7 +1,7 @@
 //! Registri slide: identitas slide, urutan tampil, dan penyimpanannya di `settings.txt`.
 
 /// Identitas slide. Slide baru ditambahkan di sini (dan di `USER`) agar bisa diatur dari Settings.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum SlideId {
     Music,
     Water,
@@ -19,8 +19,6 @@ pub(crate) enum SlideId {
     Agenda,
     /// Today's prayer times (prayer.rs). Only in the carousel while "Prayer times" is on.
     Prayer,
-    /// Hanya muncul (di akhir) selama dibuka lewat item menu "Settings"; tidak ada di carousel saat tertutup.
-    Settings,
 }
 
 impl SlideId {
@@ -57,7 +55,6 @@ impl SlideId {
             SlideId::Clipboard => "clipboard",
             SlideId::Agenda => "agenda",
             SlideId::Prayer => "prayer",
-            SlideId::Settings => "settings",
         }
     }
 
@@ -74,16 +71,6 @@ impl SlideId {
             SlideId::Clipboard => "Clipboard",
             SlideId::Agenda => "Agenda",
             SlideId::Prayer => crate::i18n::tr("Prayer"),
-            SlideId::Settings => crate::i18n::tr("Settings"),
-        }
-    }
-
-    /// Nama ringkas untuk sel sempit di Settings.
-    pub(crate) fn short_label(self) -> &'static str {
-        match self {
-            SlideId::Notifications => crate::i18n::tr("Notifs"),
-            SlideId::Clipboard => crate::i18n::tr("Clips"),
-            other => other.label(),
         }
     }
 
@@ -92,7 +79,7 @@ impl SlideId {
     }
 }
 
-/// Konfigurasi slide: urutan tampil + apakah aktif. Hanya slide `USER`; `Settings` ditambahkan otomatis.
+/// Konfigurasi slide: urutan tampil + apakah aktif.
 pub(crate) type SlideCfg = Vec<(SlideId, bool)>;
 
 pub(crate) fn default_cfg() -> SlideCfg {
@@ -133,15 +120,12 @@ pub(crate) fn effective(cfg: &[(SlideId, bool)], prayer_on: bool) -> SlideCfg {
     cfg.iter().map(|&(s, on)| (s, on && (prayer_on || s != SlideId::Prayer))).collect()
 }
 
-/// Urutan slide yang benar-benar tampil: yang aktif; `Settings` hanya ada (di akhir) selama dibuka lewat menu.
-/// Tanpa slide aktif dan Settings tertutup, slide pertama tetap ditampilkan agar carousel tidak kosong.
-pub(crate) fn visible_order(cfg: &[(SlideId, bool)], settings_open: bool) -> Vec<SlideId> {
+/// Urutan slide yang benar-benar tampil: yang aktif. Tanpa slide aktif, slide pertama tetap ditampilkan agar carousel
+/// tidak kosong.
+pub(crate) fn visible_order(cfg: &[(SlideId, bool)]) -> Vec<SlideId> {
     let mut v: Vec<SlideId> = cfg.iter().filter(|(_, on)| *on).map(|(s, _)| *s).collect();
-    if v.is_empty() && !settings_open {
+    if v.is_empty() {
         v.push(cfg.first().map_or(SlideId::Music, |(s, _)| *s));
-    }
-    if settings_open {
-        v.push(SlideId::Settings);
     }
     v
 }
@@ -168,7 +152,6 @@ mod tests {
     fn ignores_unknown_and_duplicates() {
         let c = parse_slides("music,bogus,music,!music,settings");
         assert_eq!(c.iter().filter(|(s, _)| *s == SlideId::Music).count(), 1);
-        assert!(c.iter().all(|(s, _)| *s != SlideId::Settings));
         assert_eq!(c.len(), SlideId::USER.len());
     }
 
@@ -180,18 +163,13 @@ mod tests {
     }
 
     #[test]
-    fn settings_only_when_open() {
+    fn only_enabled_slides_show() {
         let c = parse_slides("!music,water");
-        let closed = visible_order(&c, false);
-        assert!(!closed.contains(&SlideId::Settings));
-        assert!(!closed.contains(&SlideId::Music));
-        assert_eq!(closed[0], SlideId::Water);
-        let open = visible_order(&c, true);
-        assert_eq!(open.last(), Some(&SlideId::Settings));
-        assert_eq!(&open[..open.len() - 1], &closed[..]);
-        // semua disembunyikan: tertutup -> satu slide cadangan; terbuka -> hanya Settings
+        let v = visible_order(&c);
+        assert!(!v.contains(&SlideId::Music));
+        assert_eq!(v[0], SlideId::Water);
+        // semua disembunyikan: satu slide cadangan
         let all_off: SlideCfg = SlideId::USER.iter().map(|&s| (s, false)).collect();
-        assert_eq!(visible_order(&all_off, false), vec![SlideId::Music]);
-        assert_eq!(visible_order(&all_off, true), vec![SlideId::Settings]);
+        assert_eq!(visible_order(&all_off), vec![SlideId::Music]);
     }
 }

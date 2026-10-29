@@ -250,6 +250,25 @@ impl Gfx {
         }
     }
 
+    /// Canvas of `w` x `h` logical px at scale `s` (the Settings window; the notch canvas comes from `new`).
+    pub(crate) fn sized(s: f32, w: f32, h: f32) -> Gfx {
+        let (pw, ph) = ((w * s).ceil().max(1.0) as u32, (h * s).ceil().max(1.0) as u32);
+        let full = (0, 0, pw as usize, ph as usize);
+        Gfx {
+            pm: Pixmap::new(pw, ph).expect("kanvas"),
+            text: Text::load().map(|mut t| {
+                t.s = s;
+                t
+            }),
+            mask: None,
+            prev_box: full,
+            dirty: full,
+            s,
+            ts: Transform::from_scale(s, s),
+            acc: accent::get(0),
+        }
+    }
+
     /// Paint in the main accent color with alpha `a`.
     pub(crate) fn sacc(&self, a: f32) -> Paint<'static> {
         let c = self.acc.main;
