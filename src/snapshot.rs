@@ -66,6 +66,8 @@ fn test_app(s: f32) -> App {
         demo_slide: None,
         display_off: false,
         menu_open: false,
+        lock: Lock::Off,
+        lock_menu: false,
         peek_until: None,
         reminding: false,
         prayer: None,
@@ -1631,6 +1633,164 @@ fn downloads_off_shows_nothing() {
     assert!(a.dls.is_empty());
     assert!(a.toast.is_none());
     assert_eq!(a.dl_speed(), None);
+}
+
+/// An App at the size its current state wants, as after the spring has settled.
+fn settle(a: &mut App) {
+    (a.w, a.h) = anim::target(a);
+}
+
+#[test]
+fn lock_decides_whether_the_notch_is_open() {
+    let mut a = test_app(1.0);
+    a.lock = Lock::Min;
+    a.hover = true;
+    a.peek_until = Some(Instant::now() + Duration::from_secs(8));
+    a.drag = Some((0.0, 0.0));
+    assert!(!a.expanded(), "locked small: hover, peek and drag do not open it");
+
+    let mut a = test_app(1.0);
+    a.lock = Lock::Open;
+    assert!(a.expanded(), "locked open: stays open without a hover");
+    a.splash = Some(Instant::now());
+    assert!(!a.expanded(), "the startup splash still plays");
+    a.splash = None;
+    show_toast(&mut a, ToastKind::Charging { pct: 50 });
+    assert!(!a.expanded(), "shrinks for a toast");
+    a.toast = None;
+    assert!(a.expanded(), "and opens again after it");
+}
+
+#[test]
+fn locked_open_shows_toasts_and_opens_again() {
+    let mut a = test_app(1.0);
+    a.lock = Lock::Open;
+    a.push_toast(ToastKind::Charging { pct: 50 });
+    assert!(a.toast.is_some(), "not held back by the lock");
+    a.toast_update();
+    assert!(a.toast.is_some(), "not cancelled by the lock");
+    a.toast.as_mut().unwrap().dur = 0.0;
+    a.toast_update();
+    assert!(a.toast.is_none() && a.expanded(), "open again once the toast ends");
+
+    a.hover = true;
+    a.push_toast(ToastKind::Charging { pct: 50 });
+    assert!(a.toast.is_none(), "pointer on the panel: the toast waits, as in a normal open notch");
+    assert_eq!(a.toast_q.len(), 1);
+    a.hover = false;
+    a.toast_update();
+    assert!(a.toast.is_some(), "and shows once the pointer leaves");
+}
+
+#[test]
+fn locked_small_keeps_toasts_under_the_pointer() {
+    let mut a = test_app(1.0);
+    a.lock = Lock::Min;
+    a.hover = true;
+    a.push_toast(ToastKind::Charging { pct: 50 });
+    a.toast_update();
+    assert!(a.toast.is_some(), "a hover cancels a toast only by opening the notch");
+    assert!(!a.lock_chip(), "the padlock waits until the toast is gone");
+}
+
+#[test]
+fn padlock_popover_locks_and_unlocks() {
+    let (bx, by) = lock::LOCK_BTN;
+    let mut a = test_app(1.0);
+    open_slide(&mut a, SlideId::Todo);
+    settle(&mut a);
+    assert!(a.lock_click(bx, by));
+    assert!(a.lock_menu, "the padlock opens the popover");
+    assert!(!a.lock_click(300.0, 100.0), "a click elsewhere reaches the slide");
+    assert!(!a.lock_menu, "and closes the popover");
+
+    a.lock_click(bx, by);
+    assert!(a.lock_click(bx + 20.0, 56.0));
+    assert_eq!((a.lock, a.lock_menu), (Lock::Open, false), "first row: Lock expanded");
+    assert!(a.lock_click(bx, by));
+    assert_eq!(a.lock, Lock::Off, "the padlock unlocks without the popover");
+
+    a.lock_click(bx, by);
+    assert!(a.lock_click(bx + 20.0, 80.0));
+    assert_eq!(a.lock, Lock::Min, "second row: Lock minimize");
+
+    let mut a = test_app(1.0);
+    open_slide(&mut a, SlideId::Todo);
+    settle(&mut a);
+    a.editing = true;
+    assert!(!a.lock_click(bx, by), "ignored while editing, like the arrows");
+    assert!(!a.lock_menu);
+}
+
+#[test]
+fn locked_small_hover_reveals_the_padlock() {
+    let mut a = test_app(1.0);
+    a.lock = Lock::Min;
+    a.minimal = true;
+    assert!(a.thin());
+    assert_eq!(anim::target(&a), THIN);
+    a.hover = true;
+    assert!(a.lock_chip() && !a.thin(), "the thin line grows so the padlock fits");
+    assert_eq!(anim::target(&a), (IDLE.0 + lock::CHIP_W, IDLE.1));
+    settle(&mut a);
+
+    assert!(!a.lock_click(CX - 60.0, 16.0), "only the padlock unlocks");
+    assert_eq!(a.lock, Lock::Min);
+    assert!(a.lock_click(CX + a.w / 2.0 - lock::CHIP_W / 2.0, 16.0));
+    assert_eq!(a.lock, Lock::Off);
+    assert!(a.expanded(), "unlocked under the pointer: the normal hover opens it");
+}
+
+#[test]
+fn locked_small_ignores_slide_hotkeys() {
+    let mut a = test_app(1.0);
+    a.lock = Lock::Min;
+    assert!(!a.slide_hotkey(1));
+    assert_eq!((a.cur(), a.peek_until), (0, None));
+}
+
+#[test]
+fn locking_clears_a_pending_peek() {
+    let mut a = test_app(1.0);
+    a.peek_until = Some(Instant::now() + Duration::from_secs(8));
+    a.lock_set(Lock::Min);
+    a.lock_set(Lock::Off);
+    assert!(!a.expanded(), "a peek from before the lock does not open the notch after unlocking");
+    assert_eq!(a.cfg.notch_lock, 0);
+    a.lock_set(Lock::Open);
+    assert_eq!(a.cfg.notch_lock, 1, "saved for the next start");
+}
+
+#[test]
+fn snap_lock() {
+    let playing = || Media { title: "Almost Easy".into(), artist: "Avenged Sevenfold".into(), playing: true, pos: 60, dur: 240, pos_ms: 60_000, source: "Demo".into(), sources: 1 };
+    for s in SCALES {
+        shot("lock-button", s, |a| open_slide(a, SlideId::Music));
+        shot("lock-popover", s, |a| {
+            open_slide(a, SlideId::Music);
+            a.lock_menu = true;
+        });
+        shot("lock-open", s, |a| a.lock = Lock::Open);
+        shot("lock-chip-idle", s, |a| {
+            a.lock = Lock::Min;
+            a.hover = true;
+        });
+    }
+    shot("lock-chip-playing", 1.0, |a| {
+        a.lock = Lock::Min;
+        a.hover = true;
+        a.media = playing();
+    });
+    shot("lock-chip-thin", 1.0, |a| {
+        a.lock = Lock::Min;
+        a.minimal = true;
+        a.hover = true;
+    });
+    shot("lock-chip-with-privacy-dots", 1.0, |a| {
+        a.lock = Lock::Min;
+        a.hover = true;
+        a.priv_mic = vec!["Zoom".into()];
+    });
 }
 
 /// The pointer entering the notch opens Ledge once per new download, not on every hover.

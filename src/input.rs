@@ -11,6 +11,12 @@ pub(crate) unsafe fn click(x: f32, y: f32) {
             schedule(a);
             return;
         }
+        if a.lock_click(x, y) {
+            a.last = Instant::now();
+            present(a);
+            schedule(a);
+            return;
+        }
         if !a.ready() {
             return;
         }
@@ -192,17 +198,22 @@ pub(crate) unsafe fn click(x: f32, y: f32) {
     });
 }
 
-pub(crate) unsafe fn context_menu(hwnd: HWND, autostart: bool, minimal: bool, notif_on: bool) -> i32 {
+pub(crate) unsafe fn context_menu(hwnd: HWND, autostart: bool, minimal: bool, notif_on: bool, lock: Lock) -> i32 {
     let menu = match CreatePopupMenu() {
         Ok(m) => m,
         Err(_) => return 0,
     };
     let chk = |on: bool| if on { MF_STRING | MF_CHECKED } else { MF_STRING };
+    if lock != Lock::Off {
+        let _ = AppendMenuW(menu, MF_STRING, sys::CMD_UNLOCK as usize, &HSTRING::from(tr("Unlock notch")));
+        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+    }
     let _ = AppendMenuW(menu, chk(autostart), sys::CMD_AUTOSTART as usize, &HSTRING::from(tr("Start with Windows")));
     let _ = AppendMenuW(menu, chk(minimal), sys::CMD_MINIMAL as usize, &HSTRING::from(tr("Minimal notch")));
     let _ = AppendMenuW(menu, chk(notif_on), sys::CMD_NOTIF as usize, &HSTRING::from(tr("Windows notifications")));
     let _ = AppendMenuW(menu, MF_STRING, sys::CMD_NOTIF_ACCESS as usize, &HSTRING::from(tr("Notification access...")));
-    let _ = AppendMenuW(menu, MF_STRING, sys::CMD_SETTINGS as usize, &HSTRING::from(tr("Settings")));
+    let settings = if lock == Lock::Min { MF_STRING | MF_GRAYED } else { MF_STRING };
+    let _ = AppendMenuW(menu, settings, sys::CMD_SETTINGS as usize, &HSTRING::from(tr("Settings")));
     let _ = AppendMenuW(menu, MF_STRING, sys::CMD_ABOUT as usize, &HSTRING::from(tr("About Hesewake Notch")));
     let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
     let _ = AppendMenuW(menu, MF_STRING, 1, &HSTRING::from(tr("Exit")));

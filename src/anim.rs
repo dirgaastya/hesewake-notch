@@ -43,7 +43,7 @@ pub(crate) unsafe fn schedule(a: &mut App) {
         16
     } else if a.expanded() && a.is_slide(SlideId::Music) && a.tint.animating() {
         16 // artwork colour cross-fade on the Music slide
-    } else if a.media.playing && !a.expanded() && !a.busy {
+    } else if a.media.playing && !a.expanded() && !a.thin() {
         33
     } else if a.splash_t().is_some() && !a.media.playing {
         a.eye.frame_ms(0.0)
@@ -197,10 +197,14 @@ unsafe fn poll(a: &mut App) {
         redraw = true;
     }
 
+    if !a.expanded() {
+        a.lock_menu = false;
+    }
     if !a.menu_open {
         let mut p = POINT::default();
         if GetCursorPos(&mut p).is_ok() {
-            let (zw, zh) = if a.hover || a.expanded() {
+            // Locked small, the hover never opens the notch: the pointer leaves it at its small size.
+            let (zw, zh) = if a.lock != Lock::Min && (a.hover || a.expanded()) {
                 (EXP_W + 20.0, EXP_H + 8.0)
             } else if a.thin() {
                 (a.w.max(THIN.0) + 60.0, 10.0)
@@ -214,6 +218,7 @@ unsafe fn poll(a: &mut App) {
             if inside != a.hover {
                 // Pointer masuk tepat di lonceng saat ada yang belum dibaca: buka langsung slide Notifications.
                 let to_notif = inside
+                    && a.lock != Lock::Min
                     && a.unread_count() > 0
                     && a.bell_pos().map_or(false, |(bx, by)| (x - bx).abs() < 14.0 && (y - by).abs() < 14.0);
                 a.hover = inside;
@@ -223,7 +228,7 @@ unsafe fn poll(a: &mut App) {
                 changed = true;
                 if to_notif {
                     a.show_id(SlideId::Notifications);
-                } else if inside {
+                } else if inside && a.lock != Lock::Min {
                     a.dl_on_hover();
                 }
             }

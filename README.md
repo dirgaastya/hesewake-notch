@@ -55,6 +55,7 @@ Swipe, scroll, drag, use the arrow buttons or click the dots to move through an 
 |   <img src="https://api.iconify.design/lucide/music.svg?color=%23ff453a" width="22">    | Media control  | Reads Windows media sessions (GSMTC). Artwork comes from the session, with a fallback to the iTunes Search API.     |
 |   <img src="https://api.iconify.design/lucide/clock.svg?color=%23ff453a" width="22">    | Idle clock     | When nothing is playing, the notch shows the time, then switches to a blinking eye with a red glow, then loops.     |
 | <img src="https://api.iconify.design/lucide/minimize-2.svg?color=%23ff453a" width="22"> | Busy mode      | With a maximized or fullscreen window (or Adobe apps in front), the notch shrinks to a thin line. Hover to open it. |
+| <img src="https://api.iconify.design/lucide/lock.svg?color=%23ff453a" width="22"> | Notch lock     | The padlock at the top left of the open notch keeps it expanded or minimized until you unlock it. While locked small, hover the notch to reveal the padlock. The right-click and tray menus can unlock it too. |
 |  <img src="https://api.iconify.design/lucide/keyboard.svg?color=%23ff453a" width="22">  | Hotkey         | `Ctrl` + `Alt` + `H` toggles between the clock and the eye.                                                         |
 | <img src="https://api.iconify.design/lucide/mic-off.svg?color=%23ff453a" width="22"> | Mic mute       | `Ctrl` + `Alt` + `M` mutes the default microphone for every app, and again to unmute. While muted, a crossed-out mic stays in the notch, also when the mute was made elsewhere. Turn the key off in Settings > Alerts > Mic mute key. |
 |   <img src="https://api.iconify.design/lucide/waves.svg?color=%23ff453a" width="22">    | Drop animation | Dropping a file onto the notch makes its bottom edge ripple like water.                                             |
@@ -99,6 +100,7 @@ The executable is created at `target\release\hesewake-notch.exe`. Japanese romaj
 | `window.rs`                                  | Win32 window procedure (mouse, keyboard, timer, hotkey, file drop) |
 | `render.rs`, `gfx.rs`                        | Frame drawing, notch shape, text and shape helpers                 |
 | `anim.rs`                                    | Spring animation, timers, hover, busy and media polling            |
+| `lock.rs`                                    | Notch lock: padlock, popover, stays expanded or minimized          |
 | `music.rs`                                   | Media thread, artwork and artwork tint, Music slide                |
 | `output.rs`                                  | Sound output switcher on the Music slide (IPolicyConfig)           |
 | `downloads.rs`                               | Download progress: Downloads folder watcher, Ledge list, toast     |

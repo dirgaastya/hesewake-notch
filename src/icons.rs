@@ -179,6 +179,21 @@ impl Gfx {
         self.line(x1, y1, x2, y2, lw, p);
     }
 
+    /// Padlock: body + shackle; when `open` the shackle's left leg is lifted off the body.
+    pub(crate) fn icon_lock(&mut self, cx: f32, cy: f32, s: f32, open: bool, p: &Paint) {
+        self.fill(&rrect(cx - s * 0.42, cy - s * 0.04, s * 0.84, s * 0.54, s * 0.1), p);
+        let mut pts = vec![(-0.5, if open { -0.46 } else { 0.0 })];
+        for k in 0..=12 {
+            let a = std::f32::consts::PI * k as f32 / 12.0;
+            pts.push((-a.cos() * 0.5, -0.46 - a.sin() * 0.5));
+        }
+        pts.push((0.5, 0.0));
+        if let Some(path) = path_of(&pts, cx, cy, s, false) {
+            let st = Stroke { width: (s * 0.13).max(1.3), line_cap: LineCap::Round, ..Default::default() };
+            self.pm.stroke_path(&path, p, &st, self.ts, None);
+        }
+    }
+
     /// Kamera: badan + "kepala" lensa segitiga di kanan.
     pub(crate) fn icon_camera(&mut self, cx: f32, cy: f32, s: f32, p: &Paint) {
         self.fill(&rrect(cx - s * 0.5, cy - s * 0.26, s * 0.66, s * 0.52, s * 0.12), p);

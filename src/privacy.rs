@@ -212,9 +212,19 @@ impl App {
 
     /// Lebar (px) slot titik di tepi kanan notch kecil. Notch dilebarkan sebesar ini, dan lonceng/equalizer/teks
     /// bergeser ke kiri, supaya titik tidak menimpa elemen lain. 0 bila titik tidak digambar (expanded/toast/tipis).
+    /// The padlock of a locked notch (lock.rs) shares this slot, left of the marks.
     pub(crate) fn priv_extra(&self) -> f32 {
+        if self.expanded() || self.toast.is_some() || self.thin() {
+            0.0
+        } else {
+            self.priv_marks_extra() + if self.lock_chip() { lock::CHIP_W } else { 0.0 }
+        }
+    }
+
+    /// Width of the marks alone in the slot of `priv_extra`.
+    pub(crate) fn priv_marks_extra(&self) -> f32 {
         let marks = self.priv_marks();
-        if marks.is_empty() || self.expanded() || self.toast.is_some() || self.thin() {
+        if marks.is_empty() {
             0.0
         } else {
             PRIV_PAD + marks.iter().map(|m| m.width()).sum::<f32>()

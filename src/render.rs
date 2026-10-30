@@ -140,6 +140,7 @@ pub(crate) fn draw(a: &mut App) {
         if a.toast.is_none() {
             a.draw_privacy_dots(&mut g, w, h, ca);
             a.draw_download_strip(&mut g, w, h, ca);
+            a.draw_lock_chip(&mut g, ca);
         }
     }
     if p > 0.04 {
@@ -184,6 +185,7 @@ pub(crate) fn draw(a: &mut App) {
             a.draw_nav(&mut g, p);
             a.draw_dots(&mut g, pos, p);
         }
+        a.draw_lock(&mut g, p);
     }
     apply_mask(&mut g, &shape, cur);
     a.gfx = Some(g);

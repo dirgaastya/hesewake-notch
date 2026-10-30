@@ -119,12 +119,12 @@ impl App {
         }
         // HUD cepat basi: tidak diantre. Jatuh bila ada toast lain atau notch sedang terbuka.
         if matches!(kind, ToastKind::Hud { .. }) {
-            if self.toast.is_none() && !self.expanded() {
+            if self.toast.is_none() && !self.held_open() {
                 self.start_toast(kind);
             }
             return;
         }
-        if self.toast.is_none() && !self.expanded() {
+        if self.toast.is_none() && !self.held_open() {
             self.start_toast(kind);
         } else if self.toast_q.len() < 3 {
             self.toast_q.push(kind);
@@ -159,8 +159,8 @@ impl App {
     pub(crate) fn toast_update(&mut self) -> bool {
         let mut changed = false;
         if let Some(t) = &self.toast {
-            if self.expanded() || t.t0.elapsed().as_secs_f32() >= t.dur {
-                let to_notif = self.expanded() && matches!(t.kind, ToastKind::Notification { .. });
+            if self.held_open() || t.t0.elapsed().as_secs_f32() >= t.dur {
+                let to_notif = self.held_open() && matches!(t.kind, ToastKind::Notification { .. });
                 self.toast = None;
                 if to_notif {
                     self.show_id(SlideId::Notifications);
@@ -169,7 +169,7 @@ impl App {
                 changed = true;
             }
         }
-        if self.toast.is_none() && !self.expanded() && !self.toast_q.is_empty() {
+        if self.toast.is_none() && !self.held_open() && !self.toast_q.is_empty() {
             let k = self.toast_q.remove(0);
             self.start_toast(k);
             changed = true;

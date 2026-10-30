@@ -100,6 +100,9 @@ pub(crate) fn number(cfg: &[(SlideId, bool)], i: usize) -> Option<usize> {
 impl App {
     /// Handle slide hotkey `n` (0-based). True if the notch changed.
     pub(crate) fn slide_hotkey(&mut self, n: usize) -> bool {
+        if self.lock == Lock::Min {
+            return false;
+        }
         match action(&self.order, n, self.expanded(), self.cur()) {
             Action::Ignore => false,
             Action::Close => {

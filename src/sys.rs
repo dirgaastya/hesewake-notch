@@ -29,6 +29,7 @@ pub(crate) const CMD_NOTIF_ACCESS: i32 = 44;
 pub(crate) const CMD_SETTINGS: i32 = 45;
 pub(crate) const CMD_UPDATE_OPEN: i32 = 46;
 pub(crate) const CMD_UPDATE_CHECK: i32 = 47;
+pub(crate) const CMD_UNLOCK: i32 = 48;
 
 /// Mutex single instance. Mengembalikan false bila Hesewake Notch lain sudah jalan.
 pub(crate) fn single_instance() -> bool {
@@ -182,9 +183,13 @@ pub(crate) fn taskbar_created_msg() -> u32 {
     *MSG.get_or_init(|| unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) })
 }
 
-pub(crate) unsafe fn tray_menu(hwnd: HWND, autostart: bool, minimal: bool, notif_on: bool, update: Option<&str>) -> i32 {
+pub(crate) unsafe fn tray_menu(hwnd: HWND, autostart: bool, minimal: bool, notif_on: bool, update: Option<&str>, lock: Lock) -> i32 {
     let Ok(menu) = CreatePopupMenu() else { return 0 };
     let chk = |on: bool| if on { MF_STRING | MF_CHECKED } else { MF_STRING };
+    if lock != Lock::Off {
+        let _ = AppendMenuW(menu, MF_STRING, CMD_UNLOCK as usize, &HSTRING::from(tr("Unlock notch")));
+        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+    }
     let _ = AppendMenuW(menu, chk(autostart), CMD_AUTOSTART as usize, &HSTRING::from(tr("Start with Windows")));
     let _ = AppendMenuW(menu, chk(minimal), CMD_MINIMAL as usize, &HSTRING::from(tr("Minimal notch")));
     let _ = AppendMenuW(menu, chk(notif_on), CMD_NOTIF as usize, &HSTRING::from(tr("Windows notifications")));
@@ -194,7 +199,8 @@ pub(crate) unsafe fn tray_menu(hwnd: HWND, autostart: bool, minimal: bool, notif
         let _ = AppendMenuW(menu, MF_STRING, CMD_UPDATE_OPEN as usize, &HSTRING::from(fill(tr("Update available ({})..."), &[&v])));
     }
     let _ = AppendMenuW(menu, MF_STRING, CMD_UPDATE_CHECK as usize, &HSTRING::from(tr("Check for updates")));
-    let _ = AppendMenuW(menu, MF_STRING, CMD_SETTINGS as usize, &HSTRING::from(tr("Settings")));
+    let settings = if lock == Lock::Min { MF_STRING | MF_GRAYED } else { MF_STRING };
+    let _ = AppendMenuW(menu, settings, CMD_SETTINGS as usize, &HSTRING::from(tr("Settings")));
     let _ = AppendMenuW(menu, MF_STRING, CMD_ABOUT as usize, &HSTRING::from(tr("About Hesewake Notch")));
     let _ = AppendMenuW(menu, MF_STRING, CMD_EXIT as usize, &HSTRING::from(tr("Exit")));
     track(hwnd, menu)

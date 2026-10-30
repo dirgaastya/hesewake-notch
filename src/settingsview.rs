@@ -396,6 +396,7 @@ impl App {
 
     pub(crate) fn save_settings(&mut self) {
         self.cfg.minimal = self.minimal;
+        self.cfg.notch_lock = self.lock.as_u8();
         self.cfg.notifications = self.notif_on;
         self.cfg.save();
     }

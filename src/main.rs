@@ -75,6 +75,7 @@ mod icon;
 mod icons;
 mod input;
 mod keys;
+mod lock;
 mod lyricview;
 mod korean;
 mod lyrics;
@@ -122,6 +123,7 @@ use eye::{EyeAnim, HOTKEY_ID, HOTKEY_PLAIN_H, IDLE_CYCLE_SECS, IdlePhase, SPLASH
 use gfx::{Box4, Gfx, acc, dummy_path, ellipsize, in_rect, notch_path, paint, pixmap_from_rgba, decode_limited, rrect, ty, union_box, wrap_lines};
 use icon::{load_icon};
 use input::{click, context_menu};
+use lock::Lock;
 use music::{ArtData, Cmd, MARQUEE_GAP, MARQUEE_PAUSE, MARQUEE_SPEED, MCX, MCY, MW, MX, Media, media_thread};
 use nav::{NAV_L, NAV_R, cyc, dot_x};
 use note::{NOTE_H, NOTE_Y, NoteView, load_note, save_note};
@@ -178,6 +180,9 @@ struct App {
     busy: bool,
     /// Mode "Minimal notch": garis tipis saat tidak ada musik, buka dengan hover.
     minimal: bool,
+    /// Notch lock (lock.rs) and whether the padlock's popover is open.
+    lock: Lock,
+    lock_menu: bool,
     toast: Option<Toast>,
     bt_shared: bt::BtSlot,
     notifs: Vec<notif::NotifItem>,
@@ -313,12 +318,23 @@ fn with_app<F: FnOnce(&mut App)>(f: F) {
 }
 
 impl App {
+    /// Opened by the person (hover, editing, drag, peek): this is what cancels or holds back a toast.
+    fn held_open(&self) -> bool {
+        self.lock != Lock::Min
+            && (self.hover
+                || self.editing
+                // menekan tombol di toast Water (Snooze/Drank) bukan gestur geser: toast tidak boleh dibatalkan sebelum klik selesai
+                || (self.drag.is_some() && !self.toast_has_button())
+                || self.peek_until.map_or(false, |t| Instant::now() < t))
+    }
+
     fn expanded(&self) -> bool {
-        self.hover
-            || self.editing
-            // menekan tombol di toast Water (Snooze/Drank) bukan gestur geser: toast tidak boleh dibatalkan sebelum klik selesai
-            || (self.drag.is_some() && !self.toast_has_button())
-            || self.peek_until.map_or(false, |t| Instant::now() < t)
+        self.held_open() || (self.lock == Lock::Open && self.splash.is_none() && self.toast.is_none())
+    }
+
+    /// Locked small and hovered: the small notch shows the padlock to unlock with.
+    fn lock_chip(&self) -> bool {
+        self.lock == Lock::Min && self.hover && self.toast.is_none()
     }
 
     fn idle(&self) -> bool {
@@ -327,7 +343,7 @@ impl App {
 
     /// Notch menyusut jadi garis tipis: app penuh layar/Adobe (busy) atau mode Minimal saat tidak ada musik.
     fn thin(&self) -> bool {
-        self.busy || (self.minimal && !self.media.playing)
+        (self.busy || (self.minimal && !self.media.playing)) && !self.lock_chip()
     }
 
     fn ready(&self) -> bool {
@@ -554,6 +570,8 @@ fn main() -> Result<()> {
             hover: false,
             busy: is_busy(hwnd, cfg.busy_on_maximized, &mon),
             minimal: cfg.minimal,
+            lock: Lock::from_u8(cfg.notch_lock),
+            lock_menu: false,
             toast: None,
             bt_shared: bt_shared.clone(),
             notifs: if demo_notifs { notif::demo_items() } else { Vec::new() },

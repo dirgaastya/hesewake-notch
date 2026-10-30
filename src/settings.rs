@@ -16,6 +16,8 @@ pub(crate) fn idle_display_label(i: usize) -> &'static str {
 pub(crate) struct Settings {
     /// Mode "Minimal notch": garis tipis saat tidak ada musik.
     pub(crate) minimal: bool,
+    /// Notch lock (lock.rs): 0 = off, 1 = stays expanded, 2 = stays small.
+    pub(crate) notch_lock: u8,
     /// Tampilkan notifikasi Windows di notch.
     pub(crate) notifications: bool,
     /// Jendela maximized (bukan hanya layar penuh) membuat notch menyusut jadi garis tipis.
@@ -77,6 +79,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             minimal: false,
+            notch_lock: 0,
             notifications: true,
             busy_on_maximized: false,
             lyric_lead_ms: 150,
@@ -118,6 +121,7 @@ impl Settings {
             let flag = v == "1";
             match k {
                 "minimal" => s.minimal = flag,
+                "lock" => s.notch_lock = v.parse::<u8>().unwrap_or(0).min(2),
                 "notifications" => s.notifications = flag,
                 "busy_on_maximized" => s.busy_on_maximized = flag,
                 "romaji_lyrics" => s.romaji_lyrics = flag,
@@ -184,8 +188,9 @@ impl Settings {
 
     pub(crate) fn serialize(&self) -> String {
         format!(
-            "minimal={}\nnotifications={}\nbusy_on_maximized={}\nlyric_lead_ms={}\nromaji_lyrics={}\nnotif_avatar={}\nlock_toast={}\nprivacy_dot={}\nslide_hotkeys={}\nmic_hotkey={}\ndownloads={}\nhud_volume={}\nhud_brightness={}\nweather={}\nweather_city={}\nprayer={}\nimsak_terbit={}\nramadan={}\nadhan={}\nadhan_file={}\nmonitor={}\nnotch_size={}\nidle_display={}\naccent={}\nlang={}\nupdate_check={}\nupdate_seen={}\nslides={}\n",
+            "minimal={}\nlock={}\nnotifications={}\nbusy_on_maximized={}\nlyric_lead_ms={}\nromaji_lyrics={}\nnotif_avatar={}\nlock_toast={}\nprivacy_dot={}\nslide_hotkeys={}\nmic_hotkey={}\ndownloads={}\nhud_volume={}\nhud_brightness={}\nweather={}\nweather_city={}\nprayer={}\nimsak_terbit={}\nramadan={}\nadhan={}\nadhan_file={}\nmonitor={}\nnotch_size={}\nidle_display={}\naccent={}\nlang={}\nupdate_check={}\nupdate_seen={}\nslides={}\n",
             self.minimal as u8,
+            self.notch_lock,
             self.notifications as u8,
             self.busy_on_maximized as u8,
             self.lyric_lead_ms,
@@ -335,6 +340,16 @@ mod tests {
         assert!(back.ramadan && !back.imsak_terbit);
         assert_eq!((back.adhan, back.adhan_file.as_str()), (adhan::FILE, "C:\\Users\\me\\Music\\adzan = makkah.mp3"));
         assert_eq!(Settings::parse("adhan=9\n").adhan, adhan::MODES - 1, "out of range is clamped");
+    }
+
+    #[test]
+    fn notch_lock_roundtrip_and_default() {
+        assert_eq!(Settings::parse("minimal=1\n").notch_lock, 0, "old file = unlocked");
+        let mut s = Settings::default();
+        s.notch_lock = 2;
+        assert_eq!(Settings::parse(&s.serialize()).notch_lock, 2);
+        assert_eq!(Settings::parse("lock=9").notch_lock, 2, "out of range is clamped");
+        assert_eq!(Settings::parse("lock=x").notch_lock, 0);
     }
 
     #[test]

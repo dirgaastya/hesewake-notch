@@ -109,7 +109,7 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 a.drag_dx = 0.0;
                 a.shelf_drag = None;
                 // Deteksi kalau tombol ditekan di atas item shelf (bukan tombol ×): siapkan drag-out.
-                if a.ready() && !a.editing && a.is_slide(SlideId::Ledge) {
+                if a.ready() && !a.editing && !a.lock_menu && a.is_slide(SlideId::Ledge) {
                     for i in 0..a.shelf.len() {
                         let tx = LX + i as f32 * (SH_W + SH_GAP);
                         if in_rect(x, y, tx, SH_Y, SH_W, SH_H) {
@@ -183,7 +183,7 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 if let Some((sx, sy)) = a.drag.take() {
                     let dx = a.drag_dx;
                     a.drag_dx = 0.0;
-                    if dx.abs() >= 40.0 && !a.editing {
+                    if dx.abs() >= 40.0 && !a.editing && a.lock != Lock::Min {
                         a.sp -= dx / 160.0;
                         a.sv = 0.0;
                         a.step(if dx < 0.0 { 1 } else { -1 });
@@ -380,12 +380,14 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
         WM_RBUTTONUP => {
             let mut minimal = false;
             let mut notif_on = true;
+            let mut lock = Lock::Off;
             with_app(|a| {
                 a.menu_open = true;
                 minimal = a.minimal;
                 notif_on = a.notif_on;
+                lock = a.lock;
             });
-            let cmd = context_menu(hwnd, sys::autostart_enabled(), minimal, notif_on);
+            let cmd = context_menu(hwnd, sys::autostart_enabled(), minimal, notif_on, lock);
             run_command(hwnd, cmd);
             LRESULT(0)
         }
@@ -545,14 +547,15 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
         sys::WM_TRAY => {
             match (lp.0 & 0xffff) as u32 {
                 WM_RBUTTONUP | WM_CONTEXTMENU => {
-                    let (mut minimal, mut notif_on, mut update) = (false, true, None);
+                    let (mut minimal, mut notif_on, mut update, mut lock) = (false, true, None, Lock::Off);
                     with_app(|a| {
                         a.menu_open = true;
                         minimal = a.minimal;
                         notif_on = a.notif_on;
                         update = a.update.as_ref().map(|r| r.version.clone());
+                        lock = a.lock;
                     });
-                    let cmd = sys::tray_menu(hwnd, sys::autostart_enabled(), minimal, notif_on, update.as_deref());
+                    let cmd = sys::tray_menu(hwnd, sys::autostart_enabled(), minimal, notif_on, update.as_deref(), lock);
                     run_command(hwnd, cmd);
                 }
                 WM_LBUTTONUP => {
@@ -714,6 +717,7 @@ unsafe fn run_command(hwnd: HWND, cmd: i32) {
                 a.minimal = !a.minimal;
                 a.save_settings();
             }
+            sys::CMD_UNLOCK => a.lock_set(Lock::Off),
             sys::CMD_ABOUT => show_about = true,
             sys::CMD_SETTINGS => a.open_settings(),
             sys::CMD_UPDATE_OPEN => {

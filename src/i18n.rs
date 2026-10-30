@@ -95,6 +95,9 @@ const ID_TEXT: &[(&str, &str)] = &[
     // menus and dialogs
     ("Start with Windows", "Mulai bersama Windows"),
     ("Minimal notch", "Notch minimal"),
+    ("Lock expanded", "Kunci terbuka"),
+    ("Lock minimize", "Kunci kecil"),
+    ("Unlock notch", "Buka kunci notch"),
     ("Windows notifications", "Notifikasi Windows"),
     ("Notification access...", "Akses notifikasi..."),
     ("Settings", "Pengaturan"),
