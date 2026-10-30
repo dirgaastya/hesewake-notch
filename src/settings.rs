@@ -7,6 +7,16 @@ use crate::slides::{self, SlideCfg};
 /// Pilihan "Idle display" di Settings.
 pub(crate) const IDLE_DISPLAY_LABELS: [&str; 3] = ["Cycle", "Clock", "Eyes"];
 
+/// "Dodge pointer": the notch steps aside when the pointer comes to it over a fullscreen / maximized window.
+pub(crate) const DODGE_LABELS: [&str; 3] = ["Off", "Fullscreen", "Maximized"];
+pub(crate) const DODGE_FULLSCREEN: usize = 1;
+pub(crate) const DODGE_MAXIMIZED: usize = 2;
+
+/// `DODGE_LABELS[i]` in the UI language.
+pub(crate) fn dodge_label(i: usize) -> &'static str {
+    [tr("Off"), tr("Fullscreen"), tr("Maximized")][i.min(DODGE_LABELS.len() - 1)]
+}
+
 /// `IDLE_DISPLAY_LABELS[i]` in the UI language.
 pub(crate) fn idle_display_label(i: usize) -> &'static str {
     [tr("Cycle"), tr("Clock"), tr("Eyes")][i.min(IDLE_DISPLAY_LABELS.len() - 1)]
@@ -58,6 +68,8 @@ pub(crate) struct Settings {
     pub(crate) notch_size: usize,
     /// Tampilan notch idle: 0 = bergantian jam/mata (10/15 menit), 1 = jam saja, 2 = mata saja.
     pub(crate) idle_display: usize,
+    /// 0 = off, 1 = over fullscreen windows, 2 = over maximized ones too (see `DODGE_LABELS`).
+    pub(crate) dodge: usize,
     /// Index into `accent::ACCENTS` (0 = default blue).
     pub(crate) accent: usize,
     /// UI language, index into `i18n::LANGS` (0 = English).
@@ -99,6 +111,7 @@ impl Default for Settings {
             adhan_file: String::new(),
             notch_size: 0,
             idle_display: 0,
+            dodge: DODGE_FULLSCREEN,
             accent: 0,
             lang: 0,
             update_check: true,
@@ -152,6 +165,11 @@ impl Settings {
                         s.idle_display = n.min(IDLE_DISPLAY_LABELS.len() - 1);
                     }
                 }
+                "dodge" => {
+                    if let Ok(n) = v.parse::<usize>() {
+                        s.dodge = n.min(DODGE_LABELS.len() - 1);
+                    }
+                }
                 "accent" => {
                     if let Ok(n) = v.parse::<usize>() {
                         s.accent = n.min(crate::accent::ACCENTS.len() - 1);
@@ -184,7 +202,7 @@ impl Settings {
 
     pub(crate) fn serialize(&self) -> String {
         format!(
-            "minimal={}\nnotifications={}\nbusy_on_maximized={}\nlyric_lead_ms={}\nromaji_lyrics={}\nnotif_avatar={}\nlock_toast={}\nprivacy_dot={}\nslide_hotkeys={}\nmic_hotkey={}\ndownloads={}\nhud_volume={}\nhud_brightness={}\nweather={}\nweather_city={}\nprayer={}\nimsak_terbit={}\nramadan={}\nadhan={}\nadhan_file={}\nmonitor={}\nnotch_size={}\nidle_display={}\naccent={}\nlang={}\nupdate_check={}\nupdate_seen={}\nslides={}\n",
+            "minimal={}\nnotifications={}\nbusy_on_maximized={}\nlyric_lead_ms={}\nromaji_lyrics={}\nnotif_avatar={}\nlock_toast={}\nprivacy_dot={}\nslide_hotkeys={}\nmic_hotkey={}\ndownloads={}\nhud_volume={}\nhud_brightness={}\nweather={}\nweather_city={}\nprayer={}\nimsak_terbit={}\nramadan={}\nadhan={}\nadhan_file={}\nmonitor={}\nnotch_size={}\nidle_display={}\ndodge={}\naccent={}\nlang={}\nupdate_check={}\nupdate_seen={}\nslides={}\n",
             self.minimal as u8,
             self.notifications as u8,
             self.busy_on_maximized as u8,
@@ -208,6 +226,7 @@ impl Settings {
             self.monitor,
             self.notch_size,
             self.idle_display,
+            self.dodge,
             self.accent,
             self.lang,
             self.update_check as u8,
@@ -361,6 +380,19 @@ mod tests {
         assert_eq!(Settings::parse(&s.serialize()).idle_display, 2);
         assert_eq!(Settings::parse("idle_display=9").idle_display, IDLE_DISPLAY_LABELS.len() - 1);
         assert_eq!(Settings::parse("idle_display=x").idle_display, 0);
+    }
+
+    #[test]
+    fn dodge_roundtrip_and_default() {
+        assert_eq!(Settings::default().dodge, DODGE_FULLSCREEN, "fullscreen by default");
+        assert_eq!(Settings::parse("minimal=1\n").dodge, DODGE_FULLSCREEN, "old file = default");
+        let mut s = Settings::default();
+        s.dodge = DODGE_MAXIMIZED;
+        assert_eq!(Settings::parse(&s.serialize()).dodge, DODGE_MAXIMIZED);
+        s.dodge = 0;
+        assert_eq!(Settings::parse(&s.serialize()).dodge, 0);
+        assert_eq!(Settings::parse("dodge=9").dodge, DODGE_LABELS.len() - 1, "clamped");
+        assert_eq!(Settings::parse("dodge=x").dodge, DODGE_FULLSCREEN);
     }
 
     #[test]

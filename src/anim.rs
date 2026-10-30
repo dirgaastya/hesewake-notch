@@ -200,32 +200,10 @@ unsafe fn poll(a: &mut App) {
     if !a.menu_open {
         let mut p = POINT::default();
         if GetCursorPos(&mut p).is_ok() {
-            let (zw, zh) = if a.hover || a.expanded() {
-                (EXP_W + 20.0, EXP_H + 8.0)
-            } else if a.thin() {
-                (a.w.max(THIN.0) + 60.0, 10.0)
-            } else {
-                (a.w.max(IDLE.0) + 12.0, a.h.max(IDLE.1) + 6.0)
-            };
             let x = (p.x - a.wx) as f32 / a.scale;
             let y = (p.y - a.wy) as f32 / a.scale;
-            // Toast dengan tombol (Water, rapat, pembaruan): hover di atasnya tidak boleh membuka notch (itu membatalkan toast-nya).
-            let inside = (x - CX).abs() <= zw / 2.0 && y >= 0.0 && y <= zh && !a.toast_has_button();
-            if inside != a.hover {
-                // Pointer masuk tepat di lonceng saat ada yang belum dibaca: buka langsung slide Notifications.
-                let to_notif = inside
-                    && a.unread_count() > 0
-                    && a.bell_pos().map_or(false, |(bx, by)| (x - bx).abs() < 14.0 && (y - by).abs() < 14.0);
-                a.hover = inside;
-                if !inside {
-                    a.out_close();
-                }
+            if a.pointer_step(x, y) {
                 changed = true;
-                if to_notif {
-                    a.show_id(SlideId::Notifications);
-                } else if inside {
-                    a.dl_on_hover();
-                }
             }
         }
     }
@@ -233,6 +211,11 @@ unsafe fn poll(a: &mut App) {
         let b = is_busy(HWND(a.hwnd as *mut c_void), a.cfg.busy_on_maximized, &a.mon);
         if b != a.busy {
             a.busy = b;
+            changed = true;
+        }
+        let f = busy::fg_state(HWND(a.hwnd as *mut c_void), &a.mon);
+        if f != a.fg {
+            a.fg = f;
             changed = true;
         }
     }
@@ -390,5 +373,73 @@ mod frame_tests {
         assert_eq!(ui, 0.05, "UI springs keep their 50 ms cap");
         assert_eq!(frame_dt(0.016), (0.016, 0.016));
         assert_eq!(frame_dt(5.0).1, 0.15, "after a long pause nothing jumps far");
+    }
+}
+
+impl App {
+    /// The notch dodges the pointer over this kind of foreground window (setting "Dodge pointer").
+    pub(crate) fn dodge_applies(&self) -> bool {
+        match self.cfg.dodge {
+            settings::DODGE_FULLSCREEN => self.fg == 2,
+            settings::DODGE_MAXIMIZED => self.fg >= 1,
+            _ => false,
+        }
+    }
+
+    /// The pointer is at (`x`, `y`) in canvas coordinates: open the notch when it comes near, close it when it leaves, or,
+    /// over a fullscreen / maximized window with "Dodge pointer" on, step aside (thin, never expanded) so the window's own
+    /// tabs and buttons under the notch can be reached. True if something changed.
+    pub(crate) fn pointer_step(&mut self, x: f32, y: f32) -> bool {
+        let a = self;
+        let mut changed = false;
+        if a.dodge_applies() && !a.held_open() {
+            // the area of the notch as it is without the pointer (the thin line when it is already thin)
+            let fresh = if a.busy { (a.w.max(THIN.0) + 60.0, 10.0) } else { (a.w.max(IDLE.0) + 12.0, a.h.max(IDLE.1) + 6.0) };
+            let (zw, zh) = if a.dodging { a.dodge_zone } else { fresh };
+            let inside = (x - CX).abs() <= zw / 2.0 && y >= 0.0 && y <= zh;
+            if inside != a.dodging {
+                a.dodging = inside;
+                if inside {
+                    a.dodge_zone = fresh;
+                }
+                changed = true;
+            }
+            if a.hover {
+                a.hover = false;
+                a.out_close();
+                changed = true;
+            }
+            return changed;
+        }
+        if a.dodging {
+            a.dodging = false;
+            changed = true;
+        }
+        let (zw, zh) = if a.hover || a.expanded() {
+            (EXP_W + 20.0, EXP_H + 8.0)
+        } else if a.thin() {
+            (a.w.max(THIN.0) + 60.0, 10.0)
+        } else {
+            (a.w.max(IDLE.0) + 12.0, a.h.max(IDLE.1) + 6.0)
+        };
+        // Toast dengan tombol (Water, rapat, pembaruan): hover di atasnya tidak boleh membuka notch (itu membatalkan toast-nya).
+        let inside = (x - CX).abs() <= zw / 2.0 && y >= 0.0 && y <= zh && !a.toast_has_button();
+        if inside != a.hover {
+            // Pointer masuk tepat di lonceng saat ada yang belum dibaca: buka langsung slide Notifications.
+            let to_notif = inside
+                && a.unread_count() > 0
+                && a.bell_pos().map_or(false, |(bx, by)| (x - bx).abs() < 14.0 && (y - by).abs() < 14.0);
+            a.hover = inside;
+            if !inside {
+                a.out_close();
+            }
+            changed = true;
+            if to_notif {
+                a.show_id(SlideId::Notifications);
+            } else if inside {
+                a.dl_on_hover();
+            }
+        }
+        changed
     }
 }

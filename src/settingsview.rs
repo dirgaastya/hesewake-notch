@@ -158,6 +158,7 @@ pub(crate) fn cell_pos(i: usize) -> (f32, f32) {
 pub(crate) enum Rid {
     Minimal,
     ThinMaximized,
+    Dodge,
     Monitor,
     LyricTiming,
     NotchSize,
@@ -314,6 +315,7 @@ impl App {
                 Row { id: Rid::NotchSize, label: tr("Notch size"), sub: "Auto = Windows", kind: RowKind::Stepper(scale::size_label(self.cfg.notch_size)) },
                 Row { id: Rid::Minimal, label: tr("Minimal notch"), sub: tr("Thin line while idle"), kind: RowKind::Toggle(self.minimal) },
                 Row { id: Rid::ThinMaximized, label: tr("Thin on maximize"), sub: tr("Off: only on fullscreen"), kind: RowKind::Toggle(self.cfg.busy_on_maximized) },
+                Row { id: Rid::Dodge, label: tr("Dodge cursor"), sub: tr("Steps aside"), kind: RowKind::Stepper(settings::dodge_label(self.cfg.dodge).to_string()) },
                 Row { id: Rid::IdleDisplay, label: tr("Idle display"), sub: tr("Cycle: clock/eyes"), kind: RowKind::Stepper(settings::idle_display_label(self.cfg.idle_display).to_string()) },
             ],
             2 => vec![
@@ -574,6 +576,13 @@ impl App {
                         let last = scale::SIZES.len() - 1;
                         self.cfg.notch_size = if plus { (self.cfg.notch_size + 1).min(last) } else { self.cfg.notch_size.saturating_sub(1) };
                         self.place(true);
+                    }
+                }
+                Rid::Dodge => {
+                    if right {
+                        let last = settings::DODGE_LABELS.len() - 1;
+                        self.cfg.dodge = if plus { (self.cfg.dodge + 1).min(last) } else { self.cfg.dodge.saturating_sub(1) };
+                        self.dodging = false;
                     }
                 }
                 Rid::IdleDisplay => {

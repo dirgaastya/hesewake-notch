@@ -87,6 +87,9 @@ fn test_app(s: f32) -> App {
         lyric_idx: None,
         lyric_w: 0.0,
         lyric_mode: false,
+        fg: 0,
+        dodging: false,
+        dodge_zone: (0.0, 0.0),
         pinned: false,
         lyric_mode_t0: past,
         lyric_scroll: 0.0,
@@ -1248,9 +1251,9 @@ fn snap_update_toasts() {
 fn rows_tab_scrolls_to_the_last_rows() {
     let mut a = test_app(1.0);
     open_settings_tab(&mut a, 1);
-    assert_eq!(a.settings_rows(1).len(), 9);
+    assert_eq!(a.settings_rows(1).len(), 10);
     assert!(a.rows_scrollable());
-    assert!(settingsview::row_cell_visible(8, 0).is_none(), "the 9th row starts below the grid");
+    assert!(settingsview::row_cell_visible(8, 0).is_none(), "the 10th row starts below the grid");
     assert!(a.settings_rows_wheel(true));
     assert!(a.settings_rows_wheel(true));
     assert_eq!(a.sui.rows_scroll, 2, "9 rows = 5 rows of cells, 3 show");
@@ -1964,4 +1967,76 @@ fn pinned_lyrics_view_stays_open() {
     assert!(!a.pinned, "it does not come back by itself");
     assert!(a.lyric_click(lyricview::X_PIN, lyricview::Y_PIN) && a.pinned);
     assert!(a.lyric_click(lyricview::X_PIN, lyricview::Y_PIN) && !a.pinned, "a second click unpins");
+}
+
+/// "Dodge pointer": over a fullscreen window (and, in the Maximized mode, a maximized one too) the notch steps aside when
+/// the pointer comes to it, so the window's tabs and buttons under it can be reached.
+#[test]
+fn notch_dodges_the_pointer_over_fullscreen_and_maximized_windows() {
+    let mut a = test_app(1.0);
+    // an ordinary window: the pointer opens the notch as always
+    a.fg = 0;
+    assert!(a.pointer_step(CX, 5.0));
+    assert!(a.hover && !a.dodging);
+    assert!(a.pointer_step(CX, 600.0));
+    assert!(!a.hover);
+
+    // fullscreen (default mode): thin already; the pointer at it does not expand it
+    a.fg = 2;
+    a.busy = true;
+    a.pointer_step(CX, 3.0);
+    assert!(a.dodging && !a.hover && !a.expanded() && a.thin(), "stays minimal");
+    a.pointer_step(CX, 300.0);
+    assert!(!a.dodging, "the pointer left");
+
+    // a maximized window is not dodged in that mode
+    a.fg = 1;
+    a.busy = false;
+    a.pointer_step(CX, 5.0);
+    assert!(a.hover && !a.dodging);
+    a.pointer_step(CX, 600.0);
+
+    // Maximized mode: the normal notch turns thin while the pointer is near it
+    a.cfg.dodge = settings::DODGE_MAXIMIZED;
+    a.pointer_step(CX, 10.0);
+    assert!(a.dodging && !a.hover && a.thin() && !a.expanded());
+    // it does not flicker at the edge of the area while it shrinks
+    let edge = a.dodge_zone.0 / 2.0 - 1.0;
+    a.w = 10.0;
+    a.pointer_step(CX + edge, 10.0);
+    assert!(a.dodging);
+    a.pointer_step(CX + edge + 40.0, 10.0);
+    assert!(!a.dodging);
+
+    // off: the pointer expands it over fullscreen too
+    a.cfg.dodge = 0;
+    a.fg = 2;
+    a.busy = true;
+    a.pointer_step(CX, 3.0);
+    assert!(a.hover && !a.dodging);
+    a.hover = false;
+
+    // a peek (hotkey, notification) is not undone by dodging
+    a.cfg.dodge = settings::DODGE_FULLSCREEN;
+    a.peek_until = Some(Instant::now() + Duration::from_secs(5));
+    a.pointer_step(CX, 5.0);
+    assert!(a.expanded() && !a.dodging);
+}
+
+/// Settings > General has the "Dodge pointer" stepper, off / fullscreen / maximized.
+#[test]
+fn dodge_row_in_general_steps_through_the_modes() {
+    let mut a = test_app(1.0);
+    let rows = a.settings_rows(1);
+    let i = rows.iter().position(|r| r.label == "Dodge cursor").expect("row in General");
+    assert!(matches!(&rows[i].kind, settingsview::RowKind::Stepper(v) if v == "Fullscreen"), "fullscreen by default");
+    open_settings_tab(&mut a, 1);
+    while settingsview::row_cell_visible(i, a.sui.rows_scroll).is_none() {
+        assert!(a.settings_rows_wheel(true));
+    }
+    let (cx, cy) = settingsview::row_cell_visible(i, a.sui.rows_scroll).unwrap();
+    a.settings_click_rows(1, cx + settingsview::STEP_PLUS_X, cy + 17.0);
+    assert_eq!(a.cfg.dodge, settings::DODGE_MAXIMIZED);
+    a.settings_click_rows(1, cx + settingsview::STEP_PLUS_X, cy + 17.0);
+    assert_eq!(a.cfg.dodge, settings::DODGE_MAXIMIZED, "stops at the last mode");
 }
