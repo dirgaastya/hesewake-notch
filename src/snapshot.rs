@@ -1996,6 +1996,16 @@ fn notch_dodges_the_pointer_over_fullscreen_and_maximized_windows() {
     assert!(a.hover && !a.dodging);
     a.pointer_step(CX, 600.0);
 
+    // but when the notch is thin because the window is busy (a maximized window with "Thin on maximize" on, an Adobe app),
+    // the pointer does not open that thin line either
+    a.fg = 1;
+    a.busy = true;
+    a.pointer_step(CX, 3.0);
+    assert!(a.dodging && !a.hover && !a.expanded(), "the thin line stays minimal");
+    a.pointer_step(CX, 300.0);
+    assert!(!a.dodging);
+    a.busy = false;
+
     // Maximized mode: the normal notch turns thin while the pointer is near it
     a.cfg.dodge = settings::DODGE_MAXIMIZED;
     a.pointer_step(CX, 10.0);

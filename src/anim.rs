@@ -377,11 +377,13 @@ mod frame_tests {
 }
 
 impl App {
-    /// The notch dodges the pointer over this kind of foreground window (setting "Dodge pointer").
+    /// The notch dodges the pointer over this kind of foreground window (setting "Dodge cursor"). Whenever the notch is
+    /// thin because of a busy window (fullscreen, an Adobe app, or a maximized one with "Thin on maximize" on), the
+    /// pointer must not open it either: that thin line is the "minimal notch" the pointer should be able to pass.
     pub(crate) fn dodge_applies(&self) -> bool {
         match self.cfg.dodge {
-            settings::DODGE_FULLSCREEN => self.fg == 2,
-            settings::DODGE_MAXIMIZED => self.fg >= 1,
+            settings::DODGE_FULLSCREEN => self.fg == 2 || self.busy,
+            settings::DODGE_MAXIMIZED => self.fg >= 1 || self.busy,
             _ => false,
         }
     }
