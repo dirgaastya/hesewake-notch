@@ -1919,6 +1919,11 @@ fn snap_prayer_slide() {
 #[test]
 fn music_slide_has_no_clock_block() {
     assert_eq!(music::MW, RX - music::MX, "text and controls reach the right edge");
+    // the small clock on the top row (not drawn over a lyric line)
+    shot("music-small-clock", 1.0, |a| {
+        a.media.title = "Song".into();
+        open_slide(a, SlideId::Music);
+    });
     shot("music-no-clock", 1.0, |a| {
         a.media.title = "Song".into();
         a.media.artist = "Artist".into();

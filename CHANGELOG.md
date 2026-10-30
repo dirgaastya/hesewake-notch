@@ -8,7 +8,7 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/), versi mengikut
 - **Sematkan mode lirik**: di mode lirik (ikon balon di slide Music) ada tombol pin di pojok kanan atas panel kiri. Saat disematkan (pin biru), notch **tetap terbuka** walau pointer pergi, jadi lirik terus terlihat. Klik pin lagi untuk melepas. Penyematan hanya berlaku selama mode lirik menyala, dan keluar dari mode lirik otomatis melepasnya. Di atas aplikasi layar penuh (mis. video), notch tetap menyusut seperti biasa.
 
 ### Changed
-- **Slide Music tanpa blok jam, hari, dan tanggal** di sisi kanan: teks lagu, progres, dan kontrol kini memakai seluruh lebar slide. Jam di notch kecil saat idle tidak berubah.
+- **Slide Music tanpa blok jam, hari, dan tanggal** di sisi kanan: teks lagu, progres, dan kontrol kini memakai seluruh lebar slide. Sebagai gantinya ada **jam kecil** (HH:MM) di pojok kanan atas, di baris yang sama dengan "Now Playing"; baris itu dipakai penuh oleh lirik bila ada baris lirik sinkron yang tampil. Jam di notch kecil saat idle tidak berubah.
 
 ## [0.11.0] - 2026-10-30
 

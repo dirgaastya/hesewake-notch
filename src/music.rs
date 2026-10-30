@@ -826,6 +826,13 @@ impl App {
                 }
             }
         }
+        // small clock on the top row, right side; a synced lyric line has that row to itself
+        if self.lyric_text().is_none() {
+            let st = clock::now_tm();
+            let hm = format!("{:02}:{:02}", st.wHour, st.wMinute);
+            let w = g.width(&hm, 12.0);
+            g.txt(&hm, RX - w + ox, 14.0, 12.0, TEXT_DIM, al, w + 2.0);
+        }
         self.art_at(g, LX + ox, 44.0, 88.0, 12.0, al);
         let title = if self.media.title.is_empty() { tr("No media") } else { &self.media.title };
         g.txtb(title, MX + ox, 40.0, 17.0, [255, 255, 255], al, MW);
