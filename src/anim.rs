@@ -224,7 +224,9 @@ unsafe fn poll(a: &mut App) {
     if a.tick_n % 10 == 0 {
         let hwnd = HWND(a.hwnd as *mut c_void);
         let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-        if ex & WS_EX_TOPMOST.0 == 0 {
+        // The TOPMOST flag can stay while the window is pushed under ordinary windows (it then disappears from the screen
+        // although it still draws): check the z-order too.
+        if ex & WS_EX_TOPMOST.0 == 0 || buried(hwnd) {
             let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
     }
@@ -440,4 +442,19 @@ impl App {
         }
         changed
     }
+}
+
+/// Is a visible window that is not topmost above `hwnd` in the z-order? A topmost window sits above all of those, so if one
+/// is, the notch has been pushed under it (and is hidden) in spite of its TOPMOST flag.
+unsafe fn buried(hwnd: HWND) -> bool {
+    let mut w = GetWindow(hwnd, GW_HWNDPREV).unwrap_or_default();
+    let mut n = 0;
+    while !w.0.is_null() && n < 500 {
+        if IsWindowVisible(w).as_bool() && GetWindowLongW(w, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 == 0 {
+            return true;
+        }
+        w = GetWindow(w, GW_HWNDPREV).unwrap_or_default();
+        n += 1;
+    }
+    false
 }
