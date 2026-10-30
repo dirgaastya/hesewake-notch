@@ -4,9 +4,6 @@
 
 use super::*;
 use std::sync::Mutex;
-use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
-use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
-use windows::Win32::UI::Shell::{FileOpenDialog, IFileOpenDialog, SIGDN_FILESYSPATH};
 
 /// Message to the window: the file dialog closed (`take_picked`).
 pub(crate) const WM_ADHAN_FILE: u32 = WM_APP + 17;
@@ -124,39 +121,11 @@ pub(crate) fn stop() {
 }
 
 /// The file the user picked (Some(None) = the dialog was cancelled).
-static PICKED: Mutex<Option<Option<String>>> = Mutex::new(None);
+static PICKED: filepick::Picked = Mutex::new(None);
 
-/// Show the Open dialog for an .mp3 / .wav file. The dialog needs a single-threaded COM apartment, so it runs on its
-/// own thread and reports back with `WM_ADHAN_FILE`.
+/// Show the Open dialog for an .mp3 / .wav file; `WM_ADHAN_FILE` reports back.
 pub(crate) fn pick_file(hwnd: isize) {
-    if cfg!(test) {
-        return;
-    }
-    std::thread::spawn(move || {
-        let path = unsafe {
-            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-            let r = (|| -> windows::core::Result<String> {
-                let dlg: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
-                let filters = [COMDLG_FILTERSPEC { pszName: w!("Audio (*.mp3, *.wav)"), pszSpec: w!("*.mp3;*.wav") }];
-                dlg.SetFileTypes(&filters)?;
-                dlg.SetTitle(&HSTRING::from(tr("Adhan file")))?;
-                dlg.Show(HWND(hwnd as *mut c_void))?;
-                let item = dlg.GetResult()?;
-                let p = item.GetDisplayName(SIGDN_FILESYSPATH)?;
-                let s = p.to_string().unwrap_or_default();
-                CoTaskMemFree(Some(p.0 as *const c_void));
-                Ok(s)
-            })();
-            CoUninitialize();
-            r.ok().filter(|s| !s.is_empty())
-        };
-        if let Ok(mut p) = PICKED.lock() {
-            *p = Some(path);
-        }
-        unsafe {
-            let _ = PostMessageW(HWND(hwnd as *mut c_void), WM_ADHAN_FILE, WPARAM(0), LPARAM(0));
-        }
-    });
+    filepick::open(hwnd, tr("Adhan file"), "Audio (*.mp3, *.wav)", "*.mp3;*.wav", &PICKED, WM_ADHAN_FILE);
 }
 
 /// The answer of the file dialog: Some(Some(path)), Some(None) when cancelled, None when nothing is waiting.

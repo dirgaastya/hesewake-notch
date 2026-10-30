@@ -497,6 +497,27 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
             }
             LRESULT(0)
         }
+        wibu::WM_WIBU_FILE => {
+            if let Some(picked) = wibu::take_picked() {
+                with_app(|a| {
+                    a.wibu_picked(picked);
+                    a.cfg.save();
+                    present(a);
+                    schedule(a);
+                });
+            }
+            LRESULT(0)
+        }
+        wibu::WM_WIBU_READY => {
+            if let Some(loaded) = wibu::take_loaded() {
+                with_app(|a| {
+                    a.wibu_loaded(loaded);
+                    present(a);
+                    schedule(a);
+                });
+            }
+            LRESULT(0)
+        }
         privacy::WM_PRIVACY => {
             with_app(|a| {
                 a.privacy_apply();

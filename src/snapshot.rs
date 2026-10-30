@@ -72,6 +72,7 @@ fn test_app(s: f32) -> App {
         prayer_fired: None,
         prayer_sun: 0,
         adhan_until: None,
+        wibu: wibu::Wibu::default(),
         splash: None,
         // the idle clock has finished fading in (clock phase, see `idle_phase`)
         idle_base: 5.0,
@@ -1242,17 +1243,174 @@ fn snap_update_toasts() {
     shot("update-toast-available", 1.5, |a| show_toast(a, ToastKind::Update(update::Note::Available(release("0.9.0")))));
 }
 
-/// General has 9 rows: the first six show, the wheel brings the rest into view, and rows keep working there.
+// ---------------------------------------------------------------- Wibu mode
+/// An opaque picture in one color, at canvas size (what the loader hands over).
+fn wibu_bg(s: f32, rgb: [u8; 3]) -> Pixmap {
+    let (w, h) = scale::canvas(s);
+    let mut pm = Pixmap::new(w as u32, h as u32).unwrap();
+    pm.fill(Color::from_rgba8(rgb[0], rgb[1], rgb[2], 255));
+    pm
+}
+
+fn wibu_on(a: &mut App, rgb: [u8; 3]) {
+    a.cfg.wibu = true;
+    a.cfg.wibu_file = "C:\\x.png".into();
+    a.wibu.bg = Some(wibu_bg(a.scale, rgb));
+}
+
+/// The canvas after drawing `a` at its target size.
+fn drawn(a: &mut App) -> Vec<u8> {
+    let (w, h) = anim::target(a);
+    (a.w, a.h) = (w, h);
+    a.sp = a.slide as f32;
+    render::draw(a);
+    a.gfx.as_ref().unwrap().pm.data().to_vec()
+}
+
+#[test]
+fn wibu_shows_darkened_behind_the_open_notch() {
+    for s in SCALES {
+        let mut a = test_app(s);
+        open_slide(&mut a, SlideId::Todo);
+        wibu_on(&mut a, [255, 255, 255]);
+        let px = drawn(&mut a);
+        let pw = a.gfx.as_ref().unwrap().pm.width() as usize;
+        // an empty spot inside the notch, right of the slide's content
+        let (x, y) = (((CX + EXP_W / 2.0 - 6.0) * s) as usize, ((EXP_H - 30.0) * s) as usize);
+        let at = &px[(y * pw + x) * 4..(y * pw + x) * 4 + 4];
+        assert!((70..=90).contains(&at[0]), "70% dim of white, got {at:?}");
+        assert_eq!(at[3], 255);
+        assert_eq!(&px[..4], &[0, 0, 0, 0], "outside the notch stays transparent");
+        let right = (CX + EXP_W / 2.0 + 15.0) * s;
+        let y = (EXP_H / 2.0 * s) as usize;
+        assert_eq!(px[(y * pw + right as usize) * 4 + 3], 0, "right of the notch stays transparent");
+    }
+}
+
+/// The small notch and toasts look exactly as without the mode.
+#[test]
+fn wibu_leaves_the_small_notch_and_toasts_alone() {
+    let states: [fn(&mut App); 3] = [
+        |_| {},
+        |a| a.media = Media { title: "Song".into(), playing: true, ..Media::default() },
+        |a| show_toast(a, ToastKind::Hud { kind: HudKind::Caps, on: true }),
+    ];
+    // magenta appears nowhere else in these states (their animations run on the clock, so no two frames are equal)
+    let magenta = |px: &[u8]| px.chunks_exact(4).filter(|p| p[0] as u16 > p[1] as u16 + 30 && p[2] as u16 > p[1] as u16 + 30).count();
+    for setup in states {
+        let mut a = test_app(1.0);
+        setup(&mut a);
+        wibu_on(&mut a, [255, 0, 255]);
+        assert_eq!(magenta(&drawn(&mut a)), 0, "the image must not show");
+    }
+    let mut a = test_app(1.0);
+    open_slide(&mut a, SlideId::Todo);
+    wibu_on(&mut a, [255, 0, 255]);
+    assert!(magenta(&drawn(&mut a)) > 10_000, "the open notch does show it");
+}
+
+/// While the notch opens, the image fades in with it, and more dim means darker.
+#[test]
+fn wibu_follows_expand_progress_and_dim() {
+    let bright_at = |h: f32, dim: u8| {
+        let mut a = test_app(1.0);
+        open_slide(&mut a, SlideId::Todo);
+        wibu_on(&mut a, [255, 255, 255]);
+        a.cfg.wibu_dim = dim;
+        a.sp = a.slide as f32;
+        (a.w, a.h) = (EXP_W, h);
+        render::draw(&mut a);
+        let g = a.gfx.as_ref().unwrap();
+        let (x, y) = ((CX + EXP_W / 2.0 - 6.0) as usize, (h - 30.0) as usize);
+        g.pm.data()[(y * g.pm.width() as usize + x) * 4]
+    };
+    assert!(bright_at(EXP_H, 70) > bright_at(100.0, 70));
+    assert!(bright_at(EXP_H, 50) > bright_at(EXP_H, 80));
+}
+
+/// After a scale change the old image no longer fits: nothing is drawn until the new one arrives.
+#[test]
+fn wibu_skips_an_image_of_the_old_scale() {
+    let mut a = test_app(1.5);
+    open_slide(&mut a, SlideId::Todo);
+    wibu_on(&mut a, [255, 255, 255]);
+    a.wibu.bg = Some(wibu_bg(1.0, [255, 255, 255]));
+    let mut plain = test_app(1.5);
+    open_slide(&mut plain, SlideId::Todo);
+    assert!(drawn(&mut a) == drawn(&mut plain));
+}
+
+/// A missing file: black notch, the mode stays on, and the row says what is wrong.
+#[test]
+fn wibu_missing_file_keeps_the_notch_black() {
+    let mut a = test_app(1.0);
+    open_slide(&mut a, SlideId::Todo);
+    a.wibu_picked(Some("C:\\does\\not\\exist.png".into()));
+    assert!(a.cfg.wibu && a.wibu.failed && a.wibu.bg.is_none());
+    let r = a.settings_rows(1);
+    assert_eq!(r.iter().find(|r| r.id == settingsview::Rid::WibuFile).unwrap().sub, i18n::tr("Can't read the image"));
+    let mut plain = test_app(1.0);
+    open_slide(&mut plain, SlideId::Todo);
+    assert!(drawn(&mut a) == drawn(&mut plain));
+}
+
+#[test]
+fn wibu_file_dialog_answers() {
+    let mut a = test_app(1.0);
+    a.cfg.wibu = true;
+    a.wibu_picked(None);
+    assert!(!a.cfg.wibu, "cancelled with no file: off again");
+    a.cfg.wibu = true;
+    a.cfg.wibu_file = "C:\\Pictures\\a.png".into();
+    a.wibu_picked(None);
+    assert!(a.cfg.wibu, "cancelling a change keeps the mode");
+    assert_eq!(a.cfg.wibu_file, "C:\\Pictures\\a.png", "and the file");
+}
+
+/// Turning it off frees the image; the two extra rows come and go with it.
+#[test]
+fn wibu_rows_and_toggle() {
+    let mut a = test_app(1.0);
+    open_settings_tab(&mut a, 1);
+    assert_eq!(a.settings_rows(1).len(), 10);
+    wibu_on(&mut a, [1, 2, 3]);
+    assert_eq!(a.settings_rows(1).len(), 12);
+    a.sui.rows_scroll = 3;
+    let (x, y) = settingsview::row_cell_visible(9, 3).expect("Wibu mode row");
+    a.settings_click_rows(1, x + settingsview::CELL_W - 30.0, y + 17.0);
+    assert!(!a.cfg.wibu);
+    assert!(a.wibu.bg.is_none(), "the image is released");
+    assert_eq!(a.settings_rows(1).len(), 10);
+}
+
+/// A bright picture behind every slide, for checking readability by eye (SNAPSHOT_DIR), in the worst case.
+#[test]
+fn snap_wibu_on_a_white_image() {
+    let ids: Vec<SlideId> = test_app(1.0).order.clone();
+    for id in ids {
+        shot(&format!("wibu-white-{id:?}"), 1.0, |a| {
+            open_slide(a, id);
+            wibu_on(a, [255, 255, 255]);
+        });
+    }
+    shot("wibu-settings-general", 1.5, |a| {
+        wibu_on(a, [255, 255, 255]);
+        open_settings_tab(a, 1);
+        a.sui.rows_scroll = 3;
+    });
+}
+
+/// General has 10 rows: the first six show, the wheel brings the rest into view, and rows keep working there.
 #[test]
 fn rows_tab_scrolls_to_the_last_rows() {
     let mut a = test_app(1.0);
     open_settings_tab(&mut a, 1);
-    assert_eq!(a.settings_rows(1).len(), 9);
+    assert_eq!(a.settings_rows(1).len(), 10);
     assert!(a.rows_scrollable());
     assert!(settingsview::row_cell_visible(8, 0).is_none(), "the 9th row starts below the grid");
     assert!(a.settings_rows_wheel(true));
     assert!(a.settings_rows_wheel(true));
-    assert_eq!(a.sui.rows_scroll, 2, "9 rows = 5 rows of cells, 3 show");
+    assert_eq!(a.sui.rows_scroll, 2, "10 rows = 5 rows of cells, 3 show");
     assert!(!a.settings_rows_wheel(true), "nothing left to scroll");
     assert!(settingsview::row_cell_visible(0, a.sui.rows_scroll).is_none(), "the first row scrolled out");
     assert!(settingsview::row_cell_visible(8, a.sui.rows_scroll).is_some(), "the last row is in view");
