@@ -120,6 +120,22 @@ impl Gfx {
         self.circle(cx + s * 0.17, cy - s * 0.08, s * 0.075, dots);
     }
 
+    /// Pin (tombol sematkan): kepala bulat, badan, dan jarum; `on` = terisi.
+    pub(crate) fn icon_pin(&mut self, cx: f32, cy: f32, s: f32, p: &Paint, on: bool) {
+        let top = cy - s * 0.46;
+        if on {
+            self.fill(&rrect(cx - s * 0.3, top, s * 0.6, s * 0.2, s * 0.06), p);
+            self.poly(&[(cx - s * 0.2, top + s * 0.2), (cx + s * 0.2, top + s * 0.2), (cx + s * 0.34, top + s * 0.56), (cx - s * 0.34, top + s * 0.56)], p);
+        } else {
+            let lw = (s * 0.12).max(1.2);
+            self.line(cx - s * 0.3, top + s * 0.1, cx + s * 0.3, top + s * 0.1, lw, p);
+            self.line(cx - s * 0.18, top + s * 0.1, cx - s * 0.3, top + s * 0.56, lw, p);
+            self.line(cx + s * 0.18, top + s * 0.1, cx + s * 0.3, top + s * 0.56, lw, p);
+            self.line(cx - s * 0.3, top + s * 0.56, cx + s * 0.3, top + s * 0.56, lw, p);
+        }
+        self.line(cx, top + s * 0.56, cx, cy + s * 0.52, (s * 0.1).max(1.2), p);
+    }
+
     /// Matahari (ikon kecerahan): lingkaran + 8 sinar.
     pub(crate) fn icon_sun(&mut self, cx: f32, cy: f32, s: f32, p: &Paint) {
         self.circle(cx, cy, s * 0.2, p);

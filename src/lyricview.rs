@@ -22,6 +22,9 @@ const GAP: f32 = 12.0;
 const SK: f32 = 320.0;
 const SC: f32 = 36.0;
 const GREY: [u8; 3] = [140, 148, 168];
+/// Tombol sematkan: pojok kanan atas panel kiri.
+pub(crate) const X_PIN: f32 = DIV_X - 16.0;
+pub(crate) const Y_PIN: f32 = 18.0;
 /// Kredit sumber lirik ("via lrc.red") di pojok kanan bawah panel lirik, dan lebar area kliknya.
 const CREDIT_Y: f32 = 154.0;
 const CREDIT_W: f32 = 72.0;
@@ -51,9 +54,16 @@ impl App {
 
     pub(crate) fn lyric_toggle_mode(&mut self) {
         self.lyric_mode = !self.lyric_mode;
+        // the pin only means something while the lyrics view is on
+        self.pinned &= self.lyric_mode;
         self.lyric_mode_t0 = Instant::now();
         self.lyric_scroll = self.lyric_idx.unwrap_or(0) as f32;
         self.lyric_sv = 0.0;
+    }
+
+    /// Notch tetap terbuka karena mode lirik disematkan (tidak di atas aplikasi layar penuh, tempat notch menyusut).
+    pub(crate) fn pinned_open(&self) -> bool {
+        self.pinned && self.lyric_mode && !self.busy
     }
 
     /// Mode lirik sedang tampil di slide Music (arah/dots disembunyikan).
@@ -142,6 +152,8 @@ impl App {
         g.txtb(&title, tx, 31.0, 16.0, [255, 255, 255], a, tw + 2.0);
         let artist = if g.width(&self.media.artist, 12.0) > tw { ellipsize(g, &self.media.artist, 12.0, tw) } else { self.media.artist.clone() };
         g.txt(&artist, tx, 53.0, 12.0, [150, 150, 158], a, tw + 2.0);
+        let pc = if self.pinned { g.acc.bright } else { [140, 148, 168] };
+        g.icon_pin(X_PIN + ox, Y_PIN, 13.0, &paint(pc[0], pc[1], pc[2], if self.pinned { a } else { 0.8 * a }), self.pinned);
 
         // progres: 02:59 ----- -01:17
         let pos = self.lyric_pos_ms() / 1000;
@@ -212,6 +224,8 @@ impl App {
         let d = |px: f32, py: f32| ((x - px).powi(2) + (y - py).powi(2)).sqrt();
         if d(X_BUBBLE, LM_CY) < 16.0 {
             self.lyric_toggle_mode();
+        } else if d(X_PIN, Y_PIN) < 12.0 {
+            self.pinned = !self.pinned;
         } else if d(X_PREV, LM_CY) < 16.0 {
             let _ = self.tx.send(Cmd::Prev);
         } else if d(X_PLAY, LM_CY) < 18.0 {

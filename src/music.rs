@@ -17,8 +17,7 @@ const ONLINE_ARTWORK: bool = true;
 static LAST_ART_SIG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 pub(crate) const MX: f32 = LX + 104.0;
-pub(crate) const CLOCK_W: f32 = 124.0; // lebar blok jam di kanan (rata kanan di RX)
-pub(crate) const MW: f32 = RX - CLOCK_W - 6.0 - MX; // kolom teks/kontrol berhenti sebelum blok jam
+pub(crate) const MW: f32 = RX - MX; // kolom teks/kontrol sampai tepi kanan (blok jam di kanan sudah dihapus)
 pub(crate) const MCX: f32 = MX + MW / 2.0;
 pub(crate) const MCY: f32 = 128.0;
 
@@ -827,7 +826,6 @@ impl App {
                 }
             }
         }
-        self.clock_side(g, RX + ox, al);
         self.art_at(g, LX + ox, 44.0, 88.0, 12.0, al);
         let title = if self.media.title.is_empty() { tr("No media") } else { &self.media.title };
         g.txtb(title, MX + ox, 40.0, 17.0, [255, 255, 255], al, MW);

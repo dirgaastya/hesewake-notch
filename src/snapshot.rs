@@ -87,6 +87,7 @@ fn test_app(s: f32) -> App {
         lyric_idx: None,
         lyric_w: 0.0,
         lyric_mode: false,
+        pinned: false,
         lyric_mode_t0: past,
         lyric_scroll: 0.0,
         lyric_sv: 0.0,
@@ -1912,4 +1913,50 @@ fn snap_prayer_slide() {
         a.cfg.ramadan = true;
         a.cfg.weather_on = false;
     });
+}
+
+/// The Music slide no longer has the big clock, weekday and date block, so the controls use the full width.
+#[test]
+fn music_slide_has_no_clock_block() {
+    assert_eq!(music::MW, RX - music::MX, "text and controls reach the right edge");
+    shot("music-no-clock", 1.0, |a| {
+        a.media.title = "Song".into();
+        a.media.artist = "Artist".into();
+        open_slide(a, SlideId::Music);
+    });
+}
+
+/// The pin keeps the lyrics view open when the pointer leaves, but only while the lyrics view is on and not over a
+/// fullscreen app; the pin button toggles it, and leaving the lyrics view lets go of it.
+#[test]
+fn pinned_lyrics_view_stays_open() {
+    let mut a = test_app(1.0);
+    a.media.title = "Song".into();
+    a.lyrics = lyrics::Lyrics::Synced(lyrics::parse_lrc("[00:01.00]First line
+[00:05.00]Second line"), lyrics::Source::Lrclib);
+    open_slide(&mut a, SlideId::Music);
+    a.hover = false;
+    a.lyric_mode = true;
+    assert!(!a.expanded(), "the pointer is away and nothing is pinned");
+    assert!(a.lyric_click(lyricview::X_PIN, lyricview::Y_PIN), "the pin button is handled");
+    assert!(a.pinned && a.expanded(), "pinned: stays open without the pointer");
+    a.busy = true;
+    assert!(!a.expanded(), "over a fullscreen app the notch shrinks anyway");
+    a.busy = false;
+    shot("lyrics-pinned", 1.0, |b| {
+        b.media.title = "Song".into();
+        b.media.artist = "Artist".into();
+        b.lyrics = lyrics::Lyrics::Synced(lyrics::parse_lrc("[00:01.00]First line
+[00:05.00]Second line
+[00:09.00]Third line"), lyrics::Source::Lrclib);
+        b.lyric_mode = true;
+        b.pinned = true;
+        open_slide(b, SlideId::Music);
+    });
+    a.lyric_toggle_mode();
+    assert!(!a.lyric_mode && !a.pinned && !a.expanded(), "leaving the lyrics view unpins");
+    a.lyric_toggle_mode();
+    assert!(!a.pinned, "it does not come back by itself");
+    assert!(a.lyric_click(lyricview::X_PIN, lyricview::Y_PIN) && a.pinned);
+    assert!(a.lyric_click(lyricview::X_PIN, lyricview::Y_PIN) && !a.pinned, "a second click unpins");
 }

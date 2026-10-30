@@ -213,6 +213,8 @@ struct App {
     lyric_idx: Option<usize>,
     lyric_w: f32,
     lyric_mode: bool,
+    /// Mode lirik disematkan: notch tetap terbuka walau pointer pergi (hanya selama mode lirik, dan tidak di atas aplikasi layar penuh).
+    pinned: bool,
     lyric_mode_t0: Instant,
     lyric_scroll: f32,
     lyric_sv: f32,
@@ -318,6 +320,7 @@ impl App {
             || self.editing
             // menekan tombol di toast Water (Snooze/Drank) bukan gestur geser: toast tidak boleh dibatalkan sebelum klik selesai
             || (self.drag.is_some() && !self.toast_has_button())
+            || self.pinned_open()
             || self.peek_until.map_or(false, |t| Instant::now() < t)
     }
 
@@ -592,6 +595,7 @@ fn main() -> Result<()> {
             lyric_idx: None,
             lyric_w: 0.0,
             lyric_mode: false,
+            pinned: false,
             lyric_mode_t0: Instant::now() - Duration::from_secs(10),
             lyric_scroll: 0.0,
             lyric_sv: 0.0,
