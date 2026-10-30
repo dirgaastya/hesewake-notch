@@ -377,19 +377,15 @@ mod frame_tests {
 }
 
 impl App {
-    /// The notch dodges the pointer over this kind of foreground window (setting "Dodge cursor"). Whenever the notch is
-    /// thin because of a busy window (fullscreen, an Adobe app, or a maximized one with "Thin on maximize" on), the
-    /// pointer must not open it either: that thin line is the "minimal notch" the pointer should be able to pass.
+    /// Over a maximized or fullscreen window the notch always steps aside from the pointer: it sits on top of that window's
+    /// tabs and buttons, which must stay reachable. The same goes whenever the notch is thin because of a busy window
+    /// (an Adobe app, fullscreen), since that thin line is the "minimal notch" the pointer should be able to pass.
     pub(crate) fn dodge_applies(&self) -> bool {
-        match self.cfg.dodge {
-            settings::DODGE_FULLSCREEN => self.fg == 2 || self.busy,
-            settings::DODGE_MAXIMIZED => self.fg >= 1 || self.busy,
-            _ => false,
-        }
+        self.fg >= 1 || self.busy
     }
 
     /// The pointer is at (`x`, `y`) in canvas coordinates: open the notch when it comes near, close it when it leaves, or,
-    /// over a fullscreen / maximized window with "Dodge pointer" on, step aside (thin, never expanded) so the window's own
+    /// over a fullscreen / maximized window, step aside (thin, never expanded) so the window's own
     /// tabs and buttons under the notch can be reached. True if something changed.
     pub(crate) fn pointer_step(&mut self, x: f32, y: f32) -> bool {
         let a = self;
