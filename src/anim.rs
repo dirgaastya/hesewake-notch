@@ -387,12 +387,29 @@ impl App {
     }
 
     /// The pointer is at (`x`, `y`) in canvas coordinates: open the notch when it comes near, close it when it leaves, or,
-    /// over a fullscreen / maximized window, step aside (thin, never expanded) so the window's own
-    /// tabs and buttons under the notch can be reached. True if something changed.
+    /// over a fullscreen / maximized window, step aside (turn thin, not expanding) so the window's own tabs and buttons under
+    /// the notch can be reached; aiming right at the thin line opens it. True if something changed.
     pub(crate) fn pointer_step(&mut self, x: f32, y: f32) -> bool {
         let a = self;
         let mut changed = false;
         if a.dodge_applies() && !a.held_open() {
+            if a.hover {
+                // Opened on purpose from the thin line: stays open while the pointer is in the open notch.
+                let inside = (x - CX).abs() <= (EXP_W + 20.0) / 2.0 && y >= 0.0 && y <= EXP_H + 8.0;
+                if !inside {
+                    a.hover = false;
+                    a.out_close();
+                    changed = true;
+                }
+                return changed;
+            }
+            // The thin line itself: aiming right at it opens the notch (the tabs below it stay reachable).
+            if (x - CX).abs() <= THIN.0 / 2.0 + 12.0 && y >= 0.0 && y <= THIN.1 + 1.0 && !a.toast_has_button() {
+                a.hover = true;
+                a.dodging = false;
+                a.dl_on_hover();
+                return true;
+            }
             // the area of the notch as it is without the pointer (the thin line when it is already thin)
             let fresh = if a.busy { (a.w.max(THIN.0) + 60.0, 10.0) } else { (a.w.max(IDLE.0) + 12.0, a.h.max(IDLE.1) + 6.0) };
             let (zw, zh) = if a.dodging { a.dodge_zone } else { fresh };
@@ -402,11 +419,6 @@ impl App {
                 if inside {
                     a.dodge_zone = fresh;
                 }
-                changed = true;
-            }
-            if a.hover {
-                a.hover = false;
-                a.out_close();
                 changed = true;
             }
             return changed;

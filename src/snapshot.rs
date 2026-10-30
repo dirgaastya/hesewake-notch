@@ -1984,16 +1984,34 @@ fn notch_dodges_the_pointer_over_fullscreen_and_maximized_windows() {
     // fullscreen: thin already; the pointer at it does not expand it
     a.fg = 2;
     a.busy = true;
-    a.pointer_step(CX, 3.0);
-    assert!(a.dodging && !a.hover && !a.expanded() && a.thin(), "stays minimal");
+    a.pointer_step(CX, 8.0);
+    assert!(a.dodging && !a.hover && !a.expanded() && a.thin(), "near the thin line it stays minimal");
     a.pointer_step(CX, 300.0);
     assert!(!a.dodging, "the pointer left");
+    // aiming right at the thin line opens the slide; it stays while the pointer is in the open notch and closes after
+    a.pointer_step(CX, 2.0);
+    assert!(a.hover && a.expanded() && !a.dodging, "the thin line opens the notch");
+    a.pointer_step(CX + 100.0, 120.0);
+    assert!(a.hover, "inside the open notch");
+    a.pointer_step(CX, 500.0);
+    assert!(!a.hover && !a.dodging, "left the open notch");
+    // not at the thin line's width: beside it nothing opens
+    a.pointer_step(CX + THIN.0 / 2.0 + 40.0, 2.0);
+    assert!(!a.hover);
+    a.pointer_step(CX, 600.0);
 
     // maximized (the usual way of working): the normal notch turns thin while the pointer is near it, so tabs are reachable
     a.fg = 1;
     a.busy = false;
     a.pointer_step(CX, 10.0);
     assert!(a.dodging && !a.hover && a.thin() && !a.expanded());
+    // ... and aiming at the thin line it became opens the slide
+    a.pointer_step(CX, 1.0);
+    assert!(a.hover && !a.dodging);
+    a.pointer_step(CX, 600.0);
+    assert!(!a.hover);
+    a.pointer_step(CX, 10.0);
+    assert!(a.dodging);
     // it does not flicker at the edge of the area while it shrinks
     let edge = a.dodge_zone.0 / 2.0 - 1.0;
     a.w = 10.0;
@@ -2006,7 +2024,7 @@ fn notch_dodges_the_pointer_over_fullscreen_and_maximized_windows() {
     // thin because of a busy window (an Adobe app) over a window that is not maximized: the thin line stays minimal too
     a.fg = 0;
     a.busy = true;
-    a.pointer_step(CX, 3.0);
+    a.pointer_step(CX, 8.0);
     assert!(a.dodging && !a.hover && !a.expanded());
     a.pointer_step(CX, 300.0);
     assert!(!a.dodging);
