@@ -67,6 +67,7 @@ mod dict;
 mod downloads;
 mod dragdrop;
 mod eye;
+mod filepick;
 mod gfx;
 mod hotkeys;
 mod i18n;
@@ -109,6 +110,7 @@ mod timer;
 mod toast;
 mod update;
 mod water;
+mod wibu;
 mod window;
 
 use accent::Accent;
@@ -174,6 +176,8 @@ struct App {
     prayer_sun: u16,
     /// The adhan plays until then (adhan.rs).
     adhan_until: Option<Instant>,
+    /// The image of Wibu mode, scaled to the canvas (wibu.rs).
+    wibu: wibu::Wibu,
     hover: bool,
     busy: bool,
     /// Mode "Minimal notch": garis tipis saat tidak ada musik, buka dengan hover.
@@ -564,6 +568,7 @@ fn main() -> Result<()> {
             prayer_fired: None,
             prayer_sun: 0,
             adhan_until: None,
+            wibu: wibu::Wibu::default(),
             hover: false,
             busy: is_busy(hwnd, cfg.busy_on_maximized, &mon),
             minimal: cfg.minimal,
@@ -682,6 +687,7 @@ fn main() -> Result<()> {
         };
         app.prayer_refresh();
         app.out_refresh();
+        app.wibu_apply();
         let (tw, th) = target(&app);
         app.w = tw;
         app.h = th;

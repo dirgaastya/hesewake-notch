@@ -130,6 +130,9 @@ pub(crate) fn draw(a: &mut App) {
         None => notch_path(w, h),
     };
     g.fill(&shape, &paint(0, 0, 0, 1.0));
+    if p > 0.04 {
+        a.draw_wibu(&mut g, p);
+    }
 
     // Collapsed content only shows once the notch is tall enough for it, also right after a toast, when the notch
     // may be shrinking back to the thin busy line.

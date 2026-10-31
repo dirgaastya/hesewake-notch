@@ -106,6 +106,7 @@ impl App {
         self.scale = s;
         set_current(s);
         self.gfx = Some(new_gfx(s));
+        self.wibu_apply(); // the image is scaled to the canvas
         true
     }
 }
