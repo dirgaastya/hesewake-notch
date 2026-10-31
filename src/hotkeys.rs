@@ -82,13 +82,14 @@ enum Action {
 /// What hotkey `n` should do, given the carousel order, whether the notch is open, and the current slide.
 fn action(order: &[SlideId], n: usize, expanded: bool, cur: usize) -> Action {
     match order.get(n) {
-        None | Some(SlideId::Settings) => Action::Ignore,
+        None => Action::Ignore,
         Some(_) if expanded && cur == n => Action::Close,
         Some(_) => Action::Show,
     }
 }
 
-/// Hotkey number (1..=10; 10 is the 0 key) of entry `i` in the slide config, shown in Settings > Slides; None if it has none.
+/// Hotkey number (1..=10; 10 is the 0 key) of entry `i` in the slide config, shown on the Settings window's Slides page;
+/// None if it has none.
 pub(crate) fn number(cfg: &[(SlideId, bool)], i: usize) -> Option<usize> {
     if !cfg.get(i)?.1 {
         return None;
@@ -217,7 +218,6 @@ mod tests {
         assert_eq!(action(&order, 1, true, 1), Action::Close, "same hotkey again: close");
         assert_eq!(action(&order, 1, false, 1), Action::Show, "closed but last on that slide: open");
         assert_eq!(action(&order, 3, false, 0), Action::Ignore, "no 4th slide");
-        assert_eq!(action(&[Music, Todo, Settings], 2, false, 0), Action::Ignore, "Settings has no hotkey");
     }
 
     #[test]

@@ -101,7 +101,7 @@ pub(crate) fn set_enabled(on: bool) {
     ENABLED.store(on, Ordering::Relaxed);
 }
 
-/// Ambil foto profil dari payload toast (Settings > Alerts > Contact photos).
+/// Ambil foto profil dari payload toast (Settings > Notifications > Contact photos).
 pub(crate) fn set_avatar(on: bool) {
     AVATAR.store(on, Ordering::Relaxed);
 }

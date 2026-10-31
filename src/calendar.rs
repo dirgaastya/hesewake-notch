@@ -401,11 +401,11 @@ impl App {
         let rows = self.agenda(now, off);
         if rows.is_empty() {
             let (l1, l2): (&str, String) = if self.cal_link.is_none() {
-                (tr("Link your calendar in Settings \u{203a} Features"), tr("Paste its secret ICS address there").to_string())
+                (tr("Link your calendar in Settings \u{203a} Calendar"), tr("Paste its secret ICS address there").to_string())
             } else if self.cal_status == CalStatus::Loading {
                 (tr("Loading your calendar\u{2026}"), String::new())
             } else if self.cal_status == CalStatus::Failed && self.cal.is_empty() {
-                (tr("Couldn't load your calendar"), tr("Check the link in Settings \u{203a} Features").to_string())
+                (tr("Couldn't load your calendar"), tr("Check the link in Settings \u{203a} Calendar").to_string())
             } else {
                 let next = self.cal.iter().filter(|e| e.start >= now).min_by_key(|e| e.start).map(|e| {
                     let eday = (e.start + off as i64).div_euclid(DAY);

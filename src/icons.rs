@@ -318,3 +318,230 @@ pub(crate) fn hgrad(x0: f32, x1: f32, c0: [u8; 3], c1: [u8; 3], a: f32) -> Paint
     p.anti_alias = true;
     p
 }
+
+/// Outline icons for the Settings window sidebar (`Gfx::icon_outline`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum OutlineIcon {
+    Palette,
+    Monitor,
+    Layers,
+    Speaker,
+    Cloud,
+    Info,
+}
+
+/// Outline icons in a unit box (-1..1 on both axes), drawn with round caps.
+struct Pen<'a, 'p> {
+    g: &'a mut Gfx,
+    cx: f32,
+    cy: f32,
+    h: f32,
+    p: &'a Paint<'p>,
+}
+
+impl Pen<'_, '_> {
+    fn at(&self, x: f32, y: f32) -> (f32, f32) {
+        (self.cx + x * self.h, self.cy + y * self.h)
+    }
+
+    fn width(&self) -> f32 {
+        (self.h * 0.24).max(1.3)
+    }
+
+    fn stroke(&mut self, path: Path) {
+        let st = Stroke { width: self.width(), line_cap: LineCap::Round, line_join: tiny_skia::LineJoin::Round, ..Default::default() };
+        self.g.pm.stroke_path(&path, self.p, &st, self.g.ts, None);
+    }
+
+    fn polyline(&mut self, pts: &[(f32, f32)], close: bool) {
+        let mut pb = PathBuilder::new();
+        for (i, &(x, y)) in pts.iter().enumerate() {
+            let (px, py) = self.at(x, y);
+            if i == 0 {
+                pb.move_to(px, py);
+            } else {
+                pb.line_to(px, py);
+            }
+        }
+        if close {
+            pb.close();
+        }
+        if let Some(path) = pb.finish() {
+            self.stroke(path);
+        }
+    }
+
+    fn rrect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32) {
+        let (px, py) = self.at(x, y);
+        self.stroke(rrect(px, py, w * self.h, h * self.h, r * self.h));
+    }
+
+    fn circle(&mut self, x: f32, y: f32, r: f32) {
+        let (px, py) = self.at(x, y);
+        if let Some(path) = PathBuilder::from_circle(px, py, r * self.h) {
+            self.stroke(path);
+        }
+    }
+
+    /// Teardrop, same curve as `Gfx::icon_drop` but as an outline.
+    fn drop(&mut self) {
+        let q = |x: f32, y: f32| self.at(x * 0.9, y * 0.95);
+        let segs = [
+            [q(0.55, -0.35), q(0.7, 0.05), q(0.7, 0.3)],
+            [q(0.7, 0.7), q(0.38, 1.0), q(0.0, 1.0)],
+            [q(-0.38, 1.0), q(-0.7, 0.7), q(-0.7, 0.3)],
+            [q(-0.7, 0.05), q(-0.55, -0.35), q(0.0, -1.0)],
+        ];
+        let start = q(0.0, -1.0);
+        let mut pb = PathBuilder::new();
+        pb.move_to(start.0, start.1);
+        for [c1, c2, e] in segs {
+            pb.cubic_to(c1.0, c1.1, c2.0, c2.1, e.0, e.1);
+        }
+        pb.close();
+        if let Some(path) = pb.finish() {
+            self.stroke(path);
+        }
+    }
+
+    fn dot(&mut self, x: f32, y: f32, r: f32) {
+        let (px, py) = self.at(x, y);
+        self.g.circle(px, py, r * self.h, self.p);
+    }
+}
+
+impl Gfx {
+    /// Gear: a ring with eight teeth around a small hole.
+    pub(crate) fn icon_gear(&mut self, cx: f32, cy: f32, s: f32, p: &Paint) {
+        let mut pen = Pen { g: self, cx, cy, h: s / 2.0, p };
+        // Eight flat-topped teeth: each one is two points on the outer radius between two on the inner one.
+        let mut pts = Vec::with_capacity(32);
+        for k in 0..8 {
+            let a = k as f32 * std::f32::consts::FRAC_PI_4;
+            for (da, r) in [(-0.39, 0.66), (-0.2, 0.96), (0.2, 0.96), (0.39, 0.66)] {
+                pts.push(((a + da).cos() * r, (a + da).sin() * r));
+            }
+        }
+        pen.polyline(&pts, true);
+        pen.circle(0.0, 0.0, 0.26);
+    }
+
+    /// The Settings window's sidebar icons that are not slides.
+    pub(crate) fn icon_outline(&mut self, kind: OutlineIcon, cx: f32, cy: f32, s: f32, p: &Paint) {
+        let mut pen = Pen { g: self, cx, cy, h: s / 2.0, p };
+        match kind {
+            OutlineIcon::Palette => {
+                pen.circle(0.0, 0.0, 0.9);
+                pen.dot(-0.42, 0.05, 0.13);
+                pen.dot(-0.18, -0.42, 0.13);
+                pen.dot(0.32, -0.36, 0.13);
+                pen.circle(0.3, 0.38, 0.2);
+            }
+            OutlineIcon::Monitor => {
+                pen.rrect(-0.95, -0.8, 1.9, 1.25, 0.2);
+                pen.polyline(&[(0.0, 0.45), (0.0, 0.85)], false);
+                pen.polyline(&[(-0.42, 0.88), (0.42, 0.88)], false);
+            }
+            OutlineIcon::Layers => {
+                pen.polyline(&[(0.0, -0.9), (0.95, -0.4), (0.0, 0.1), (-0.95, -0.4)], true);
+                pen.polyline(&[(-0.95, 0.05), (0.0, 0.55), (0.95, 0.05)], false);
+                pen.polyline(&[(-0.95, 0.48), (0.0, 0.98), (0.95, 0.48)], false);
+            }
+            OutlineIcon::Speaker => {
+                pen.polyline(&[(-0.9, -0.3), (-0.5, -0.3), (0.0, -0.8), (0.0, 0.8), (-0.5, 0.3), (-0.9, 0.3)], true);
+                let arc = |r: f32| -> Vec<(f32, f32)> {
+                    (0..=8).map(|i| {
+                        let a = -0.75 + 1.5 * i as f32 / 8.0;
+                        (0.05 + a.cos() * r, a.sin() * r)
+                    }).collect()
+                };
+                pen.polyline(&arc(0.42), false);
+                pen.polyline(&arc(0.82), false);
+            }
+            OutlineIcon::Cloud => {
+                let mut pts = Vec::new();
+                for (ox, oy, r, a0, a1) in [(-0.45, 0.2, 0.42, 1.57, 3.9), (0.02, -0.18, 0.55, 3.6, 6.0), (0.5, 0.18, 0.44, 5.0, 7.85)] {
+                    for i in 0..=8 {
+                        let a = a0 + (a1 - a0) * i as f32 / 8.0;
+                        pts.push((ox + a.cos() * r, oy + a.sin() * r));
+                    }
+                }
+                pen.polyline(&pts, true);
+            }
+            OutlineIcon::Info => {
+                pen.circle(0.0, 0.0, 0.9);
+                pen.polyline(&[(0.0, -0.05), (0.0, 0.5)], false);
+                pen.dot(0.0, -0.42, 0.12);
+            }
+        }
+    }
+
+    /// A slide's outline icon (`s` = box size in px): Settings sidebar and slide list.
+    pub(crate) fn slide_icon(&mut self, id: SlideId, cx: f32, cy: f32, s: f32, p: &Paint) {
+        let mut pen = Pen { g: self, cx, cy, h: s / 2.0, p };
+        match id {
+            SlideId::Music => {
+                pen.polyline(&[(-0.35, 0.6), (-0.35, -0.75), (0.85, -0.95), (0.85, 0.42)], false);
+                pen.dot(-0.62, 0.62, 0.32);
+                pen.dot(0.58, 0.44, 0.32);
+            }
+            SlideId::Water => pen.drop(),
+            SlideId::Todo => {
+                pen.polyline(&[(-0.95, -0.5), (-0.72, -0.27), (-0.3, -0.72)], false);
+                pen.polyline(&[(-0.95, 0.45), (-0.72, 0.68), (-0.3, 0.23)], false);
+                pen.polyline(&[(0.1, -0.5), (0.95, -0.5)], false);
+                pen.polyline(&[(0.1, 0.45), (0.95, 0.45)], false);
+            }
+            SlideId::Ledge => {
+                pen.polyline(&[(-0.95, 0.1), (-0.95, 0.85), (0.95, 0.85), (0.95, 0.1), (0.55, -0.8), (-0.55, -0.8)], true);
+                pen.polyline(&[(-0.95, 0.1), (-0.38, 0.1), (-0.22, 0.38), (0.22, 0.38), (0.38, 0.1), (0.95, 0.1)], false);
+            }
+            SlideId::Scrap => {
+                pen.rrect(-0.72, -0.92, 1.44, 1.84, 0.28);
+                for y in [-0.38, 0.02, 0.42] {
+                    pen.polyline(&[(-0.32, y), (0.32, y)], false);
+                }
+            }
+            SlideId::Notifications => {
+                pen.polyline(
+                    &[(-0.85, 0.48), (-0.62, 0.2), (-0.62, -0.18), (-0.38, -0.66), (0.0, -0.82), (0.38, -0.66), (0.62, -0.18), (0.62, 0.2), (0.85, 0.48)],
+                    true,
+                );
+                pen.polyline(&[(-0.25, 0.8), (0.25, 0.8)], false);
+            }
+            SlideId::System => {
+                pen.polyline(&[(-1.0, 0.05), (-0.5, 0.05), (-0.25, -0.75), (0.2, 0.8), (0.45, 0.05), (1.0, 0.05)], false);
+            }
+            SlideId::Timer => {
+                pen.circle(0.0, 0.15, 0.78);
+                pen.polyline(&[(0.0, 0.15), (0.0, -0.25)], false);
+                pen.polyline(&[(-0.28, -0.98), (0.28, -0.98)], false);
+            }
+            SlideId::Clipboard => {
+                pen.rrect(-0.75, -0.72, 1.5, 1.7, 0.26);
+                pen.rrect(-0.34, -0.98, 0.68, 0.4, 0.12);
+                pen.polyline(&[(-0.32, 0.12), (0.32, 0.12)], false);
+                pen.polyline(&[(-0.32, 0.5), (0.18, 0.5)], false);
+            }
+            SlideId::Agenda => {
+                pen.rrect(-0.88, -0.66, 1.76, 1.6, 0.28);
+                pen.polyline(&[(-0.88, -0.14), (0.88, -0.14)], false);
+                pen.polyline(&[(-0.42, -0.95), (-0.42, -0.5)], false);
+                pen.polyline(&[(0.42, -0.95), (0.42, -0.5)], false);
+            }
+            SlideId::Prayer => {
+                // a crescent: the outer arc of the moon, back along the edge of the shadow
+                let mut pts = Vec::new();
+                for i in 0..=14 {
+                    let a = 0.95 + (std::f32::consts::TAU - 1.9) * i as f32 / 14.0;
+                    pts.push((a.cos() * 0.86, a.sin() * 0.86));
+                }
+                for i in 0..=10 {
+                    let a = std::f32::consts::PI + 0.55 - (1.1 + std::f32::consts::PI) * i as f32 / 10.0;
+                    pts.push((0.42 + a.cos() * 0.62, -0.22 + a.sin() * 0.62));
+                }
+                pen.polyline(&pts, true);
+            }
+        }
+    }
+}

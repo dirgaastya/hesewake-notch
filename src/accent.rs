@@ -1,4 +1,4 @@
-//! Accent colors selectable in Settings > General. Warning red, "done" green, water/Bluetooth blue and the
+//! Accent colors selectable in Settings > Appearance. Warning red, "done" green, water/Bluetooth blue and the
 //! Pomodoro tomato stay as they are, because those colors carry their own meaning.
 
 #[derive(Clone, Copy, Debug, PartialEq)]

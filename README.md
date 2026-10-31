@@ -28,7 +28,7 @@ Hesewake Notch sits flush against the top edge of your screen as a small black n
 
 ## <img src="https://api.iconify.design/lucide/plus.svg?color=%23ff453a" width="20" align="top"> What this fork adds to Poch
 
-Synced lyrics (with a scrolling lyrics mode), cover art in the notch, a redesigned Water slide, Windows notifications with contact photos, toasts (charger, Bluetooth, Caps/Num/Scroll Lock, microphone/camera in use), volume control by scrolling, a **Settings** slide (show/hide/reorder slides, display and feature toggles), a tray menu, a blue theme, and an installer. See [CHANGELOG.md](CHANGELOG.md) for details.
+Synced lyrics (with a scrolling lyrics mode), cover art in the notch, a redesigned Water slide, Windows notifications with contact photos, toasts (charger, Bluetooth, Caps/Num/Scroll Lock, microphone/camera in use), volume control by scrolling, a **Settings** window (a sidebar of categories: show/hide/reorder slides, appearance, screens, music, alerts, weather and calendar), a tray menu, a blue theme, and an installer. See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ---
 
@@ -56,16 +56,16 @@ Swipe, scroll, drag, use the arrow buttons or click the dots to move through an 
 |   <img src="https://api.iconify.design/lucide/clock.svg?color=%23ff453a" width="22">    | Idle clock     | When nothing is playing, the notch shows the time, then switches to a blinking eye with a red glow, then loops.     |
 | <img src="https://api.iconify.design/lucide/minimize-2.svg?color=%23ff453a" width="22"> | Busy mode      | With a maximized or fullscreen window (or Adobe apps in front), the notch shrinks to a thin line. Hover to open it. |
 |  <img src="https://api.iconify.design/lucide/keyboard.svg?color=%23ff453a" width="22">  | Hotkey         | `Ctrl` + `Alt` + `H` toggles between the clock and the eye.                                                         |
-| <img src="https://api.iconify.design/lucide/mic-off.svg?color=%23ff453a" width="22"> | Mic mute       | `Ctrl` + `Alt` + `M` mutes the default microphone for every app, and again to unmute. While muted, a crossed-out mic stays in the notch, also when the mute was made elsewhere. Turn the key off in Settings > Alerts > Mic mute key. |
+| <img src="https://api.iconify.design/lucide/mic-off.svg?color=%23ff453a" width="22"> | Mic mute       | `Ctrl` + `Alt` + `M` mutes the default microphone for every app, and again to unmute. While muted, a crossed-out mic stays in the notch, also when the mute was made elsewhere. Turn the key off in Settings > HUD & alerts > Mic mute key. |
 |   <img src="https://api.iconify.design/lucide/waves.svg?color=%23ff453a" width="22">    | Drop animation | Dropping a file onto the notch makes its bottom edge ripple like water.                                             |
 |  <img src="https://api.iconify.design/lucide/palette.svg?color=%23ff453a" width="22">   | Artwork tint   | The Music slide picks up colors from the album cover for a soft glow.                                               |
 | <img src="https://api.iconify.design/lucide/headphones.svg?color=%23ff453a" width="22"> | Sound output   | The speaker / headphone button left of the playback controls lists the playback devices; a click on one makes it the Windows default for every app, including calls. The mouse wheel on the button moves to the next device. If Windows refuses, the sound settings open. |
-| <img src="https://api.iconify.design/lucide/languages.svg?color=%23ff453a" width="22"> | Romanize lyrics | Optional (Settings > Widgets): Japanese lyrics shown in romaji (Lindera IPADIC and WanaKana) and Korean lyrics in Revised Romanization (no dictionary needed). |
+| <img src="https://api.iconify.design/lucide/languages.svg?color=%23ff453a" width="22"> | Romanize lyrics | Optional (Settings > Music & lyrics): Japanese lyrics shown in romaji (Lindera IPADIC and WanaKana) and Korean lyrics in Revised Romanization (no dictionary needed). |
 | <img src="https://api.iconify.design/lucide/globe.svg?color=%23ff453a" width="22"> | Language       | English or Indonesian (Settings > General > Language). Applies right away, including the right-click menu.     |
-| <img src="https://api.iconify.design/lucide/download.svg?color=%23ff453a" width="22"> | Update check   | At startup and every 24 hours the app asks GitHub for the latest release and shows a toast once per new version, with **Download** to open the release page. Nothing is installed automatically. Right-click menu: **Check for updates**. Turn it off in Settings > Alerts > Update notice. |
-| <img src="https://api.iconify.design/lucide/download.svg?color=%23ff453a" width="22"> | Downloads      | While a browser downloads into your Downloads folder, the notch shows the speed (↓ 4.1 MB/s) and Ledge lists the running downloads with size and speed. When one is done, a toast offers **Open** and **Show in folder**. Turn it off in Settings > Alerts > Download progress. |
-| <img src="https://api.iconify.design/lucide/calendar-clock.svg?color=%23ff453a" width="22"> | Calendar       | Settings > Widgets > Calendar: copy your calendar's secret ICS address (Google: "Secret address in iCal format", Outlook: "Publish calendar"), then press **Paste**. The notch counts down the last 10 minutes before a meeting and shows a toast with **Join** when it starts. The link is kept in Windows Credential Manager (not in a file) and the feed is refreshed every 10 minutes. |
-| <img src="https://api.iconify.design/lucide/moon.svg?color=%23ff453a" width="22"> | Prayer times   | Computed on the PC with the Kemenag parameters for the city in Settings > Widgets: a countdown in the last 15 minutes, a toast when a prayer starts, and a **Prayer** slide with the day (Imsak, Subuh, Terbit, Dzuhur, Ashar, Maghrib, Isya). **Ramadan mode** (turned on by hand) adds the Imsak countdown and toast and an Iftar toast at Maghrib. An optional **adhan** (off by default) plays the system sound or an .mp3 / .wav file you pick. |
+| <img src="https://api.iconify.design/lucide/download.svg?color=%23ff453a" width="22"> | Update check   | At startup and every 24 hours the app asks GitHub for the latest release and shows a toast once per new version, with **Download** to open the release page. Nothing is installed automatically. Right-click menu: **Check for updates**. Turn it off in Settings > General > Update notice. |
+| <img src="https://api.iconify.design/lucide/download.svg?color=%23ff453a" width="22"> | Downloads      | While a browser downloads into your Downloads folder, the notch shows the speed (↓ 4.1 MB/s) and Ledge lists the running downloads with size and speed. When one is done, a toast offers **Open** and **Show in folder**. Turn it off in Settings > HUD & alerts > Download progress. |
+| <img src="https://api.iconify.design/lucide/calendar-clock.svg?color=%23ff453a" width="22"> | Calendar       | Settings > Calendar: copy your calendar's secret ICS address (Google: "Secret address in iCal format", Outlook: "Publish calendar"), then press **Paste**. The notch counts down the last 10 minutes before a meeting and shows a toast with **Join** when it starts. The link is kept in Windows Credential Manager (not in a file) and the feed is refreshed every 10 minutes. |
+| <img src="https://api.iconify.design/lucide/moon.svg?color=%23ff453a" width="22"> | Prayer times   | Computed on the PC with the Kemenag parameters for the city in Settings > Weather & prayer: a countdown in the last 15 minutes, a toast when a prayer starts, and a **Prayer** slide with the day (Imsak, Subuh, Terbit, Dzuhur, Ashar, Maghrib, Isya). **Ramadan mode** (turned on by hand) adds the Imsak countdown and toast and an Iftar toast at Maghrib. An optional **adhan** (off by default) plays the system sound or an .mp3 / .wav file you pick. |
 
 ---
 
@@ -87,7 +87,7 @@ cd hesewake-notch
 cargo build --release
 ```
 
-The executable is created at `target\release\hesewake-notch.exe`. Japanese romaji needs the Lindera IPADIC dictionary: press **Get** on the "Japanese dictionary" row in Settings > Widgets (it goes to `%APPDATA%\hesewake-notch\dict\ipadic`), or for development run `scripts\fetch-dict.ps1` to put it in the repo's `dict\ipadic`. To make a setup installer, open `hesewake-notch.iss` in Inno Setup and compile it.
+The executable is created at `target\release\hesewake-notch.exe`. Japanese romaji needs the Lindera IPADIC dictionary: press **Get** on the "Japanese dictionary" row in Settings > Music & lyrics (it goes to `%APPDATA%\hesewake-notch\dict\ipadic`), or for development run `scripts\fetch-dict.ps1` to put it in the repo's `dict\ipadic`. To make a setup installer, open `hesewake-notch.iss` in Inno Setup and compile it.
 
 ---
 
@@ -109,6 +109,7 @@ The executable is created at `target\release\hesewake-notch.exe`. Japanese romaj
 | `clipboard.rs`                               | Clipboard history slide and clipboard listener                     |
 | `ics.rs`, `calendar.rs`                      | iCalendar reader (time zones, recurring events), calendar feed, Agenda slide |
 | `update.rs`                                  | Update check against the latest GitHub release                     |
+| `settingswin.rs`, `opts.rs`                  | Settings window (right-click / tray > Settings); every setting and what changing it does |
 | `dragdrop.rs`                                | OLE drag out of the Ledge                                          |
 | `eye.rs`, `busy.rs`, `icon.rs`               | Eye animation, busy detection, app icons                           |
 | `nav.rs`, `input.rs`, `config.rs`, `data.rs` | Carousel, clicks and menu, shared sizes, data storage              |

@@ -34,12 +34,15 @@ fn settled(a: &App) -> bool {
 /// Timer: 16 ms saat bergerak / animasi droplet / mid-blink, 40 ms saat mata istirahat (glow mengalir),
 /// 33 ms untuk equalizer, dan mati kalau tidak ada yang bergerak.
 pub(crate) unsafe fn schedule(a: &mut App) {
+    if a.hwnd == 0 {
+        return; // no window (tests)
+    }
     let pulsing = a.drop_pulse.map_or(false, |t| t.elapsed().as_secs_f32() < DROP_ANIM_SECS);
     let want = if a.display_off {
         0
     } else if pulsing {
         16
-    } else if !settled(a) || a.lyric_fading() || a.art_fading() || a.toast.is_some() || a.water_animating() || a.lyric_scroll_animating() || a.bell_animating() || a.notif_ui_animating() || a.settings_animating() || a.privacy_animating() || a.vol_overlay_active() || a.sys_animating() || a.weather_animating() || a.timer_animating() || a.clip_animating() {
+    } else if !settled(a) || a.lyric_fading() || a.art_fading() || a.toast.is_some() || a.water_animating() || a.lyric_scroll_animating() || a.bell_animating() || a.notif_ui_animating() || a.privacy_animating() || a.vol_overlay_active() || a.sys_animating() || a.weather_animating() || a.timer_animating() || a.clip_animating() {
         16
     } else if a.expanded() && a.is_slide(SlideId::Music) && a.tint.animating() {
         16 // artwork colour cross-fade on the Music slide
@@ -85,9 +88,6 @@ unsafe fn poll(a: &mut App) {
         redraw = true;
     }
     if a.toast_update() {
-        redraw = true;
-    }
-    if a.settings_open && settled(a) && a.settings_autoclose() {
         redraw = true;
     }
     a.notif_ui_step();
@@ -145,7 +145,7 @@ unsafe fn poll(a: &mut App) {
     if a.splash.is_none() {
         if let Some(n) = a.demo_slide.take() {
             if n == usize::MAX {
-                a.open_settings();
+                a.open_settings_window();
             } else {
                 a.show(n);
             }
@@ -334,7 +334,6 @@ pub(crate) unsafe fn tick(id: usize) {
         a.t += clock_dt;
         a.water_ui_step(dt);
         a.lyric_scroll_step(dt);
-        a.settings_ui_step(dt);
         a.sys_step(dt);
         a.notif_ui_step();
 
@@ -372,7 +371,6 @@ pub(crate) unsafe fn tick(id: usize) {
             let k = a.slide.div_euclid(n) * n;
             a.slide -= k;
             a.sp -= k as f32;
-            a.settings_autoclose();
         }
         present(a);
         schedule(a);

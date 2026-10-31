@@ -86,6 +86,7 @@ mod notif;
 mod notif_img;
 mod notifview;
 mod note;
+mod opts;
 mod output;
 mod pace;
 mod perf;
@@ -96,7 +97,7 @@ mod render;
 mod romaji;
 mod scale;
 mod settings;
-mod settingsview;
+mod settingswin;
 mod shelf;
 mod slides;
 #[cfg(test)]
@@ -288,10 +289,8 @@ struct App {
     /// Wheel delta on the output button not yet used (trackpads send small steps).
     out_acc: i32,
     order: Vec<SlideId>,
-    /// Slide Settings sedang dibuka (ada di carousel) dan slide asal sebelum dibuka.
-    settings_open: bool,
-    settings_prev: Option<SlideId>,
-    sui: settingsview::SettingsUi,
+    /// The Settings window (settingswin.rs).
+    sw: settingswin::Win,
     sys_ui: sysview::SysUi,
     /// Indeks tahap cuaca terakhir yang digambar (memicu transisi suhu <-> ikon).
     weather_idx: u64,
@@ -655,10 +654,8 @@ fn main() -> Result<()> {
             out_scroll: 0,
             out_t: Instant::now() - Duration::from_secs(10),
             out_acc: 0,
-            order: slides::visible_order(&slides::effective(&cfg.slides, cfg.prayer_on), false),
-            settings_open: false,
-            settings_prev: None,
-            sui: settingsview::SettingsUi::new(),
+            order: slides::visible_order(&slides::effective(&cfg.slides, cfg.prayer_on)),
+            sw: settingswin::Win::new(),
             sys_ui: sysview::SysUi::new(),
             weather_idx: 0,
             cfg,
