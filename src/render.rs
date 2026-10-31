@@ -156,7 +156,6 @@ pub(crate) fn draw(a: &mut App) {
         for &(i, _, al) in &vis {
             match a.order[i] {
                 SlideId::Music => a.music_glow(&mut g, &shape, w, h, al),
-                SlideId::Water => glow(&mut g, &shape, h, (30, 110, 235), 0.40 * al),
                 // Other slides: one glow color (derived from the accent) so the slides feel consistent.
                 _ => {
                     let c = g.acc.glow;

@@ -6,7 +6,6 @@ use icons::{hgrad, vgrad};
 pub(crate) const SNOOZE: Duration = Duration::from_secs(10 * 60);
 
 // ---------------------------------------------------------------- layout (koordinat kanvas, slide di LX..RX)
-const BLUE: [u8; 3] = [80, 170, 255];
 const GREEN: [u8; 3] = [60, 200, 110];
 const GREY: [u8; 3] = TEXT_DIM;
 
@@ -540,17 +539,17 @@ impl App {
             let (t1, t2) = tr("Water |Reminder").split_once('|').unwrap_or(("", ""));
             g.txtb(t1, LX + ox, y, 15.0, [255, 255, 255], al, 120.0);
             let w1 = g.width_ex(t1, 15.0, true);
-            g.txtb(t2, LX + ox + w1, y, 15.0, BLUE, al, 120.0);
+            g.txtb(t2, LX + ox + w1, y, 15.0, g.acc.bright, al, 120.0);
             (LX + ox, w1 + g.width_ex(t2, 15.0, true))
         };
         // Ring progres kecil + tanggal + jam, atau "Time to drink" saat reminder aktif.
         let rx = lead + title_w + 22.0;
         let frac = if wt.goal > 0 { (self.wui.shown / wt.goal as f32).clamp(0.0, 1.0) } else { 0.0 };
-        let rc = if wt.ml >= wt.goal { GREEN } else { BLUE };
+        let rc = if wt.ml >= wt.goal { GREEN } else { g.acc.bright };
         g.ring(rx, y + 9.5, 8.0, frac, 2.6, &paint(255, 255, 255, 0.14 * al), &paint(rc[0], rc[1], rc[2], al));
         let tx = rx + 16.0;
         if self.reminding && !settings {
-            g.txtb(tr("Time to drink"), tx, y + 1.0, 13.0, BLUE, al, 140.0);
+            g.txtb(tr("Time to drink"), tx, y + 1.0, 13.0, g.acc.bright, al, 140.0);
         } else {
             let st = now_tm();
             let date = format!("{} {} {} {}", clock::day_short(st.wDayOfWeek as usize), st.wDay, clock::month((st.wMonth as usize).max(1) - 1), st.wYear);
@@ -583,7 +582,7 @@ impl App {
         g.txt(part1, LX + ox, sy, 12.0, GREY, al, 120.0);
         let mut x = LX + ox + g.width(part1, 12.0);
         let pc = format!("{}%", pct);
-        g.txtb(&pc, x, sy, 12.0, BLUE, al, 80.0);
+        g.txtb(&pc, x, sy, 12.0, g.acc.bright, al, 80.0);
         x += g.width_ex(&pc, 12.0, true);
         let rest = if wt.ml >= wt.goal {
             tr(" \u{b7} Goal reached").to_string()
@@ -598,7 +597,7 @@ impl App {
         let frac = if wt.goal > 0 { (shown / wt.goal as f32).clamp(0.0, 1.0) } else { 0.0 };
         if frac > 0.005 {
             let fw = (bwid * frac).max(7.0);
-            g.fill(&rrect(bx, by, fw, 7.0, 3.5), &hgrad(bx, bx + bwid, [120, 205, 255], BLUE, al));
+            g.fill(&rrect(bx, by, fw, 7.0, 3.5), &hgrad(bx, bx + bwid, g.acc.pale, g.acc.bright, al));
         }
 
         // Tombol Drink (+ efek tekan + riak dari ikon tetes) dan Settings / Snooze.
@@ -609,16 +608,17 @@ impl App {
             }
         };
         let (dx, dy, dw, dh) = (DRINK.0 + ox, DRINK.1, DRINK.2, DRINK.3);
-        g.pill(dx, dy, dw, dh, [30, 90, 170], 0.85 * al, press(0));
+        g.pill(dx, dy, dw, dh, g.acc.dark, 0.85 * al, press(0));
         let (ix, iy) = (dx + 22.0, dy + dh / 2.0);
         if let Some(t) = self.wui.ripple {
             let e = t.elapsed().as_secs_f32() / 0.8;
             let r = 6.0 + 20.0 * e;
-            let p = paint(BLUE[0], BLUE[1], BLUE[2], (1.0 - e).max(0.0) * 0.55 * al);
+            let c = g.acc.bright;
+            let p = paint(c[0], c[1], c[2], (1.0 - e).max(0.0) * 0.55 * al);
             g.ring(ix, iy, r, 0.0, 1.5, &p, &p);
         }
-        g.icon_drop(ix, iy, 14.0, &paint(120, 200, 255, al));
-        g.txtb(tr("Drink"), dx + 36.0, dy + ty(dh, 14.0), 14.0, [220, 238, 255], al, 60.0);
+        g.icon_water_drop(ix, iy, 14.0, g.acc.pale, g.acc.bright, al);
+        g.txtb(tr("Drink"), dx + 36.0, dy + ty(dh, 14.0), 14.0, g.acc.pale, al, 60.0);
 
         let (sx, sy2, sw, sh) = (SIDE.0 + ox, SIDE.1, SIDE.2, SIDE.3);
         if self.reminding {
@@ -667,7 +667,7 @@ impl App {
                 let hgt = (ph * f).max(if target > 0 { bw } else { 0.0 }).min(ph);
                 if hgt > 0.5 {
                     let top = PLOT_B - hgt;
-                    g.fill(&rrect(x, top, bw, hgt, bw / 2.0), &vgrad(top, PLOT_B, [110, 205, 255], [30, 110, 235], al));
+                    g.fill(&rrect(x, top, bw, hgt, bw / 2.0), &vgrad(top, PLOT_B, g.acc.bright, g.acc.deep, al));
                 }
             }
             if i % 3 == 0 {
@@ -732,8 +732,9 @@ impl App {
             g.txt_c(&n.to_string(), CARD.0 + ox + CARD.2 / 2.0, y, 19.0, rgb, al, CARD.2, true);
             g.txt_c(cap, CARD.0 + ox + CARD.2 / 2.0, y + 23.0, 11.0, GREY, al, CARD.2, false);
         };
-        stat(g, wt.reminders, tr("reminders"), CARD.1 + 6.0, BLUE);
-        stat(g, wt.refills(), tr("refills"), CARD.1 + 43.0, BLUE);
+        let c = g.acc.bright;
+        stat(g, wt.reminders, tr("reminders"), CARD.1 + 6.0, c);
+        stat(g, wt.refills(), tr("refills"), CARD.1 + 43.0, c);
     }
 }
 

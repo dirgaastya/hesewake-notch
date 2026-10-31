@@ -579,10 +579,12 @@ impl App {
         let (x0, cy) = (CX - w / 2.0, h / 2.0);
         let sc = 0.6 + 0.4 * pop(t).clamp(0.0, 1.2);
         let (icx, r) = (x0 + 34.0, 18.0 * sc);
-        g.circle(icx, cy, r, &paint(30, 90, 170, 0.5 * al));
-        let edge = paint(BLUE[0], BLUE[1], BLUE[2], 0.55 * al);
+        // accent colours, like the Water slide
+        let (dark, bright, deep) = (g.acc.dark, g.acc.bright, g.acc.deep);
+        g.circle(icx, cy, r, &paint(dark[0], dark[1], dark[2], 0.5 * al));
+        let edge = paint(bright[0], bright[1], bright[2], 0.55 * al);
         g.ring(icx, cy, r, 0.0, 1.5, &edge, &edge);
-        g.icon_drop(icx, cy, 17.0 * sc, &paint(135, 210, 255, al));
+        g.icon_water_drop(icx, cy, 17.0 * sc, g.acc.pale, g.acc.bright, al);
 
         let k = ss(0.12, 0.4, t);
         let tx = x0 + 66.0 + (1.0 - k) * 6.0;
@@ -597,7 +599,7 @@ impl App {
         let ba = al * k;
         g.pill(sn.0, sn.1, sn.2, sn.3, [255, 255, 255], if over(sn) { 0.24 } else { 0.13 } * ba, 1.0);
         g.txt_c(tr("Snooze"), sn.0 + sn.2 / 2.0, sn.1 + ty(sn.3, 13.0), 13.0, [228, 232, 240], ba, sn.2, true);
-        g.pill(dr.0, dr.1, dr.2, dr.3, [40, 120, 235], if over(dr) { 1.0 } else { 0.85 } * ba, 1.0);
+        g.pill(dr.0, dr.1, dr.2, dr.3, deep, if over(dr) { 1.0 } else { 0.85 } * ba, 1.0);
         g.txt_c(tr("Drank"), dr.0 + dr.2 / 2.0, dr.1 + ty(dr.3, 13.0), 13.0, [255, 255, 255], ba, dr.2, true);
     }
 }
