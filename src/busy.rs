@@ -60,3 +60,26 @@ pub(crate) unsafe fn is_busy(own: HWND, maximized_is_busy: bool, mon: &RECT) -> 
     }
     false
 }
+
+/// What the foreground window is doing to the notch's neighbourhood: 0 = nothing special, 1 = maximized, 2 = fullscreen
+/// (covers the whole monitor the notch is on). The desktop, the taskbar and the notch's own window count as nothing.
+pub(crate) unsafe fn fg_state(own: HWND, mon: &RECT) -> u8 {
+    let fg = GetForegroundWindow();
+    if fg.0.is_null() || fg == own {
+        return 0;
+    }
+    let mut cls = [0u16; 64];
+    let n = GetClassNameW(fg, &mut cls);
+    let class = String::from_utf16_lossy(&cls[..(n.max(0) as usize)]);
+    if matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
+        return 0;
+    }
+    let mut r = RECT::default();
+    if GetWindowRect(fg, &mut r).is_ok() && r.left <= mon.left && r.top <= mon.top && r.right >= mon.right && r.bottom >= mon.bottom {
+        return 2;
+    }
+    if IsZoomed(fg).as_bool() {
+        return 1;
+    }
+    0
+}

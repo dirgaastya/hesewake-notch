@@ -2,6 +2,19 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/), versi mengikuti [Semantic Versioning](https://semver.org/).
 
+## [0.11.1] - 2026-10-30
+
+### Added
+- **Sematkan mode lirik**: di mode lirik (ikon balon di slide Music) ada tombol pin di pojok kanan atas panel kiri. Saat disematkan (pin biru), notch **tetap terbuka** walau pointer pergi, jadi lirik terus terlihat. Klik pin lagi untuk melepas. Penyematan hanya berlaku selama mode lirik menyala, dan keluar dari mode lirik otomatis melepasnya. Di atas aplikasi layar penuh (mis. video), notch tetap menyusut seperti biasa.
+
+- **Notch menyingkir dari kursor** (tanpa pengaturan, selalu aktif): di atas jendela **maksimal atau layar penuh**, begitu kursor mendekati notch, notch **otomatis menciut jadi garis tipis dan tidak membuka slide**, sehingga tab dan tombol jendela di bawahnya (misalnya tab terminal atau browser) bisa dijangkau. **Mengarahkan kursor tepat ke garis tipis itu (di tepi atas layar) membuka slide**, dan slide tetap terbuka selama kursor berada di dalamnya. Setelah kursor pergi, notch kembali seperti biasa. Hal yang sama berlaku bila notch sudah tipis karena jendela sibuk (layar penuh, aplikasi Adobe, atau jendela maksimal dengan "Thin on maximize" nyala). Di jendela biasa, hover tetap membuka slide. Notch tetap bisa dibuka lewat hotkey (`Ctrl+Alt+H`, `Ctrl+Alt+1..`), dan peek karena notifikasi atau lirik yang disematkan tidak terganggu.
+
+### Fixed
+- **Notch bisa lenyap dari layar padahal masih berjalan**: jendela notch tetap berstatus *topmost* tetapi urutannya (z-order) bisa turun di bawah jendela biasa, sehingga tertutup sementara isinya masih digambar. Pemeriksaan tiap detik kini juga memeriksa urutan itu, dan memulihkan notch ke paling atas bila tertutup.
+
+### Changed
+- **Slide Music tanpa blok jam, hari, dan tanggal** di sisi kanan: teks lagu, progres, dan kontrol kini memakai seluruh lebar slide. Sebagai gantinya ada **jam kecil** (HH:MM) di pojok kanan atas, di baris yang sama dengan "Now Playing"; baris itu dipakai penuh oleh lirik bila ada baris lirik sinkron yang tampil. Jam di notch kecil saat idle tidak berubah.
+
 ## [0.11.0] - 2026-10-30
 
 Rilis ini berisi kontribusi dari @MaulanaRhezaArdiansyah (PR #37, #38, #39, #40).

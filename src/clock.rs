@@ -4,11 +4,6 @@ use super::*;
 
 pub(crate) const CLOCK_FADE_IN: f32 = 0.35;
 
-/// Day name, 0 = Sunday.
-pub(crate) fn day_long(i: usize) -> &'static str {
-    [tr("Sunday"), tr("Monday"), tr("Tuesday"), tr("Wednesday"), tr("Thursday"), tr("Friday"), tr("Saturday")][i % 7]
-}
-
 /// Short day name, 0 = Sunday.
 pub(crate) fn day_short(i: usize) -> &'static str {
     [tr("Sun"), tr("Mon"), tr("Tue"), tr("Wed"), tr("Thu"), tr("Fri"), tr("Sat")][i % 7]
@@ -38,22 +33,5 @@ impl App {
     pub(crate) fn draw_clock_collapsed(&self, g: &mut Gfx, w: f32, h: f32, ca: f32) {
         let fade = ((self.idle_secs() % IDLE_CYCLE_SECS) / CLOCK_FADE_IN).clamp(0.0, 1.0);
         self.clock_text(g, w, h, ca * fade);
-    }
-
-    /// Jam besar + hari/tanggal (huruf kapital) di sisi kanan slide Music.
-    /// `rx` = tepi kanan blok; semua teks (jam, hari, tanggal) rata kanan di tepi itu.
-    pub(crate) fn clock_side(&self, g: &mut Gfx, rx: f32, al: f32) {
-        let st = now_tm();
-        let hm = format!("{:02}:{:02}", st.wHour, st.wMinute);
-        let day = day_long(st.wDayOfWeek as usize).to_uppercase();
-        let mon = month((st.wMonth as usize).max(1) - 1).to_uppercase();
-        let date = format!("{} {} {}", st.wDay, mon, st.wYear);
-        let (hs, ds, ts) = (46.0, 14.0, 12.0);
-        let hw = g.width_ex(&hm, hs, true);
-        let dw = g.width_ex(&day, ds, true);
-        let tw = g.width_ex(&date, ts, true);
-        g.txtb(&hm, rx - hw, 40.0, hs, [255, 255, 255], al, 200.0);
-        g.txtb(&day, rx - dw, 94.0, ds, [255, 255, 255], al, 200.0);
-        g.txtb(&date, rx - tw, 112.0, ts, [200, 200, 205], al, 200.0);
     }
 }

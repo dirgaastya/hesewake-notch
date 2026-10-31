@@ -87,6 +87,10 @@ fn test_app(s: f32) -> App {
         lyric_idx: None,
         lyric_w: 0.0,
         lyric_mode: false,
+        fg: 0,
+        dodging: false,
+        dodge_zone: (0.0, 0.0),
+        pinned: false,
         lyric_mode_t0: past,
         lyric_scroll: 0.0,
         lyric_sv: 0.0,
@@ -1912,4 +1916,123 @@ fn snap_prayer_slide() {
         a.cfg.ramadan = true;
         a.cfg.weather_on = false;
     });
+}
+
+/// The Music slide no longer has the big clock, weekday and date block, so the controls use the full width.
+#[test]
+fn music_slide_has_no_clock_block() {
+    assert_eq!(music::MW, RX - music::MX, "text and controls reach the right edge");
+    // the small clock on the top row (not drawn over a lyric line)
+    shot("music-small-clock", 1.0, |a| {
+        a.media.title = "Song".into();
+        open_slide(a, SlideId::Music);
+    });
+    shot("music-no-clock", 1.0, |a| {
+        a.media.title = "Song".into();
+        a.media.artist = "Artist".into();
+        open_slide(a, SlideId::Music);
+    });
+}
+
+/// The pin keeps the lyrics view open when the pointer leaves, but only while the lyrics view is on and not over a
+/// fullscreen app; the pin button toggles it, and leaving the lyrics view lets go of it.
+#[test]
+fn pinned_lyrics_view_stays_open() {
+    let mut a = test_app(1.0);
+    a.media.title = "Song".into();
+    a.lyrics = lyrics::Lyrics::Synced(lyrics::parse_lrc("[00:01.00]First line
+[00:05.00]Second line"), lyrics::Source::Lrclib);
+    open_slide(&mut a, SlideId::Music);
+    a.hover = false;
+    a.lyric_mode = true;
+    assert!(!a.expanded(), "the pointer is away and nothing is pinned");
+    assert!(a.lyric_click(lyricview::X_PIN, lyricview::Y_PIN), "the pin button is handled");
+    assert!(a.pinned && a.expanded(), "pinned: stays open without the pointer");
+    a.busy = true;
+    assert!(!a.expanded(), "over a fullscreen app the notch shrinks anyway");
+    a.busy = false;
+    shot("lyrics-pinned", 1.0, |b| {
+        b.media.title = "Song".into();
+        b.media.artist = "Artist".into();
+        b.lyrics = lyrics::Lyrics::Synced(lyrics::parse_lrc("[00:01.00]First line
+[00:05.00]Second line
+[00:09.00]Third line"), lyrics::Source::Lrclib);
+        b.lyric_mode = true;
+        b.pinned = true;
+        open_slide(b, SlideId::Music);
+    });
+    a.lyric_toggle_mode();
+    assert!(!a.lyric_mode && !a.pinned && !a.expanded(), "leaving the lyrics view unpins");
+    a.lyric_toggle_mode();
+    assert!(!a.pinned, "it does not come back by itself");
+    assert!(a.lyric_click(lyricview::X_PIN, lyricview::Y_PIN) && a.pinned);
+    assert!(a.lyric_click(lyricview::X_PIN, lyricview::Y_PIN) && !a.pinned, "a second click unpins");
+}
+
+/// Over a fullscreen or maximized window the notch steps aside when the pointer comes to it (no setting), so that window's
+/// tabs and buttons under it can be reached.
+#[test]
+fn notch_dodges_the_pointer_over_fullscreen_and_maximized_windows() {
+    let mut a = test_app(1.0);
+    // an ordinary window: the pointer opens the notch as always
+    a.fg = 0;
+    assert!(a.pointer_step(CX, 5.0));
+    assert!(a.hover && !a.dodging);
+    assert!(a.pointer_step(CX, 600.0));
+    assert!(!a.hover);
+
+    // fullscreen: thin already; the pointer at it does not expand it
+    a.fg = 2;
+    a.busy = true;
+    a.pointer_step(CX, 8.0);
+    assert!(a.dodging && !a.hover && !a.expanded() && a.thin(), "near the thin line it stays minimal");
+    a.pointer_step(CX, 300.0);
+    assert!(!a.dodging, "the pointer left");
+    // aiming right at the thin line opens the slide; it stays while the pointer is in the open notch and closes after
+    a.pointer_step(CX, 2.0);
+    assert!(a.hover && a.expanded() && !a.dodging, "the thin line opens the notch");
+    a.pointer_step(CX + 100.0, 120.0);
+    assert!(a.hover, "inside the open notch");
+    a.pointer_step(CX, 500.0);
+    assert!(!a.hover && !a.dodging, "left the open notch");
+    // not at the thin line's width: beside it nothing opens
+    a.pointer_step(CX + THIN.0 / 2.0 + 40.0, 2.0);
+    assert!(!a.hover);
+    a.pointer_step(CX, 600.0);
+
+    // maximized (the usual way of working): the normal notch turns thin while the pointer is near it, so tabs are reachable
+    a.fg = 1;
+    a.busy = false;
+    a.pointer_step(CX, 10.0);
+    assert!(a.dodging && !a.hover && a.thin() && !a.expanded());
+    // ... and aiming at the thin line it became opens the slide
+    a.pointer_step(CX, 1.0);
+    assert!(a.hover && !a.dodging);
+    a.pointer_step(CX, 600.0);
+    assert!(!a.hover);
+    a.pointer_step(CX, 10.0);
+    assert!(a.dodging);
+    // it does not flicker at the edge of the area while it shrinks
+    let edge = a.dodge_zone.0 / 2.0 - 1.0;
+    a.w = 10.0;
+    a.pointer_step(CX + edge, 10.0);
+    assert!(a.dodging);
+    a.pointer_step(CX + edge + 40.0, 10.0);
+    assert!(!a.dodging);
+    a.pointer_step(CX, 600.0);
+
+    // thin because of a busy window (an Adobe app) over a window that is not maximized: the thin line stays minimal too
+    a.fg = 0;
+    a.busy = true;
+    a.pointer_step(CX, 8.0);
+    assert!(a.dodging && !a.hover && !a.expanded());
+    a.pointer_step(CX, 300.0);
+    assert!(!a.dodging);
+    a.busy = false;
+
+    // a peek (hotkey, notification) is not undone by dodging
+    a.fg = 1;
+    a.peek_until = Some(Instant::now() + Duration::from_secs(5));
+    a.pointer_step(CX, 5.0);
+    assert!(a.expanded() && !a.dodging);
 }

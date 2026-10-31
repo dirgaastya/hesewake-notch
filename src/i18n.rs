@@ -173,13 +173,6 @@ const ID_TEXT: &[(&str, &str)] = &[
     ("Green", "Hijau"),
     ("Teal", "Toska"),
     // dates
-    ("Sunday", "Minggu"),
-    ("Monday", "Senin"),
-    ("Tuesday", "Selasa"),
-    ("Wednesday", "Rabu"),
-    ("Thursday", "Kamis"),
-    ("Friday", "Jumat"),
-    ("Saturday", "Sabtu"),
     ("Sun", "Min"),
     ("Mon", "Sen"),
     ("Tue", "Sel"),

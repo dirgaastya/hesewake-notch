@@ -10,3 +10,6 @@
 
 # Salinan exe untuk dijalankan lokal
 /dist/
+
+# Catatan pribadi untuk Claude Code (edisi Office, rencana internal)
+/CLAUDE.local.md
