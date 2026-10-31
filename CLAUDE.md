@@ -94,7 +94,7 @@ Versi: `0.MINOR.PATCH`. Satu rilis = satu cabang rilis → satu PR → merge com
    harus menampilkan kedua aset (fitur Install bergantung padanya).
 9. Sinkron ke Office (lihat `CLAUDE.local.md`), bangun installer Office (lokal, tidak dipublikasikan).
 
-Rilis yang sudah keluar: 0.1.0 … 0.11.0 (terakhir publik: **0.11.0**). Rilis 0.11.1 ada di PR #44.
+Rilis yang sudah keluar: 0.1.0 … 0.11.1 (terakhir publik: **0.11.1**).
 
 ## 5. Kapan harus bertanya (aturan pemilik: "tanyain ulang yang perlu dikonfirmasi")
 
@@ -138,9 +138,11 @@ Saat melapor: tulis hasil apa adanya (tes yang gagal, langkah yang dilewati), be
 
 ## 9. Status terakhir (31 Oktober 2026)
 
-- Publik terakhir: **0.11.0**. **PR #44 (0.11.1)** menunggu "merge #44": jam kecil di slide Music (menggantikan blok jam/hari/tanggal), pin mode lirik (tombol),
-  notch menyingkir dari kursor di jendela maksimal/layar penuh (garis tipis membuka slide), perbaikan notch yang tertutup (z-order).
-- PR terbuka belum ditinjau: **#45** idle clock ikon cuaca (Maulana), **#47** Wibu mode (gewall), **#49** Notch lock (gewall; tumpang tindih dengan pin dan menyingkir milik #44), **#50** Water ikut aksen (Maulana; menutup #41),
+- Publik terakhir: **0.11.1** (jam kecil di slide Music, pin mode lirik lewat tombol, notch menyingkir dari kursor di jendela maksimal/layar penuh,
+  perbaikan notch yang tertutup z-order, dokumentasi ini). Edisi Office belum disinkron ke 0.11.0/0.11.1 (pemilik: "office skip dulu").
+- **`main` dilindungi** (31 Oktober): wajib lewat Pull Request (0 approval), wajib CI `test` hijau, tanpa force push dan hapus; admin tidak dipaksa. Jadi perubahan apa pun,
+  termasuk dokumentasi, lewat cabang dan PR; jangan `git push origin main`.
+- PR terbuka belum ditinjau: **#45** idle clock ikon cuaca (Maulana), **#47** Wibu mode (gewall), **#49** Notch lock (gewall; tumpang tindih dengan pin dan menyingkir yang sudah ada di 0.11.1), **#50** Water ikut aksen (Maulana; menutup #41),
   **#51** jendela Settings terpisah (yourLogic01; besar, +2404/-1269, menyentuh Settings: gabungkan PR lain yang menambah baris Settings lebih dulu). Issue #34 (Settings jadi jendela) sudah dijawab pemilik: setuju, slide Settings dihapus di PR yang sama.
 - Rencana **0.12.0**: edisi Office diubah menjadi extension (lihat `CLAUDE.local.md`).
-- Keputusan yang masih menunggu pemilik: tidak ada selain "merge #44" dan prioritas peninjauan PR baru.
+- Keputusan yang masih menunggu pemilik: prioritas dan urutan peninjauan PR baru (#45 sampai #51).
