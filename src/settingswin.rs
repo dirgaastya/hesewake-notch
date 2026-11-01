@@ -56,11 +56,23 @@ pub(crate) enum Sec {
     Alerts,
     Weather,
     Calendar,
+    Extensions,
     About,
 }
 
-pub(crate) const SECS: [Sec; 10] =
-    [Sec::General, Sec::Look, Sec::Slides, Sec::Screens, Sec::Music, Sec::Notifs, Sec::Alerts, Sec::Weather, Sec::Calendar, Sec::About];
+pub(crate) const SECS: [Sec; 11] = [
+    Sec::General,
+    Sec::Look,
+    Sec::Slides,
+    Sec::Screens,
+    Sec::Music,
+    Sec::Notifs,
+    Sec::Alerts,
+    Sec::Weather,
+    Sec::Calendar,
+    Sec::Extensions,
+    Sec::About,
+];
 
 impl Sec {
     fn name(self) -> &'static str {
@@ -74,6 +86,7 @@ impl Sec {
             Sec::Alerts => tr("HUD & alerts"),
             Sec::Weather => tr("Weather & prayer"),
             Sec::Calendar => tr("Calendar"),
+            Sec::Extensions => tr("Extensions"),
             Sec::About => tr("About"),
         }
     }
@@ -90,6 +103,7 @@ impl Sec {
             Sec::Alerts => tr("HUD & |Alerts"),
             Sec::Weather => tr("Weather & |Prayer"),
             Sec::Calendar => tr("Calen|dar"),
+            Sec::Extensions => tr("Ext|ensions"),
             Sec::About => tr("Ab|out"),
         }
     }
@@ -105,6 +119,7 @@ impl Sec {
             Sec::Alerts => tr("Small popups for things that change around you."),
             Sec::Weather => tr("Calculated on this PC, no account needed."),
             Sec::Calendar => tr("Your next meeting from a secret ICS link. No sign-in."),
+            Sec::Extensions => tr("Programs that add slides and alerts to the notch."),
             Sec::About => tr("A personal fork of Poch by Commonly Works (MIT)."),
         }
     }
@@ -120,6 +135,7 @@ impl Sec {
             Sec::Alerts => g.icon_outline(OutlineIcon::Speaker, cx, cy, s, p),
             Sec::Weather => g.icon_outline(OutlineIcon::Cloud, cx, cy, s, p),
             Sec::Calendar => g.slide_icon(SlideId::Agenda, cx, cy, s, p),
+            Sec::Extensions => g.slide_icon(SlideId::Ext(0), cx, cy, s, p),
             Sec::About => g.icon_outline(OutlineIcon::Info, cx, cy, s, p),
         }
     }
@@ -138,6 +154,15 @@ pub(crate) enum Hit {
     SlideToggle(usize),
     /// Move slide `i` up (true) or down in the order.
     SlideMove(usize, bool),
+    /// Extensions page: switch one on or off, mute its toasts, open its settings, restart it, open its folder.
+    ExtOn(usize),
+    ExtMute(usize),
+    ExtConfig(usize),
+    ExtRestart(usize),
+    ExtFolder(usize),
+    /// Open the folder all extensions live in, or look for them again.
+    ExtRoot,
+    ExtScan,
     /// About > Updates: check now, or install / download the release found.
     Update,
 }
@@ -156,6 +181,9 @@ pub(crate) enum UpdateAction {
 enum Knob {
     Row(Rid),
     Slide(SlideId),
+    /// An extension's on/off switch, and its Toasts switch (by place in the list).
+    Ext(u8),
+    ExtMute(u8),
 }
 
 pub(crate) struct Win {
@@ -392,7 +420,7 @@ impl App {
                 tr("Calendar link"),
                 vec![row(Rid::Calendar, tr("Calendar"), self.cal_sub(), Ctl::Button(self.cal_button_text().into(), self.cal_link.is_some()))],
             )],
-            Sec::Slides | Sec::About => Vec::new(),
+            Sec::Slides | Sec::Extensions | Sec::About => Vec::new(),
         }
     }
 
@@ -400,6 +428,8 @@ impl App {
         let on = match k {
             Knob::Row(o) => self.opt_on(o),
             Knob::Slide(id) => self.cfg.slides.iter().any(|&(s, on)| s == id && on),
+            Knob::Ext(i) => self.ext.list.get(i as usize).is_some_and(|e| self.cfg.ext_on.iter().any(|x| x == e.id())),
+            Knob::ExtMute(i) => self.ext.list.get(i as usize).is_some_and(|e| !self.cfg.ext_mute.iter().any(|x| x == e.id())),
         };
         if on {
             1.0
@@ -594,6 +624,11 @@ impl App {
                     self.sw.knobs.entry(Knob::Slide(id)).or_insert((t, 0.0));
                 }
             }
+            Hit::ExtOn(i) | Hit::ExtMute(i) => {
+                let k = if matches!(hit, Hit::ExtOn(_)) { Knob::Ext(i as u8) } else { Knob::ExtMute(i as u8) };
+                let t = self.sw_target(k);
+                self.sw.knobs.entry(k).or_insert((t, 0.0));
+            }
             _ => {}
         }
         match hit {
@@ -615,6 +650,13 @@ impl App {
                     self.slide_swap(i, i + 1);
                 }
             }
+            Hit::ExtOn(i) => self.ext_set_on(i),
+            Hit::ExtMute(i) => self.ext_toggle_mute(i),
+            Hit::ExtConfig(i) => self.ext_open_config(i),
+            Hit::ExtRestart(i) => self.ext_restart(i),
+            Hit::ExtFolder(i) => self.ext_open_folder(Some(i)),
+            Hit::ExtRoot => self.ext_open_folder(None),
+            Hit::ExtScan => self.ext_rescan(),
             Hit::Update => self.sw_update_button(),
             Hit::Close | Hit::Minimize => {}
         }
@@ -1021,6 +1063,7 @@ impl Draw {
 
         match sec {
             Sec::Slides => y = self.slides(a, g, y),
+            Sec::Extensions => y = self.extensions(a, g, y),
             Sec::About => {
                 y = self.about(a, g, y);
                 y = self.updates(a, g, y);
@@ -1230,6 +1273,91 @@ impl Draw {
             g.txt(&sub, X0 + 60.0, cy + 2.0, 11.5, TEXT_FAINT, 1.0, tw + 2.0);
         }
         y + h + 22.0
+    }
+
+    fn extensions(&mut self, a: &App, g: &mut Gfx, y: f32) -> f32 {
+        Self::header(g, tr("Installed"), y);
+        let mut y = y + 22.0;
+        let now = Instant::now();
+        if a.ext.list.is_empty() {
+            let h = 92.0;
+            Self::card(g, y, h);
+            let w = X1 - X0 - 40.0;
+            let mut ly = y + 16.0;
+            self.check(g, tr("No extensions found"), 13.5, true, w);
+            g.txtb(tr("No extensions found"), X0 + 20.0, ly, 13.5, [255, 255, 255], 1.0, w);
+            ly += 24.0;
+            for line in wrap_lines(g, tr("An extension is a small program that adds a slide or alerts to the notch. Its installer puts a folder in the extensions folder."), 11.5, w) {
+                g.txt(&line, X0 + 20.0, ly, 11.5, TEXT_FAINT, 1.0, w + 2.0);
+                ly += 16.0;
+            }
+            y += h + 12.0;
+        }
+        for (i, e) in a.ext.list.iter().enumerate() {
+            let enabled = a.cfg.ext_on.iter().any(|x| x == e.id());
+            let valid = e.manifest.is_ok();
+            let h = if valid { 104.0 } else { 62.0 };
+            Self::card(g, y, h);
+            let cy = y + 31.0;
+            let ib = rrect(X0 + 14.0, cy - 16.0, 32.0, 32.0, 9.0);
+            g.fill(&ib, &rgb(WELL, 1.0));
+            g.stroke(&ib, &paint(255, 255, 255, 0.07), 1.0);
+            g.slide_icon(SlideId::Ext(i as u8), X0 + 30.0, cy, 14.0, &if enabled { g.sacc(1.0) } else { rgb(TEXT_FAINT, 1.0) });
+            let right = X1 - 16.0;
+            let tw = (right - 46.0 - 14.0 - X0 - 60.0).max(40.0);
+            let name = match &e.manifest {
+                Ok(m) if m.version.is_empty() => m.name.clone(),
+                Ok(m) => format!("{}  {}", m.name, m.version),
+                Err(_) => e.folder.clone(),
+            };
+            let status = crate::extapp::status_text(e, enabled, now);
+            self.check(g, &name, 13.5, true, tw);
+            self.check(g, &status, 11.5, false, tw);
+            g.txtb(&name, X0 + 60.0, cy - 17.0, 13.5, if enabled || !valid { [255, 255, 255] } else { TEXT_FAINT }, 1.0, tw);
+            let status = fit(g, &status, 11.5, tw);
+            g.txt(&status, X0 + 60.0, cy + 2.0, 11.5, TEXT_FAINT, 1.0, tw + 2.0);
+            if valid {
+                let kx = right - 46.0;
+                g.toggle(kx, cy - 13.0, 46.0, 26.0, a.sw.knob(Knob::Ext(i as u8), enabled), 0.0, 1.0);
+                self.hit(kx - 4.0, cy - 17.0, 54.0, 34.0, Hit::ExtOn(i));
+                // second row: Toasts, Settings, Restart, Open folder
+                let by = y + 66.0;
+                g.rect(X0 + 16.0, by - 8.0, X1 - X0 - 32.0, 1.0, &paint(255, 255, 255, 0.05));
+                let mut rx = right;
+                rx = self.small_button(g, rx, by, tr("Open folder"), Hit::ExtFolder(i), true);
+                rx = self.small_button(g, rx - 6.0, by, tr("Restart"), Hit::ExtRestart(i), enabled);
+                rx = self.small_button(g, rx - 6.0, by, tr("Settings"), Hit::ExtConfig(i), e.connected);
+                // Toasts: a label and a small switch
+                let muted = a.cfg.ext_mute.iter().any(|x| x == e.id());
+                let sx = rx - 6.0 - 38.0;
+                g.toggle(sx, by + 2.0, 38.0, 22.0, a.sw.knob(Knob::ExtMute(i as u8), !muted), 0.0, 1.0);
+                self.hit(sx - 4.0, by - 2.0, 46.0, 30.0, Hit::ExtMute(i));
+                let lw = g.width(tr("Toasts"), 12.0);
+                self.check(g, tr("Toasts"), 12.0, false, lw + 4.0);
+                g.txt(tr("Toasts"), sx - 8.0 - lw, by + ty(26.0, 12.0), 12.0, TEXT_DIM, 1.0, lw + 4.0);
+            }
+            y += h + 12.0;
+        }
+        // the folder everything is read from
+        let by = y + 2.0;
+        let rx = self.small_button(g, X1, by, tr("Open extensions folder"), Hit::ExtRoot, true);
+        self.small_button(g, rx - 6.0, by, tr("Rescan"), Hit::ExtScan, true);
+        by + 26.0 + 22.0
+    }
+
+    /// A small pill button whose right edge is at `rx`; returns its left edge. A disabled one is drawn dim and does not
+    /// answer clicks.
+    fn small_button(&mut self, g: &mut Gfx, rx: f32, y: f32, label: &str, hit: Hit, enabled: bool) -> f32 {
+        let w = (g.width_ex(label, 12.0, true) + 24.0).max(56.0);
+        let x = rx - w;
+        self.check(g, label, 12.0, true, w - 8.0);
+        let hot = enabled && self.is_hover(hit);
+        g.pill(x, y, w, 26.0, [255, 255, 255], if !enabled { 0.05 } else if hot { 0.22 } else { 0.12 }, 1.0);
+        g.txt_c(label, x + w / 2.0, y + ty(26.0, 12.0), 12.0, if enabled { [255, 255, 255] } else { TEXT_FAINT }, 1.0, w - 4.0, true);
+        if enabled {
+            self.hit(x, y, w, 26.0, hit);
+        }
+        x
     }
 
     fn about(&mut self, a: &App, g: &mut Gfx, y: f32) -> f32 {

@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::ext::{self, Evt, Host};
-use crate::extproto::{DetailMsg, FromExt, Manifest, SlideMsg};
+use crate::extproto::{self as proto, DetailMsg, FromExt, Manifest, SlideMsg};
 use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -180,6 +180,12 @@ impl ExtState {
         self.list.push(Ext::new(id.into(), Ok(m)));
     }
 
+    /// Tests: a folder whose manifest is no good.
+    #[cfg(test)]
+    pub(crate) fn test_add_bad(&mut self, folder: &str, why: &str) {
+        self.list.push(Ext::new(folder.into(), Err(why.into())));
+    }
+
     pub(crate) fn find(&self, id: &str) -> Option<&Ext> {
         self.list.iter().find(|e| e.id() == id)
     }
@@ -346,6 +352,20 @@ impl ExtState {
     }
 }
 
+/// What the Settings page says about an extension, in words.
+pub(crate) fn status_text(e: &Ext, enabled: bool, now: Instant) -> String {
+    match e.status(enabled, now) {
+        Status::Invalid(why) => fill(tr("Invalid: {}"), &[&why]),
+        Status::Off => tr("Off").to_string(),
+        Status::Starting => tr("Starting\u{2026}").to_string(),
+        Status::Connected(s) if s.is_empty() => tr("Connected").to_string(),
+        Status::Connected(s) => s,
+        Status::Problem(why, None) => fill(tr("Not running: {}"), &[&why]),
+        Status::Problem(why, Some(n)) => format!("{} \u{b7} {}", fill(tr("Not running: {}"), &[&why]), fill(tr("Next try in {} s"), &[&n])),
+        Status::Parked => tr("Stopped by the extension").to_string(),
+    }
+}
+
 impl App {
     /// Find the extensions and, if there are any, open the pipe for them.
     pub(crate) fn ext_start(&mut self) {
@@ -399,6 +419,85 @@ impl App {
         let on = |e: &Ext| e.manifest.as_ref().is_ok_and(|m| m.slide && self.cfg.ext_on.contains(&m.id));
         v.extend(self.ext.list.iter().enumerate().filter(|(_, e)| on(e)).take(4).map(|(i, _)| SlideId::Ext(i as u8)));
         v
+    }
+
+    fn ext_id(&self, i: usize) -> Option<String> {
+        self.ext.list.get(i).and_then(|e| e.manifest.as_ref().ok()).map(|m| m.id.clone())
+    }
+
+    /// Send a message to the extension `id`. (Tests keep it instead of using the pipe.)
+    pub(crate) fn ext_send_to(&mut self, id: &str, frame: Vec<u8>) {
+        #[cfg(test)]
+        self.ext.sent.push((id.to_string(), frame));
+        #[cfg(not(test))]
+        let _ = ext::host().send(id, frame);
+    }
+
+    /// Settings > Extensions: switch extension `i` on or off. Its slide and its program follow at once.
+    pub(crate) fn ext_set_on(&mut self, i: usize) {
+        let Some(id) = self.ext_id(i) else { return };
+        match self.cfg.ext_on.iter().position(|x| *x == id) {
+            Some(p) => {
+                self.cfg.ext_on.remove(p);
+            }
+            None if self.cfg.ext_on.len() < 16 => self.cfg.ext_on.push(id),
+            None => return,
+        }
+        self.save_settings();
+        self.ext_sync();
+        self.apply_slide_cfg();
+        self.ext_tick();
+    }
+
+    pub(crate) fn ext_toggle_mute(&mut self, i: usize) {
+        let Some(id) = self.ext_id(i) else { return };
+        match self.cfg.ext_mute.iter().position(|x| *x == id) {
+            Some(p) => {
+                self.cfg.ext_mute.remove(p);
+            }
+            None if self.cfg.ext_mute.len() < 16 => self.cfg.ext_mute.push(id),
+            None => return,
+        }
+        self.save_settings();
+    }
+
+    /// Ask a connected extension to open its own settings window.
+    pub(crate) fn ext_open_config(&mut self, i: usize) {
+        if let Some(id) = self.ext_id(i).filter(|_| self.ext.list[i].connected) {
+            self.ext_send_to(&id, proto::config());
+        }
+    }
+
+    pub(crate) fn ext_restart(&mut self, i: usize) {
+        if let Some(id) = self.ext_id(i) {
+            self.ext.restart(&id, ext::host());
+            self.ext_tick();
+        }
+    }
+
+    /// Show the folder of extension `i` (or the folder of all of them) in Explorer.
+    pub(crate) fn ext_open_folder(&mut self, i: Option<usize>) {
+        let root = data_path("extensions");
+        if !cfg!(test) {
+            let _ = std::fs::create_dir_all(&root);
+        }
+        let path = match i.and_then(|i| self.ext.list.get(i)) {
+            Some(e) => root.join(&e.folder),
+            None => root,
+        };
+        sys::open_url(&path.to_string_lossy());
+    }
+
+    /// Look at the extensions folder again (a new extension was installed).
+    pub(crate) fn ext_rescan(&mut self) {
+        self.ext_rescan_in(&data_path("extensions"));
+    }
+
+    pub(crate) fn ext_rescan_in(&mut self, dir: &Path) {
+        self.ext.scan(dir);
+        self.ext_sync();
+        self.ext_serve();
+        self.apply_slide_cfg();
     }
 
     /// An extension slide has something new: the dot of slide `i` gets a marker.

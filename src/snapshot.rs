@@ -2527,3 +2527,113 @@ fn snap_extension_slide() {
         a.ext.list[0].problem = Some("blocked by a policy".into());
     });
 }
+
+// ---------------------------------------------------------------- Settings > Extensions
+const EXTENSIONS: usize = 9;
+
+/// Three extensions: one running and talking, one off, one whose manifest is no good.
+fn ext_page_setup(a: &mut App) {
+    a.ext.test_add("example-issues", "Issues", true);
+    a.ext.test_add("media-bridge", "Media Bridge", false);
+    a.ext.test_add_bad("broken-one", "exe must be an absolute path to an .exe");
+    a.cfg.ext_on.push("example-issues".into());
+    a.ext.list[0].connected = true;
+    a.ext.list[0].status = "Synced 12 issues".into();
+    a.apply_slide_cfg();
+    a.sw_show_page(EXTENSIONS);
+}
+
+#[test]
+fn extensions_page_is_between_calendar_and_about() {
+    assert_eq!(settingswin::SECS[EXTENSIONS], settingswin::SECS[settingswin::SECS.len() - 2]);
+    let a = sw_shot("settingswin-extensions-empty", page(EXTENSIONS));
+    assert!(settingswin::hit_center(&a, settingswin::Hit::ExtRoot).is_some() && settingswin::hit_center(&a, settingswin::Hit::ExtScan).is_some(), "the folder and rescan buttons are always there");
+    assert!(settingswin::hit_center(&a, settingswin::Hit::ExtOn(0)).is_none(), "nothing installed: nothing to switch");
+}
+
+#[test]
+fn extensions_page_switches_mutes_and_asks_for_settings() {
+    use settingswin::Hit;
+    let mut a = sw_shot("settingswin-extensions", ext_page_setup);
+    assert!(settingswin::hit_center(&a, Hit::ExtOn(0)).is_some() && settingswin::hit_center(&a, Hit::ExtOn(1)).is_some());
+    assert!(settingswin::hit_center(&a, Hit::ExtOn(2)).is_none(), "a manifest that is no good has no switch");
+    // the second one runs in the background: switching it on adds no slide
+    let slides = a.order.len();
+    sw_press(&mut a, Hit::ExtOn(1));
+    assert_eq!(a.cfg.ext_on, vec!["example-issues".to_string(), "media-bridge".to_string()]);
+    assert_eq!(a.order.len(), slides, "a background extension has no slide");
+    sw_press(&mut a, Hit::ExtOn(1));
+    assert_eq!(a.cfg.ext_on, vec!["example-issues".to_string()]);
+    // the first one has a slide, and it comes and goes with the switch
+    sw_press(&mut a, Hit::ExtOn(0));
+    assert!(a.cfg.ext_on.is_empty());
+    assert_eq!(a.order.len(), slides - 1);
+    sw_press(&mut a, Hit::ExtOn(0));
+    assert_eq!(a.cfg.ext_on, vec!["example-issues".to_string()]);
+    assert_eq!(a.order.len(), slides);
+    // toasts
+    assert!(a.cfg.ext_mute.is_empty());
+    sw_press(&mut a, Hit::ExtMute(0));
+    assert_eq!(a.cfg.ext_mute, vec!["example-issues".to_string()]);
+    sw_press(&mut a, Hit::ExtMute(0));
+    assert!(a.cfg.ext_mute.is_empty());
+    // Settings reaches the extension only while it is connected
+    sw_press(&mut a, Hit::ExtConfig(0));
+    assert_eq!(a.ext.sent.last().map(|(id, f)| (id.as_str(), serde_json::from_slice::<serde_json::Value>(&f[4..]).unwrap())), Some(("example-issues", serde_json::json!({"t": "config"}))));
+    assert!(settingswin::hit_center(&a, Hit::ExtConfig(1)).is_none(), "not connected: the button is greyed out");
+    assert!(settingswin::hit_center(&a, Hit::ExtRestart(1)).is_none(), "off: nothing to restart");
+    assert!(settingswin::hit_center(&a, Hit::ExtRestart(0)).is_some());
+}
+
+#[test]
+fn extensions_page_opens_folders_and_rescans() {
+    use settingswin::Hit;
+    let mut a = sw_shot("settingswin-extensions-folders", ext_page_setup);
+    let _ = sys::opened();
+    sw_press(&mut a, Hit::ExtFolder(0));
+    sw_press(&mut a, Hit::ExtRoot);
+    let opened = sys::opened();
+    assert!(opened[0].ends_with(r"extensions\example-issues") && opened[1].ends_with("extensions"), "{opened:?}");
+    // a new extension was installed: rescan finds it, and the old ones keep what the notch knows
+    let dir = std::env::temp_dir().join(format!("hesewake-ext-page-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("new-one")).unwrap();
+    let exe = format!(r"{}\System32\whoami.exe", std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()));
+    std::fs::write(dir.join("new-one").join("extension.json"), serde_json::json!({"id": "new-one", "name": "New", "exe": exe, "proto": 1}).to_string()).unwrap();
+    a.ext_rescan_in(&dir);
+    assert_eq!(a.ext.list.iter().map(|e| e.folder.as_str()).collect::<Vec<_>>(), vec!["new-one"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn what_an_extension_is_doing_is_said_in_words() {
+    let now = Instant::now();
+    let mut a = test_app(1.0);
+    a.ext.test_add("a-ext", "A", true);
+    a.ext.test_add_bad("b-ext", "no extension.json");
+    let say = |a: &App, i: usize, on: bool| extapp::status_text(&a.ext.list[i], on, now);
+    assert_eq!(say(&a, 0, false), "Off");
+    assert_eq!(say(&a, 0, true), "Starting\u{2026}");
+    a.ext.list[0].problem = Some("file not found".into());
+    assert_eq!(say(&a, 0, true), "Not running: file not found");
+    a.ext.list[0].connected = true;
+    assert_eq!(say(&a, 0, true), "Connected");
+    a.ext.list[0].status = "3 devices".into();
+    assert_eq!(say(&a, 0, true), "3 devices", "its own words win");
+    assert_eq!(say(&a, 1, true), "Invalid: no extension.json");
+    let _lang = i18n::restore_on_drop();
+    a.ext.list[0].status.clear();
+    indonesian(&mut a);
+    assert_eq!(say(&a, 0, true), "Tersambung");
+    assert_eq!(say(&a, 1, true), "Tidak valid: no extension.json");
+}
+
+#[test]
+fn snap_extensions_page_in_indonesian() {
+    let _lang = i18n::restore_on_drop();
+    sw_shot("id-settingswin-extensions", |a| {
+        indonesian(a);
+        ext_page_setup(a);
+        a.ext.list[1].problem = Some("file not found".into());
+    });
+}

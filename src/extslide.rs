@@ -377,10 +377,7 @@ impl App {
     /// Send a message to the extension of slide `i`.
     fn ext_send(&mut self, i: usize, frame: Vec<u8>) {
         let Some(id) = self.ext.list.get(i).map(|e| e.id().to_string()) else { return };
-        #[cfg(test)]
-        self.ext.sent.push((id, frame));
-        #[cfg(not(test))]
-        let _ = crate::ext::host().send(&id, frame);
+        self.ext_send_to(&id, frame);
     }
 
     /// A click on the extension slide. True if it was used.
