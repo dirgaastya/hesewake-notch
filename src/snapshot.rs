@@ -73,6 +73,7 @@ fn test_app(s: f32) -> App {
         prayer_sun: 0,
         adhan_until: None,
         wibu: wibu::Wibu::default(),
+        ext: extapp::ExtState::default(),
         splash: None,
         // the idle clock has finished fading in (clock phase, see `idle_phase`)
         idle_base: 5.0,

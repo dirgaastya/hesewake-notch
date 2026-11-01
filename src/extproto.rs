@@ -54,7 +54,7 @@ pub(crate) struct Manifest {
     pub(crate) slide: bool,
 }
 
-fn valid_id(id: &str) -> bool {
+pub(crate) fn valid_id(id: &str) -> bool {
     (1..=32).contains(&id.len()) && !id.starts_with('-') && !id.ends_with('-') && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 

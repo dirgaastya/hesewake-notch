@@ -492,6 +492,15 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
             }
             LRESULT(0)
         }
+        ext::WM_EXT => {
+            with_app(|a| {
+                if a.ext_events() {
+                    present(a);
+                    schedule(a);
+                }
+            });
+            LRESULT(0)
+        }
         wibu::WM_WIBU_READY => {
             if let Some(loaded) = wibu::take_loaded() {
                 with_app(|a| {

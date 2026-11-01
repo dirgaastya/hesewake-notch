@@ -67,6 +67,7 @@ mod dict;
 mod downloads;
 mod dragdrop;
 mod ext;
+mod extapp;
 mod eye;
 mod extproto;
 mod filepick;
@@ -181,6 +182,8 @@ struct App {
     adhan_until: Option<Instant>,
     /// The image of Wibu mode, scaled to the canvas (wibu.rs).
     wibu: wibu::Wibu,
+    /// Extensions: manifests, started programs and what they show (extapp.rs).
+    ext: extapp::ExtState,
     hover: bool,
     busy: bool,
     /// Mode "Minimal notch": garis tipis saat tidak ada musik, buka dengan hover.
@@ -570,6 +573,7 @@ fn main() -> Result<()> {
             prayer_sun: 0,
             adhan_until: None,
             wibu: wibu::Wibu::default(),
+            ext: extapp::ExtState::default(),
             hover: false,
             busy: is_busy(hwnd, cfg.busy_on_maximized, &mon),
             minimal: cfg.minimal,
@@ -687,6 +691,7 @@ fn main() -> Result<()> {
         app.prayer_refresh();
         app.out_refresh();
         app.wibu_apply();
+        app.ext_start();
         let (tw, th) = target(&app);
         app.w = tw;
         app.h = th;
