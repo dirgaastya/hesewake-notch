@@ -1,4 +1,4 @@
-//! Unduh kamus IPADIC Lindera untuk "Romaji lyrics" (tombol Get di Settings > Widgets) ke
+//! Unduh kamus IPADIC Lindera untuk "Romaji lyrics" (tombol Get di Settings > Music & lyrics) ke
 //! %APPDATA%\hesewake-notch\dict\ipadic. Arsip dipin ukuran + SHA-256, diekstrak ke folder sementara lalu di-rename,
 //! jadi kamus setengah jadi tidak pernah terbaca.
 

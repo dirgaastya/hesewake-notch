@@ -119,7 +119,7 @@ pub(crate) const WM_UPDATE: u32 = WM_APP + 12;
 pub(crate) const WM_UPDATE_DL: u32 = WM_APP + 14;
 /// Automatic checks run at most this often.
 pub(crate) const INTERVAL: Duration = Duration::from_secs(24 * 3600);
-const CURRENT: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
 /// What an update toast says.
 #[derive(Clone, Debug, PartialEq)]

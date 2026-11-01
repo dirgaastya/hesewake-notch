@@ -258,10 +258,9 @@ pub(crate) fn opened() -> Vec<String> {
 }
 
 pub(crate) unsafe fn about(hwnd: HWND) {
-    let text = fill(
-        tr("Hesewake Notch {}\nA personal notch for the top of your screen.\n\nBased on Poch by Commonly Works\n(github.com/klawcodes/poch), MIT License.\nLyrics: LRCLIB (lrclib.net) and lrc.red.\nRomaji: Lindera (IPADIC) and WanaKana.\nFont: Instrument Sans."),
-        &[&env!("CARGO_PKG_VERSION")],
-    );
+    let head = fill(tr("Hesewake Notch {}\nA personal notch for the top of your screen."), &[&env!("CARGO_PKG_VERSION")]);
+    let credits = tr("Based on Poch by Commonly Works\n(github.com/klawcodes/poch), MIT License.\nLyrics: LRCLIB (lrclib.net) and lrc.red.\nRomaji: Lindera (IPADIC) and WanaKana.\nFont: Instrument Sans.");
+    let text = format!("{head}\n\n{credits}");
     let _ = MessageBoxW(hwnd, &HSTRING::from(text), &HSTRING::from(tr("About Hesewake Notch")), MB_OK | MB_ICONINFORMATION);
 }
 
