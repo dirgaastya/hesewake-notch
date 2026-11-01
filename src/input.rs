@@ -156,6 +156,12 @@ pub(crate) unsafe fn click(x: f32, y: f32) {
                 present(a);
             }
             SlideId::System => {}
+            SlideId::Ext(_) => {
+                if a.ext_click(x, y) {
+                    present(a);
+                    schedule(a);
+                }
+            }
             SlideId::Prayer => {
                 if a.prayer_click(x, y) {
                     present(a);

@@ -19,6 +19,8 @@ pub(crate) enum SlideId {
     Agenda,
     /// Today's prayer times (prayer.rs). Only in the carousel while "Prayer times" is on.
     Prayer,
+    /// The slide of an extension (extslide.rs); the number is the extension's place in the list. Never in `USER`.
+    Ext(u8),
 }
 
 impl SlideId {
@@ -55,6 +57,7 @@ impl SlideId {
             SlideId::Clipboard => "clipboard",
             SlideId::Agenda => "agenda",
             SlideId::Prayer => "prayer",
+            SlideId::Ext(_) => "ext",
         }
     }
 
@@ -71,6 +74,7 @@ impl SlideId {
             SlideId::Clipboard => "Clipboard",
             SlideId::Agenda => "Agenda",
             SlideId::Prayer => crate::i18n::tr("Prayer"),
+            SlideId::Ext(_) => "Extension",
         }
     }
 

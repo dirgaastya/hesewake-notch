@@ -93,6 +93,9 @@ unsafe fn poll(a: &mut App) {
         redraw = true;
     }
     a.notif_ui_step();
+    if a.tick_n % 5 == 0 && a.ext_tick() {
+        redraw = true;
+    }
     if a.tick_n % 5 == 0 && a.monitor_follow() {
         redraw = true;
     }

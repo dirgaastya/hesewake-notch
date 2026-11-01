@@ -2,6 +2,11 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/), versi mengikuti [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Extensions**: program kecil yang berjalan di samping notch dan menambah satu slide, toast, titik penanda, dan baris status. Extension berbicara lewat **named pipe** yang hanya bisa dibuka oleh pengguna Windows yang sama (DACL ketat, klien dari jaringan ditolak), dan program yang menyambung harus sama dengan `exe` di manifest yang diaktifkan pengguna. Isi dari extension dianggap tidak tepercaya: hanya teks, semua panjang dan jumlah dibatasi, tautan hanya `http/https`, buka tautan dan salin ke clipboard hanya sebagai akibat klik pengguna. Notch menggambar semuanya (daftar dengan tab dan penanda, halaman detail, halaman bersekat dengan stepper tanggal, keadaan loading/kosong/galat/belum diatur). Dikelola di **Settings > Extensions** (daftar, status, sakelar, sakelar Toasts, Settings, Restart, Open folder, Rescan). Notch menjalankan extension yang aktif sendiri, memulainya lagi dengan jeda 5 dtk / 15 dtk / 60 dtk / 5 menit bila berhenti sendiri, dan menghentikannya saat dimatikan. Protokol: [`docs/extensions.md`](docs/extensions.md); contoh kerja: `examples/hello-extension`.
+
 ## [0.12.0] - 2026-11-01
 
 Rilis ini berisi kontribusi dari @yourLogic01 (PR #51), @gewall (PR #47), dan @MaulanaRhezaArdiansyah (PR #45, #50).

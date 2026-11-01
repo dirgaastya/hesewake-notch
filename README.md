@@ -105,6 +105,7 @@ The executable is created at `target\release\hesewake-notch.exe`. Japanese romaj
 | `downloads.rs`                               | Download progress: Downloads folder watcher, Ledge list, toast     |
 | `prayer.rs`, `adhan.rs`                      | Prayer times, Prayer slide, Ramadan mode, adhan sound              |
 | `wibu.rs`, `filepick.rs`                     | Wibu mode: image behind the notch; the shared Open dialog          |
+| `extproto.rs`, `ext.rs`, `extapp.rs`, `extslide.rs` | Extensions: protocol rules, the pipe, the extension list and the slide |
 | `clock.rs`                                   | Clock and date helpers                                             |
 | `water.rs`, `todo.rs`, `shelf.rs`, `note.rs` | Water, To-do, Ledge and Scrap slides                               |
 | `i18n.rs`                                    | UI language: English text as the key, Indonesian table             |
@@ -115,6 +116,15 @@ The executable is created at `target\release\hesewake-notch.exe`. Japanese romaj
 | `dragdrop.rs`                                | OLE drag out of the Ledge                                          |
 | `eye.rs`, `busy.rs`, `icon.rs`               | Eye animation, busy detection, app icons                           |
 | `nav.rs`, `input.rs`, `config.rs`, `data.rs` | Carousel, clicks and menu, shared sizes, data storage              |
+
+---
+
+## <img src="https://api.iconify.design/lucide/plug.svg?color=%23ff453a" width="20" align="top"> Extensions
+
+Extensions are small programs that run next to the notch and add a slide, toasts or a status. They talk to the notch over a
+local pipe that only your Windows user can open, and the notch draws everything they show. They are off until you switch
+them on in *Settings > Extensions*. The protocol is in [`docs/extensions.md`](docs/extensions.md), and
+[`examples/hello-extension`](examples/hello-extension) is a small working example.
 
 ---
 

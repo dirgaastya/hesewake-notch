@@ -60,9 +60,14 @@ sampai habis sebelum mengerjakan apa pun. Hal-hal khusus edisi Office (kantor) a
   Peek (hotkey, notifikasi) dan lirik yang disematkan (`pinned`) tidak terganggu. Tidak ada pengaturannya (sengaja global).
 - **Jendela topmost** bisa tenggelam di bawah jendela biasa walau penandanya masih ada: pemeriksaan tiap detik di `anim.rs` juga
   memeriksa z-order (`buried`). Jika notch "hilang tapi proses hidup", curigai ini dulu (bandingkan `PrintWindow` vs layar).
+- **Extension** (sejak 0.13.0, protokol di `docs/extensions.md`): `extproto.rs` aturan murni (manifest, frame, validasi, batas; semua data dari extension tidak tepercaya),
+  `ext.rs` host pipe (overlapped I/O, DACL pengguna ini, cek jalur exe klien terhadap manifest), `extapp.rs` daftar manifest + peluncur + status,
+  `extslide.rs` penggambar slide generik (hit box dicatat saat menggambar). `SlideId::Ext(u8)` = urutan di daftar extension; slide-nya ditambahkan setelah
+  slide bawaan oleh `App::slide_order()`. Tes UI-nya di `snapshot.rs`; tes manual end-to-end: bangun `examples/hello-extension` lalu
+  `cargo test --release the_example_extension -- --ignored`. Pada handle pipe sinkron, `ReadFile` yang menunggu memblokir `WriteFile` thread lain: jangan ubah ke sinkron.
 - **Pesan jendela** memakai `WM_APP + n`. Sebelum menambah, `grep -rn "WM_APP + " src/` supaya tidak bentrok. Terpakai: 1 tray, 2 bt,
   3 notif, 4 lockkey, 5 privacy, 6 volume, 7 brightness, 8 powercheck, 9 display, 10 weather, 11 calendar, 12 update, 13 mic,
-  14 update download, 15 output, 16 downloads, 17 adhan file, 18 Wibu file, 19 Wibu siap. (Edisi Office memakai 40.)
+  14 update download, 15 output, 16 downloads, 17 adhan file, 18 Wibu file, 19 Wibu siap, 20 extension. (Edisi Office memakai 40.)
 - **Lirik** (`lyrics.rs`): LRCLIB dulu, lalu **lrc.red** bila LRCLIB tak punya lirik sinkron. Syarat lrc.red: User-Agent berisi nama aplikasi,
   tautan repo, dan email kontak (`hesewake@gmail.com`), serta kredit sumber ("via lrc.red", klik membuka situsnya) di mode lirik dan About.
   Unison sudah dicoba dan dilewati (tidak menemukan lagu tanpa ID video YouTube). Romanisasi: Jepang lewat Lindera (kamus 47 MB diunduh

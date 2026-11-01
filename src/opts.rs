@@ -322,7 +322,7 @@ impl App {
     /// Rebuild the carousel after the slide list changed, staying on the slide being shown (or the nearest one).
     pub(crate) fn apply_slide_cfg(&mut self) {
         let cur = self.cur_id();
-        self.order = slides::visible_order(&self.slide_cfg());
+        self.order = self.slide_order();
         let idx = self.order.iter().position(|&s| s == cur).unwrap_or(0).min(self.order.len() - 1);
         self.slide = idx as i32;
         self.sp = idx as f32;

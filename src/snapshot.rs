@@ -73,6 +73,7 @@ fn test_app(s: f32) -> App {
         prayer_sun: 0,
         adhan_until: None,
         wibu: wibu::Wibu::default(),
+        ext: extapp::ExtState::default(),
         splash: None,
         // the idle clock has finished fading in (clock phase, see `idle_phase`)
         idle_base: 5.0,
@@ -2308,4 +2309,372 @@ fn about_page_updates() {
         a.update = Some(release_with_installer("99.0.0"));
         a.sw_show_page(about);
     });
+}
+
+// ---------------------------------------------------------------- extension slides
+fn ext_msg(j: serde_json::Value) -> extproto::FromExt {
+    match extproto::parse(j.to_string().as_bytes()) {
+        extproto::Parsed::Msg(m) => m,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// An extension is on, connected, and has sent `j` (a `slide` or a `detail`); its slide is the one shown.
+fn ext_setup(a: &mut App, j: serde_json::Value) {
+    a.ext.test_add("example-issues", "Issues", true);
+    a.cfg.ext_on.push("example-issues".into());
+    a.apply_slide_cfg();
+    open_slide(a, SlideId::Ext(0));
+    ext_feed(a, j);
+}
+
+fn ext_feed(a: &mut App, j: serde_json::Value) {
+    a.ext.list[0].connected = true;
+    match ext_msg(j) {
+        extproto::FromExt::Slide(s) => {
+            a.ext.list[0].slide = Some(s);
+            a.ext.list[0].detail = None;
+        }
+        extproto::FromExt::Detail(d) => a.ext.list[0].detail = Some(d),
+        other => panic!("{other:?}"),
+    }
+}
+
+fn ext_showing(j: serde_json::Value) -> App {
+    let mut a = test_app(1.0);
+    ext_setup(&mut a, j);
+    ext_draw(&mut a);
+    a
+}
+
+fn ext_draw(a: &mut App) {
+    let (w, h) = anim::target(a);
+    (a.w, a.h) = (w, h);
+    a.sp = a.slide as f32;
+    render::draw(a);
+}
+
+fn ext_click_on(a: &mut App, want: &extslide::ExtHit) -> bool {
+    let r = a.ext.list[0].view.hits.borrow().iter().find(|h| &h.4 == want).map(|h| (h.0 + h.2 / 2.0, h.1 + h.3 / 2.0));
+    let (x, y) = r.unwrap_or_else(|| panic!("{want:?} was not drawn"));
+    a.ext_click(x, y)
+}
+
+fn ext_sent(a: &App) -> Vec<serde_json::Value> {
+    a.ext.sent.iter().map(|(_, f)| serde_json::from_slice(&f[4..]).unwrap()).collect()
+}
+
+fn ext_issues() -> serde_json::Value {
+    serde_json::json!({
+        "t": "slide", "rev": 1, "title": "Is|sues",
+        "tabs": [{"id": "all", "label": "All", "count": 3}, {"id": "todo", "label": "To do"}],
+        "tab": "all",
+        "actions": [{"id": "refresh", "label": "Refresh"}, {"id": "report", "label": "Report"}],
+        "rows": [
+            {"id": "128", "text": "#128 Fix crash on startup", "sub": "To do", "mark": true},
+            {"id": "127", "text": "#127 Update the installer", "sub": "In progress"},
+            {"id": "126", "text": "#126 A very long title that has to be cut with an ellipsis before it runs into the stage name", "sub": "Review"}
+        ],
+        "foot": "Updated just now"
+    })
+}
+
+fn ext_ticket() -> serde_json::Value {
+    serde_json::json!({
+        "t": "detail", "rev": 2, "for": "128", "title": "#128 Fix crash on startup",
+        "meta": [{"k": "Project", "v": "Installer"}, {"k": "Stage", "v": "To do"}, {"k": "Due", "v": "2026-11-05"}],
+        "body": "The app closes when the settings file is empty. Steps: open the settings file, empty it and start the app.",
+        "notes": [{"who": "Dewi", "when": "2026-10-31 14:02", "text": "Reproduced on 0.12.0."}],
+        "buttons": [{"id": "open", "label": "Open", "link": "https://tracker.example/issues/128"}, {"id": "copy", "label": "Copy", "copy": "#128 Fix crash on startup"}, {"id": "more", "label": "More"}],
+        "foot": "2 attachments"
+    })
+}
+
+#[test]
+fn extension_slides_follow_what_is_on() {
+    let mut a = test_app(1.0);
+    let before = a.order.clone();
+    a.ext.test_add("a-ext", "A", true);
+    a.ext.test_add("b-bg", "B", false);
+    a.ext.test_add("c-ext", "C", true);
+    a.apply_slide_cfg();
+    assert_eq!(a.order, before, "nothing on: no extension slides");
+    a.cfg.ext_on = vec!["b-bg".into(), "c-ext".into()];
+    a.apply_slide_cfg();
+    assert_eq!(a.order.len(), before.len() + 1, "a background extension has no slide");
+    assert_eq!(a.order.last(), Some(&SlideId::Ext(2)), "the slide is the third in the list, after the built-in ones");
+    a.cfg.ext_on.push("a-ext".into());
+    a.apply_slide_cfg();
+    assert_eq!(&a.order[before.len()..], &[SlideId::Ext(0), SlideId::Ext(2)], "in the order of the list");
+    for i in 3..8 {
+        a.ext.test_add(&format!("more-{i}"), "M", true);
+        a.cfg.ext_on.push(format!("more-{i}"));
+    }
+    a.apply_slide_cfg();
+    assert_eq!(a.order.len() - before.len(), 4, "at most four extension slides");
+}
+
+#[test]
+fn the_list_page_draws_and_its_hits_work() {
+    let mut a = ext_showing(ext_issues());
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Tab("todo".into())));
+    assert_eq!(a.ext.list[0].view.tab_sel.as_deref(), Some("todo"), "the chip moves at once");
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Row("127".into())));
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Action(0)));
+    assert_eq!(ext_sent(&a), vec![serde_json::json!({"t": "tab", "id": "todo"}), serde_json::json!({"t": "row", "id": "127"}), serde_json::json!({"t": "action", "id": "refresh"})]);
+    assert!(a.ext.sent.iter().all(|(id, _)| id == "example-issues"));
+    // the extension answers with its own tab: that one counts from then on
+    a.ext.apply(vec![ext::Evt::Msg { id: "example-issues".into(), msg: ext_msg(ext_issues()) }], &[], Instant::now());
+    assert_eq!(a.ext.list[0].view.tab_sel, None);
+}
+
+#[test]
+fn the_detail_page_opens_copies_and_goes_back() {
+    let mut a = ext_showing(ext_ticket());
+    let _ = sys::opened();
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Button(0)));
+    assert_eq!(sys::opened(), vec!["https://tracker.example/issues/128".to_string()], "a link opens in the browser");
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Button(1)));
+    assert_eq!(a.ext.copied_text.as_deref(), Some("#128 Fix crash on startup"));
+    assert!(a.ext.list[0].view.copied.is_some(), "the Copied mark is up");
+    assert!(a.ext.sent.is_empty(), "opening and copying are the notch's own, nothing is sent for them");
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Button(2)));
+    assert_eq!(ext_sent(&a), vec![serde_json::json!({"t": "action", "id": "more"})], "a button with neither is passed on");
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Back));
+    assert!(a.ext.list[0].detail.is_none(), "Back leaves the page at once");
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "back"})));
+}
+
+#[test]
+fn a_page_that_says_it_is_not_ready_is_drawn_that_way() {
+    let msg = |state: &str| serde_json::json!({"t": "slide", "rev": 1, "state": state, "message": "Something to say", "setup_label": "Set it up"});
+    for (state, hit) in [("loading", None), ("empty", None), ("error", Some(extslide::ExtHit::Retry)), ("setup", Some(extslide::ExtHit::Setup))] {
+        let mut a = ext_showing(msg(state));
+        match hit {
+            Some(h) => assert!(ext_click_on(&mut a, &h), "{state}"),
+            None => assert!(a.ext.list[0].view.hits.borrow().is_empty(), "{state}: nothing to click"),
+        }
+    }
+    let mut a = ext_showing(msg("error"));
+    ext_click_on(&mut a, &extslide::ExtHit::Retry);
+    assert_eq!(ext_sent(&a), vec![serde_json::json!({"t": "action", "id": "retry"})]);
+    let mut a = ext_showing(msg("setup"));
+    ext_click_on(&mut a, &extslide::ExtHit::Setup);
+    assert_eq!(ext_sent(&a), vec![serde_json::json!({"t": "action", "id": "setup"})]);
+}
+
+#[test]
+fn a_page_with_sections_and_a_stepper() {
+    let rows = |n: usize, p: &str| (0..n).map(|i| serde_json::json!({"id": format!("{p}{i}"), "text": format!("#{i} Something done"), "sub": "Review"})).collect::<Vec<_>>();
+    let mut a = ext_showing(serde_json::json!({"t": "slide", "rev": 3, "title": "Re|port", "back": true,
+        "stepper": {"label": "2026-10-31", "prev": true, "next": false},
+        "actions": [{"id": "copy", "label": "Copy", "copy": "Worked on 2026-10-31"}],
+        "sections": [{"title": "Worked on", "rows": rows(3, "w")}, {"title": "Queue today", "rows": rows(2, "q")}]}));
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Back));
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Step(-1)));
+    assert!(!a.ext.list[0].view.hits.borrow().iter().any(|h| h.4 == extslide::ExtHit::Step(1)), "a disabled arrow is not clickable");
+    assert_eq!(ext_sent(&a), vec![serde_json::json!({"t": "back"}), serde_json::json!({"t": "step", "dir": -1})]);
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Action(0)));
+    assert_eq!(a.ext.copied_text.as_deref(), Some("Worked on 2026-10-31"), "a header action can copy too");
+    assert!(a.ext_scrollable() && a.ext_wheel(true) && a.ext.list[0].view.scroll == 1, "7 lines, 3 show: the wheel scrolls the list");
+    assert!(a.ext_wheel(false) && !a.ext_wheel(false), "and stops at the top");
+}
+
+#[test]
+fn a_long_detail_page_scrolls() {
+    let mut j = ext_ticket();
+    j["body"] = serde_json::json!(("A line of the description that goes on.\n").repeat(12));
+    let mut a = ext_showing(j);
+    assert!(a.ext_scrollable());
+    let first = a.ext.list[0].view.dscroll;
+    assert!(a.ext_wheel(true) && a.ext.list[0].view.dscroll == first + 1);
+    ext_draw(&mut a);
+}
+
+#[test]
+fn an_extension_that_is_not_there_is_explained_not_empty() {
+    let mut a = ext_showing(ext_issues());
+    a.ext.list[0].connected = false;
+    a.ext.list[0].problem = Some("file not found".into());
+    ext_draw(&mut a);
+    assert!(a.ext.list[0].view.hits.borrow().is_empty(), "nothing to click");
+    assert!(!a.ext_scrollable());
+    assert!(!a.ext_click(300.0, 60.0));
+}
+
+#[test]
+fn the_dot_of_an_extension_slide_shows_a_marker() {
+    let mut a = ext_showing(ext_issues());
+    let i = a.order.iter().position(|s| *s == SlideId::Ext(0)).unwrap();
+    assert!(!a.ext_dot_badge(i));
+    a.ext.apply(vec![ext::Evt::Msg { id: "example-issues".into(), msg: extproto::FromExt::Badge(true) }], &[], Instant::now());
+    assert!(a.ext_dot_badge(i) && !a.ext_dot_badge(0));
+    ext_draw(&mut a);
+}
+
+/// The extension slide in the snapshot folder, for a look by eye.
+#[test]
+fn snap_extension_slide() {
+    for s in SCALES {
+        for (name, j) in [("list", ext_issues()), ("detail", ext_ticket())] {
+            shot(&format!("ext-{name}"), s, |a| ext_setup(a, j));
+        }
+    }
+    shot("ext-setup", 1.0, |a| ext_setup(a, serde_json::json!({"t": "slide", "rev": 1, "state": "setup", "message": "The tracker is not set up yet", "setup_label": "Open settings"})));
+    shot("ext-not-running", 1.0, |a| {
+        ext_setup(a, ext_issues());
+        a.ext.list[0].connected = false;
+        a.ext.list[0].problem = Some("blocked by a policy".into());
+    });
+}
+
+// ---------------------------------------------------------------- Settings > Extensions
+const EXTENSIONS: usize = 9;
+
+/// Three extensions: one running and talking, one off, one whose manifest is no good.
+fn ext_page_setup(a: &mut App) {
+    a.ext.test_add("example-issues", "Issues", true);
+    a.ext.test_add("media-bridge", "Media Bridge", false);
+    a.ext.test_add_bad("broken-one", "exe must be an absolute path to an .exe");
+    a.cfg.ext_on.push("example-issues".into());
+    a.ext.list[0].connected = true;
+    a.ext.list[0].status = "Synced 12 issues".into();
+    a.apply_slide_cfg();
+    a.sw_show_page(EXTENSIONS);
+}
+
+#[test]
+fn extensions_page_is_between_calendar_and_about() {
+    assert_eq!(settingswin::SECS[EXTENSIONS], settingswin::SECS[settingswin::SECS.len() - 2]);
+    let a = sw_shot("settingswin-extensions-empty", page(EXTENSIONS));
+    assert!(settingswin::hit_center(&a, settingswin::Hit::ExtRoot).is_some() && settingswin::hit_center(&a, settingswin::Hit::ExtScan).is_some(), "the folder and rescan buttons are always there");
+    assert!(settingswin::hit_center(&a, settingswin::Hit::ExtOn(0)).is_none(), "nothing installed: nothing to switch");
+}
+
+#[test]
+fn extensions_page_switches_mutes_and_asks_for_settings() {
+    use settingswin::Hit;
+    let mut a = sw_shot("settingswin-extensions", ext_page_setup);
+    assert!(settingswin::hit_center(&a, Hit::ExtOn(0)).is_some() && settingswin::hit_center(&a, Hit::ExtOn(1)).is_some());
+    assert!(settingswin::hit_center(&a, Hit::ExtOn(2)).is_none(), "a manifest that is no good has no switch");
+    // the second one runs in the background: switching it on adds no slide
+    let slides = a.order.len();
+    sw_press(&mut a, Hit::ExtOn(1));
+    assert_eq!(a.cfg.ext_on, vec!["example-issues".to_string(), "media-bridge".to_string()]);
+    assert_eq!(a.order.len(), slides, "a background extension has no slide");
+    sw_press(&mut a, Hit::ExtOn(1));
+    assert_eq!(a.cfg.ext_on, vec!["example-issues".to_string()]);
+    // the first one has a slide, and it comes and goes with the switch
+    sw_press(&mut a, Hit::ExtOn(0));
+    assert!(a.cfg.ext_on.is_empty());
+    assert_eq!(a.order.len(), slides - 1);
+    sw_press(&mut a, Hit::ExtOn(0));
+    assert_eq!(a.cfg.ext_on, vec!["example-issues".to_string()]);
+    assert_eq!(a.order.len(), slides);
+    // toasts
+    assert!(a.cfg.ext_mute.is_empty());
+    sw_press(&mut a, Hit::ExtMute(0));
+    assert_eq!(a.cfg.ext_mute, vec!["example-issues".to_string()]);
+    sw_press(&mut a, Hit::ExtMute(0));
+    assert!(a.cfg.ext_mute.is_empty());
+    // Settings reaches the extension only while it is connected
+    sw_press(&mut a, Hit::ExtConfig(0));
+    assert_eq!(a.ext.sent.last().map(|(id, f)| (id.as_str(), serde_json::from_slice::<serde_json::Value>(&f[4..]).unwrap())), Some(("example-issues", serde_json::json!({"t": "config"}))));
+    assert!(settingswin::hit_center(&a, Hit::ExtConfig(1)).is_none(), "not connected: the button is greyed out");
+    assert!(settingswin::hit_center(&a, Hit::ExtRestart(1)).is_none(), "off: nothing to restart");
+    assert!(settingswin::hit_center(&a, Hit::ExtRestart(0)).is_some());
+}
+
+#[test]
+fn extensions_page_opens_folders_and_rescans() {
+    use settingswin::Hit;
+    let mut a = sw_shot("settingswin-extensions-folders", ext_page_setup);
+    let _ = sys::opened();
+    sw_press(&mut a, Hit::ExtFolder(0));
+    sw_press(&mut a, Hit::ExtRoot);
+    let opened = sys::opened();
+    assert!(opened[0].ends_with(r"extensions\example-issues") && opened[1].ends_with("extensions"), "{opened:?}");
+    // a new extension was installed: rescan finds it, and the old ones keep what the notch knows
+    let dir = std::env::temp_dir().join(format!("hesewake-ext-page-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("new-one")).unwrap();
+    let exe = format!(r"{}\System32\whoami.exe", std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()));
+    std::fs::write(dir.join("new-one").join("extension.json"), serde_json::json!({"id": "new-one", "name": "New", "exe": exe, "proto": 1}).to_string()).unwrap();
+    a.ext_rescan_in(&dir);
+    assert_eq!(a.ext.list.iter().map(|e| e.folder.as_str()).collect::<Vec<_>>(), vec!["new-one"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn what_an_extension_is_doing_is_said_in_words() {
+    let now = Instant::now();
+    let mut a = test_app(1.0);
+    a.ext.test_add("a-ext", "A", true);
+    a.ext.test_add_bad("b-ext", "no extension.json");
+    let say = |a: &App, i: usize, on: bool| extapp::status_text(&a.ext.list[i], on, now);
+    assert_eq!(say(&a, 0, false), "Off");
+    assert_eq!(say(&a, 0, true), "Starting\u{2026}");
+    a.ext.list[0].problem = Some("file not found".into());
+    assert_eq!(say(&a, 0, true), "Not running: file not found");
+    a.ext.list[0].connected = true;
+    assert_eq!(say(&a, 0, true), "Connected");
+    a.ext.list[0].status = "3 devices".into();
+    assert_eq!(say(&a, 0, true), "3 devices", "its own words win");
+    assert_eq!(say(&a, 1, true), "Invalid: no extension.json");
+    let _lang = i18n::restore_on_drop();
+    a.ext.list[0].status.clear();
+    indonesian(&mut a);
+    assert_eq!(say(&a, 0, true), "Tersambung");
+    assert_eq!(say(&a, 1, true), "Tidak valid: no extension.json");
+}
+
+#[test]
+fn snap_extensions_page_in_indonesian() {
+    let _lang = i18n::restore_on_drop();
+    sw_shot("id-settingswin-extensions", |a| {
+        indonesian(a);
+        ext_page_setup(a);
+        a.ext.list[1].problem = Some("file not found".into());
+    });
+}
+
+// ---------------------------------------------------------------- extension toasts
+fn ext_toast_msg(count: u32) -> ext::Evt {
+    ext::Evt::Msg { id: "example-issues".into(), msg: extproto::FromExt::Toast { title: "#128 Fix crash on startup".into(), sub: "New \u{b7} To do".into(), count } }
+}
+
+#[test]
+fn an_extension_toast_shows_and_hovering_it_opens_the_slide() {
+    let mut a = test_app(1.0);
+    ext_setup(&mut a, ext_issues());
+    a.hover = false;
+    a.slide = 0;
+    let out = a.ext.apply(vec![ext_toast_msg(1)], &[], Instant::now());
+    assert!(a.ext_out(out));
+    assert!(matches!(a.toast.as_ref().map(|t| &t.kind), Some(ToastKind::Ext { id, count: 1, .. }) if id == "example-issues"));
+    assert!(!a.toast_has_button(), "no buttons: hovering is how it is answered");
+    a.hover = true;
+    assert!(a.toast_update());
+    assert!(a.toast.is_none() && a.cur_ext() == Some(0), "the extension's slide is open");
+}
+
+#[test]
+fn a_muted_extension_makes_no_toast() {
+    let mut a = test_app(1.0);
+    ext_setup(&mut a, ext_issues());
+    a.hover = false;
+    let out = a.ext.apply(vec![ext_toast_msg(1)], &["example-issues".to_string()], Instant::now());
+    assert!(!a.ext_out(out));
+    assert!(a.toast.is_none());
+}
+
+#[test]
+fn snap_extension_toast() {
+    for (name, count) in [("one", 1), ("many", 4)] {
+        shot(&format!("ext-toast-{name}"), 1.0, |a| {
+            ext_setup(a, ext_issues());
+            a.hover = false;
+            show_toast(a, ToastKind::Ext { id: "example-issues".into(), title: "#128 Fix crash on startup".into(), sub: "New \u{b7} To do".into(), count });
+        });
+    }
 }

@@ -79,6 +79,8 @@ pub(crate) enum ToastKind {
     Update(update::Note),
     /// A download finished: full path of the file, with Open / Show in folder (downloads.rs).
     Downloaded { path: String },
+    /// A message from an extension (extapp.rs): its id (the slide opens on hover), title, subtitle and how many.
+    Ext { id: String, title: String, sub: String, count: u32 },
 }
 
 pub(crate) struct Toast {
@@ -147,6 +149,7 @@ impl App {
             ToastKind::Update(update::Note::DownloadFailed(_)) => 12.0,
             ToastKind::Update(_) => 4.0,
             ToastKind::Downloaded { .. } => 8.0,
+            ToastKind::Ext { .. } => 5.0,
             _ => 3.4,
         };
         perf::note(&format!("toast start {:?} mem={:.1}MB", kind, perf::mem_mb()));
@@ -161,9 +164,16 @@ impl App {
         if let Some(t) = &self.toast {
             if self.expanded() || t.t0.elapsed().as_secs_f32() >= t.dur {
                 let to_notif = self.expanded() && matches!(t.kind, ToastKind::Notification { .. });
+                // hovering an extension's toast opens that extension's slide
+                let to_ext = match &t.kind {
+                    ToastKind::Ext { id, .. } if self.expanded() => self.ext.list.iter().position(|e| e.id() == id.as_str()),
+                    _ => None,
+                };
                 self.toast = None;
                 if to_notif {
                     self.show_id(SlideId::Notifications);
+                } else if let Some(i) = to_ext {
+                    self.show_id(SlideId::Ext(i as u8));
                 }
                 self.toast_end = Instant::now();
                 changed = true;
@@ -255,6 +265,7 @@ impl App {
             ToastKind::Unplugged { pct } => ([235, 235, 240], tr("On battery").to_string(), tr("Charger disconnected").to_string(), *pct as f32 / 100.0, Some(format!("{}%", pct))),
             ToastKind::LowBattery { pct } => (ACCENT, tr("Battery low").to_string(), tr("Plug in your charger").to_string(), *pct as f32 / 100.0, Some(format!("{}%", pct))),
             ToastKind::Timer { title, label } => ([255, 170, 60], title.clone(), label.clone(), 1.0, None),
+            ToastKind::Ext { title, sub, count, .. } => (g.acc.bright, title.clone(), sub.clone(), 1.0, (*count > 1).then(|| count.to_string())),
             ToastKind::Bluetooth { name, pct, connected } => {
                 let s = match (connected, pct) {
                     (true, Some(p)) => fill(tr("Connected \u{b7} {}%"), &[p]),
@@ -296,6 +307,7 @@ impl App {
             ToastKind::Bluetooth { .. } => g.icon_bluetooth(rcx, cy, 17.0 * sc, &ic),
             ToastKind::Prayer { .. } => g.icon_crescent(rcx, cy, 18.0 * sc, &ic),
             ToastKind::Timer { .. } => g.icon_bell(rcx, cy, 17.0 * sc, (t * 22.0).sin() * (1.0 - t / 1.5).max(0.0), &ic),
+            ToastKind::Ext { .. } => g.slide_icon(SlideId::Ext(0), rcx, cy, 17.0 * sc, &ic),
             ToastKind::Notification { .. } | ToastKind::Hud { .. } | ToastKind::Privacy { .. } | ToastKind::Water | ToastKind::Meeting { .. } | ToastKind::Update(_) | ToastKind::Downloaded { .. } => {}
         }
 

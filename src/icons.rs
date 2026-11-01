@@ -560,6 +560,12 @@ impl Gfx {
                 pen.polyline(&[(-0.42, -0.95), (-0.42, -0.5)], false);
                 pen.polyline(&[(0.42, -0.95), (0.42, -0.5)], false);
             }
+            SlideId::Ext(_) => {
+                // a small block with a plus: something plugged in
+                pen.rrect(-0.8, -0.8, 1.6, 1.6, 0.3);
+                pen.polyline(&[(-0.38, 0.0), (0.38, 0.0)], false);
+                pen.polyline(&[(0.0, -0.38), (0.0, 0.38)], false);
+            }
             SlideId::Prayer => {
                 // a crescent: the outer arc of the moon, back along the edge of the shadow
                 let mut pts = Vec::new();
