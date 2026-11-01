@@ -2,6 +2,23 @@
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/), versi mengikuti [Semantic Versioning](https://semver.org/).
 
+## [0.12.0] - 2026-11-01
+
+Rilis ini berisi kontribusi dari @yourLogic01 (PR #51), @gewall (PR #47), dan @MaulanaRhezaArdiansyah (PR #45, #50).
+
+### Added
+- **Pengaturan di jendela sendiri** (PR #51, menutup #34): **Settings** dari menu klik kanan atau tray kini membuka jendela mengambang dengan sidebar kategori (General, Appearance, Slides, Screens, Music & lyrics, Notifications, HUD & alerts, Weather & prayer, Calendar, About), bukan lagi slide di dalam notch. Baris selebar penuh sehingga label dan deskripsi tidak terpotong, dengan kontrol yang sesuai untuk tiap pengaturan: sakelar, pilihan bersegmen, contoh warna (aksen), stepper, dan tombol. Halaman **Slides** menampilkan semua slide dengan ikon, deskripsi, tombol `Ctrl+Alt+N`-nya, geser naik/turun, dan sakelar (slide terakhir yang aktif tidak bisa dimatikan). Halaman **About** punya baris **Updates** (cek pembaruan, atau Install/Download bila ada rilis baru). Setiap perubahan langsung berlaku di notch dan disimpan ke `settings.txt` seperti sebelumnya; format berkas tidak berubah. Slide Settings di dalam notch dihapus.
+- **Wibu mode** (PR #47, menutup #46, mati secara default): di Settings > Appearance, gambar JPG, PNG, atau WebP pilihan pengguna tampil di belakang notch yang terbuka, digelapkan (**Image dim** 50 sampai 80%) agar teks tetap terbaca. Berkasnya tetap di tempatnya (hanya path yang disimpan), gambar didekode di thread terpisah sehingga wallpaper 4K tidak membuat UI macet, dan berkas yang hilang atau rusak membuat notch tetap hitam dengan keterangan di barisnya. Notch kecil dan toast tetap hitam.
+
+### Changed
+- **Water ikut warna aksen** (PR #50, menutup #41): slide Water, toast "Time to Drink", tombol Drink, ring, bar riwayat, dan glow kini memakai aksen yang dipilih, bukan biru sendiri. Dengan aksen Blue (bawaan) tampilannya nyaris sama seperti sebelumnya. Tetes air tetap terbaca sebagai air (kilau putih di sisi kiri), dan ring **tercapai** tetap hijau.
+- **Ikon cuaca di jam idle lebih hemat CPU** (PR #45): ikon cuaca yang bergerak (hujan, gerimis, badai, salju, matahari terik) kini digambar 20 fps (sebelumnya 60 fps), dan diam bila tidak ada input selama 5 menit, seperti mata idle. Perpindahan antara suhu dan ikon tetap mulus. Pada pengukuran kontributor, CPU turun sekitar 37% dan jumlah frame sekitar 53% di fase jam saat hujan.
+- **Kredit di About** kini ada di halaman About jendela Settings dan memakai teks yang sama dengan menu klik kanan: Poch (MIT), LRCLIB, lrc.red, Lindera, WanaKana, dan Instrument Sans. Ikon aplikasi asli dipakai di sidebar dan About.
+- Pemilih berkas dipakai bersama oleh adhan dan Wibu (`filepick.rs`).
+
+### Removed
+- Slide **Settings** di dalam notch (digantikan jendela Settings).
+
 ## [0.11.1] - 2026-10-30
 
 ### Added

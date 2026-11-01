@@ -44,11 +44,12 @@ sampai habis sebelum mengerjakan apa pun. Hal-hal khusus edisi Office (kantor) a
   `with_app(|a| ...)`. **Fixture tes `test_app` (`snapshot.rs`) harus diisi setiap field baru `App`.**
 - **Slide**: `slides.rs` (`SlideId`, `USER`, `available()`, `effective()`, urutan dan tampil/sembunyi di `settings.txt` kunci `slides=`).
   Slide opsional baru tersembunyi secara default kecuali memang dimaksudkan nyala. Hotkey slide `Ctrl+Alt+1..` mengikuti urutan.
-- **Settings** (`settings.rs` untuk simpan/parse, `settingsview.rs` untuk tampilan): tab **Slides, General, Alerts, Widgets**.
-  Tiap baris punya `Rid` (id); klik dikenali lewat `match r.id`, **bukan nomor urut**. Menambah pengaturan = tambah `Rid`, baris di
-  `settings_rows(tab)`, arm klik di `settings_click_rows`, field + parse + serialize + tes roundtrip di `settings.rs`, teks di `i18n.rs`.
-  Tab baris menampilkan 3 baris sel (2 kolom, kiri ke kanan) dan sisanya di-scroll dengan roda. Label dan nilai stepper harus muat
-  di sel (tes `settings_text_fits_cells`, `stepper_values_fit_without_cutting` akan gagal bila terlalu panjang; pendekkan teksnya).
+- **Settings** (sejak 0.12.0 jendela sendiri, bukan slide): `settings.rs` untuk simpan/parse, `opts.rs` untuk daftar pengaturan (`Rid`, nilai, dan
+  apa yang terjadi saat diubah), `settingswin.rs` untuk jendela (sidebar kategori, halaman, gambar dengan `Gfx`). Menambah pengaturan = tambah `Rid`
+  (dan ke `Rid::ALL`) di `opts.rs` beserta arm di `opt_on`/`opt_press`/`opt_step`/`opt_pick`, baris di halaman yang tepat di `sw_groups`
+  (`settingswin.rs`), field + parse + serialize + tes roundtrip di `settings.rs`, teks di `i18n.rs`. Baris bersyarat (mis. file adhan, gambar Wibu)
+  dikecualikan di tes `every_setting_has_a_row` dan punya tes sendiri. Label dan nilai harus muat (tes `settings_window_text_fits`, dua bahasa).
+  Halaman About memakai teks kredit yang sama dengan menu About (`sys.rs`); jangan hapus kredit lrc.red, LRCLIB, dan Poch (syarat lisensi).
 - **i18n** (`i18n.rs`): `tr("English")` mengembalikan teks bahasa aktif; teks Inggris adalah kuncinya. Satu tes memindai semua
   `tr("...")` di `src/` dan gagal bila ada terjemahan hilang, tak terpakai, ganda, atau placeholder tak cocok. Nama produk dan fitur
   (Pomodoro, Timer, Ledge, Scrap, HUD) tidak diterjemahkan. Teks bernilai dinamis memakai `fill(tr("{} min"), &[&5])`.
@@ -61,7 +62,7 @@ sampai habis sebelum mengerjakan apa pun. Hal-hal khusus edisi Office (kantor) a
   memeriksa z-order (`buried`). Jika notch "hilang tapi proses hidup", curigai ini dulu (bandingkan `PrintWindow` vs layar).
 - **Pesan jendela** memakai `WM_APP + n`. Sebelum menambah, `grep -rn "WM_APP + " src/` supaya tidak bentrok. Terpakai: 1 tray, 2 bt,
   3 notif, 4 lockkey, 5 privacy, 6 volume, 7 brightness, 8 powercheck, 9 display, 10 weather, 11 calendar, 12 update, 13 mic,
-  14 update download, 15 output, 16 downloads, 17 adhan file. (Edisi Office memakai 40.)
+  14 update download, 15 output, 16 downloads, 17 adhan file, 18 Wibu file, 19 Wibu siap. (Edisi Office memakai 40.)
 - **Lirik** (`lyrics.rs`): LRCLIB dulu, lalu **lrc.red** bila LRCLIB tak punya lirik sinkron. Syarat lrc.red: User-Agent berisi nama aplikasi,
   tautan repo, dan email kontak (`hesewake@gmail.com`), serta kredit sumber ("via lrc.red", klik membuka situsnya) di mode lirik dan About.
   Unison sudah dicoba dan dilewati (tidak menemukan lagu tanpa ID video YouTube). Romanisasi: Jepang lewat Lindera (kamus 47 MB diunduh
@@ -94,7 +95,7 @@ Versi: `0.MINOR.PATCH`. Satu rilis = satu cabang rilis → satu PR → merge com
    harus menampilkan kedua aset (fitur Install bergantung padanya).
 9. Sinkron ke Office (lihat `CLAUDE.local.md`), bangun installer Office (lokal, tidak dipublikasikan).
 
-Rilis yang sudah keluar: 0.1.0 … 0.11.1 (terakhir publik: **0.11.1**).
+Rilis yang sudah keluar: 0.1.0 … 0.11.1 (terakhir publik: **0.11.1**; **0.12.0** menunggu merge, lihat §9).
 
 ## 5. Kapan harus bertanya (aturan pemilik: "tanyain ulang yang perlu dikonfirmasi")
 
@@ -136,13 +137,11 @@ Saat melapor: tulis hasil apa adanya (tes yang gagal, langkah yang dilewati), be
   cek CI, lalu **bangun dan jalankan** sebelum merge. Laporkan temuan ke pemilik dengan rekomendasi. Balas issue dengan keputusan pemilik (bahasa Inggris).
 - Kontributor sudah diminta menambah baris Settings memakai `Rid` di tab yang tepat dan mengikuti pola yang ada.
 
-## 9. Status terakhir (31 Oktober 2026)
+## 9. Status terakhir (1 November 2026)
 
-- Publik terakhir: **0.11.1** (jam kecil di slide Music, pin mode lirik lewat tombol, notch menyingkir dari kursor di jendela maksimal/layar penuh,
-  perbaikan notch yang tertutup z-order, dokumentasi ini). Edisi Office belum disinkron ke 0.11.0/0.11.1 (pemilik: "office skip dulu").
+- Publik terakhir: **0.11.1**. **0.12.0** disiapkan di cabang `release/0.12.0` (satu PR): jendela Settings (PR #51, @yourLogic01), Wibu mode (PR #47, @gewall),
+  Water ikut aksen (PR #50) dan ikon cuaca 20 fps (PR #45), keduanya @MaulanaRhezaArdiansyah. Edisi Office belum disinkron ke 0.11.x/0.12.0 (pemilik: "office skip dulu").
+- PR #49 (Notch lock, @gewall) **ditutup tanpa merge** (tumpang tindih dengan pin lirik dan menyingkir dari kursor di 0.11.1).
 - **`main` dilindungi** (31 Oktober): wajib lewat Pull Request (0 approval), wajib CI `test` hijau, tanpa force push dan hapus; admin tidak dipaksa. Jadi perubahan apa pun,
   termasuk dokumentasi, lewat cabang dan PR; jangan `git push origin main`.
-- PR terbuka belum ditinjau: **#45** idle clock ikon cuaca (Maulana), **#47** Wibu mode (gewall), **#49** Notch lock (gewall; tumpang tindih dengan pin dan menyingkir yang sudah ada di 0.11.1), **#50** Water ikut aksen (Maulana; menutup #41),
-  **#51** jendela Settings terpisah (yourLogic01; besar, +2404/-1269, menyentuh Settings: gabungkan PR lain yang menambah baris Settings lebih dulu). Issue #34 (Settings jadi jendela) sudah dijawab pemilik: setuju, slide Settings dihapus di PR yang sama.
-- Rencana **0.12.0**: edisi Office diubah menjadi extension (lihat `CLAUDE.local.md`).
-- Keputusan yang masih menunggu pemilik: prioritas dan urutan peninjauan PR baru (#45 sampai #51).
+- Rencana **0.13.0**: edisi Office diubah menjadi extension (lihat `CLAUDE.local.md`). Langkah pertama: dokumen rancangan untuk disetujui pemilik.
