@@ -22,6 +22,9 @@ pub(crate) const MAX_BUTTONS: usize = 4;
 /// The biggest `matrix` (modules on a side): a QR code of version 20 is 97.
 pub(crate) const MAX_MATRIX: usize = 100;
 
+/// The longest text a page's `input` can hold.
+pub(crate) const MAX_INPUT: usize = 40;
+
 pub(crate) const LEN_ID: usize = 64;
 pub(crate) const LEN_TAB: usize = 12;
 pub(crate) const LEN_LABEL: usize = 16;
@@ -219,6 +222,11 @@ pub(crate) fn config() -> Vec<u8> {
     msg(json!({"t": "config"}))
 }
 
+/// What the user typed in a page's `input`: its id and the text (one line, at most `MAX_INPUT` characters).
+pub(crate) fn input(id: &str, value: &str) -> Vec<u8> {
+    msg(json!({"t": "input", "id": id, "value": clip(Some(&json!(value)), MAX_INPUT, false)}))
+}
+
 pub(crate) fn lang(l: &str) -> Vec<u8> {
     msg(json!({"t": "lang", "lang": l}))
 }
@@ -354,7 +362,19 @@ pub(crate) struct DetailMsg {
     pub(crate) notes: Vec<Note>,
     pub(crate) buttons: Vec<Button>,
     pub(crate) matrix: Option<Matrix>,
+    pub(crate) input: Option<InputSpec>,
     pub(crate) foot: String,
+}
+
+/// A line of text the user can edit on a page (the Settings panel): `{ "id": "rename", "label": "Name", "value": "Phone 1",
+/// "max": 32, "button": "Save" }`. What is typed goes back as an `input` message.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct InputSpec {
+    pub(crate) id: String,
+    pub(crate) label: String,
+    pub(crate) value: String,
+    pub(crate) max: usize,
+    pub(crate) button: String,
 }
 
 /// A small square picture of black and white modules (a QR code), `size` x `size`, row by row.
@@ -466,6 +486,16 @@ fn parse_slide(v: &Value) -> Option<SlideMsg> {
     })
 }
 
+fn parse_input(v: &Value) -> Option<InputSpec> {
+    let i = v.get("input").filter(|i| i.is_object())?;
+    let id = id_of(i, "id");
+    if id.is_empty() {
+        return None;
+    }
+    let max = i.get("max").and_then(Value::as_u64).map_or(MAX_INPUT, |m| (m as usize).clamp(1, MAX_INPUT));
+    Some(InputSpec { id, label: clip(i.get("label"), LEN_LABEL, false), value: clip(i.get("value"), max, false), max, button: clip(i.get("button"), LEN_LABEL, false) })
+}
+
 /// `{"size": 3, "rows": ["101", "010", "101"]}`. Anything that is not exactly that is no matrix (the rest of the page stays).
 fn parse_matrix(v: &Value) -> Option<Matrix> {
     let m = v.get("matrix")?;
@@ -504,6 +534,7 @@ fn parse_detail(v: &Value) -> Option<DetailMsg> {
             .collect(),
         buttons: parse_buttons(v, "buttons", MAX_BUTTONS),
         matrix: parse_matrix(v),
+        input: parse_input(v),
         foot: clip(v.get("foot"), LEN_LINE, false),
     })
 }
@@ -905,5 +936,46 @@ mod panel_tests {
             Parsed::Msg(FromExt::Detail(d)) => assert_eq!((d.title.as_str(), d.matrix), ("Pair", None)),
             other => panic!("{other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+
+    fn input(i: serde_json::Value) -> Option<InputSpec> {
+        match parse(serde_json::json!({"t": "detail", "rev": 1, "input": i}).to_string().as_bytes()) {
+            Parsed::Msg(FromExt::Detail(d)) => d.input,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_text_box_is_read_with_its_limits() {
+        let i = input(serde_json::json!({"id": "rename", "label": "Name", "value": "Phone 1", "max": 32, "button": "Save"})).unwrap();
+        assert_eq!((i.id.as_str(), i.label.as_str(), i.value.as_str(), i.max, i.button.as_str()), ("rename", "Name", "Phone 1", 32, "Save"));
+        let d = input(serde_json::json!({"id": "x"})).unwrap();
+        assert_eq!((d.max, d.value.as_str(), d.button.as_str()), (MAX_INPUT, "", ""), "defaults");
+        assert_eq!(input(serde_json::json!({"id": "x", "max": 0})).unwrap().max, 1);
+        assert_eq!(input(serde_json::json!({"id": "x", "max": 999})).unwrap().max, MAX_INPUT, "never more than 40");
+        assert_eq!(input(serde_json::json!({"id": "x", "max": 5, "value": "abcdefgh"})).unwrap().value, "abcde", "the value is cut to the limit");
+        assert_eq!(input(serde_json::json!({"id": "x", "value": "a\u{7}b\nc"})).unwrap().value, "ab c", "one line, no control characters");
+    }
+
+    #[test]
+    fn a_text_box_without_an_id_is_no_text_box() {
+        assert_eq!(input(serde_json::json!({"label": "Name"})), None);
+        assert_eq!(input(serde_json::json!({"id": ""})), None);
+        assert_eq!(input(serde_json::json!("rename")), None);
+        assert_eq!(input(serde_json::json!(null)), None);
+    }
+
+    #[test]
+    fn what_is_typed_goes_back_clean_and_short() {
+        let read = |b: Vec<u8>| serde_json::from_slice::<serde_json::Value>(&b[4..]).unwrap();
+        assert_eq!(read(super::input("rename", "Pixel 8")), serde_json::json!({"t": "input", "id": "rename", "value": "Pixel 8"}));
+        let long = read(super::input("rename", &format!("{}\n\u{7}x", "a".repeat(60))));
+        assert_eq!(long["value"].as_str().unwrap().chars().count(), MAX_INPUT);
+        assert!(!long["value"].as_str().unwrap().contains('\n'));
     }
 }

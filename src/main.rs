@@ -111,6 +111,7 @@ mod sys;
 mod sysview;
 mod weather;
 mod todo;
+mod textfield;
 mod timer;
 mod toast;
 mod update;

@@ -2827,3 +2827,149 @@ fn a_window_extension_still_gets_the_config_message() {
     assert_eq!(a.sw.panel, None);
     assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "config"})));
 }
+
+// ---------------------------------------------------------------- a text box on an extension's page
+fn rename_page(value: &str) -> serde_json::Value {
+    serde_json::json!({
+        "t": "detail", "rev": 3, "for": "a1b2", "title": "Phone 1",
+        "meta": [{"k": "Status", "v": "Connected"}, {"k": "Paired", "v": "2026-11-01"}],
+        "body": "Forget this phone to take away its access.",
+        "input": {"id": "rename", "label": "Name", "value": value, "max": 12, "button": "Save"},
+        "buttons": [{"id": "forget:a1b2", "label": "Forget"}]
+    })
+}
+
+/// The panel with the rename page showing and the first frame drawn.
+fn rename_panel(name: &str, value: &str) -> App {
+    sw_shot(name, |a| {
+        panel_ext(a, rename_page(value));
+        a.sw.panel = Some(0);
+    })
+}
+
+fn type_text(a: &mut App, s: &str) {
+    for u in s.encode_utf16() {
+        assert!(a.sw_field_char(u), "the box has the keyboard");
+    }
+}
+
+fn key(a: &mut App, vk: u16) -> bool {
+    a.sw_field_key(vk, false)
+}
+
+fn field_text(a: &App) -> String {
+    a.sw.field.as_ref().expect("a text box").tf_text()
+}
+
+#[test]
+fn a_text_box_takes_typing_and_sends_it_on_enter() {
+    use settingswin::Hit;
+    let mut a = rename_panel("settingswin-panel-input", "Phone 1");
+    assert!(settingswin::hit_center(&a, Hit::PanelInput).is_some() && settingswin::hit_center(&a, Hit::PanelInputSave).is_some());
+    assert!(!a.sw_field_char(b'x' as u16), "it does not take keys before it is clicked");
+    assert!(!key(&mut a, 0x08));
+    sw_press(&mut a, Hit::PanelInput);
+    assert_eq!(field_text(&a), "Phone 1");
+    for _ in 0..7 {
+        key(&mut a, 0x08);
+    }
+    type_text(&mut a, "Pixel 8");
+    assert_eq!(field_text(&a), "Pixel 8");
+    settingswin::render(&mut a);
+    key(&mut a, 0x0D);
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "input", "id": "rename", "value": "Pixel 8"})));
+    assert!(!a.sw_field_char(b'x' as u16), "after Enter the box lets go of the keyboard");
+}
+
+#[test]
+fn the_save_button_sends_it_too_and_clicking_elsewhere_keeps_what_was_typed() {
+    use settingswin::Hit;
+    let mut a = rename_panel("settingswin-panel-input-save", "Phone 1");
+    sw_press(&mut a, Hit::PanelInput);
+    key(&mut a, 0x24);
+    type_text(&mut a, "My ");
+    // a click on something else lets go of the box, the text stays
+    sw_press(&mut a, Hit::PanelButton(0));
+    assert!(!a.sw.field.as_ref().unwrap().is_focused());
+    assert_eq!(field_text(&a), "My Phone 1");
+    a.ext.sent.clear();
+    sw_press(&mut a, Hit::PanelInputSave);
+    assert_eq!(ext_sent(&a), vec![serde_json::json!({"t": "input", "id": "rename", "value": "My Phone 1"})]);
+}
+
+#[test]
+fn escape_gives_up_and_the_box_is_never_longer_than_the_page_says() {
+    use settingswin::Hit;
+    let mut a = rename_panel("settingswin-panel-input-esc", "Phone 1");
+    sw_press(&mut a, Hit::PanelInput);
+    type_text(&mut a, "xxxxxxxxxxxxxxxx");
+    assert_eq!(field_text(&a).chars().count(), 12, "the page said 12");
+    assert!(key(&mut a, 0x1B));
+    assert_eq!(field_text(&a), "Phone 1", "back to what the extension said");
+    assert!(!a.sw.field.as_ref().unwrap().is_focused());
+    assert!(a.ext.sent.iter().all(|(_, f)| serde_json::from_slice::<serde_json::Value>(&f[4..]).unwrap()["t"] != "input"), "nothing was sent");
+}
+
+#[test]
+fn the_caret_keys_and_characters_that_come_in_two_halves_work() {
+    use settingswin::Hit;
+    let mut a = rename_panel("settingswin-panel-input-keys", "Phone 1");
+    sw_press(&mut a, Hit::PanelInput);
+    key(&mut a, 0x24);
+    key(&mut a, 0x2E);
+    assert_eq!(field_text(&a), "hone 1", "Home, then Delete");
+    key(&mut a, 0x23);
+    key(&mut a, 0x25);
+    key(&mut a, 0x25);
+    type_text(&mut a, "!");
+    assert_eq!(field_text(&a), "hone! 1", "End, two Left, a character in the middle");
+    key(&mut a, 0x27);
+    key(&mut a, 0x08);
+    assert_eq!(field_text(&a), "hone!1");
+    // a character outside the first plane arrives as two UTF-16 units
+    type_text(&mut a, "\u{1F600}");
+    assert!(field_text(&a).contains('\u{1F600}'));
+    assert!(a.sw_field_char(0x16), "a control character (Ctrl+V) is taken and ignored");
+    calendar::TEST_CLIPBOARD.with(|c| *c.borrow_mut() = Some("ab\ncd".into()));
+    assert!(a.sw_field_key(0x56, true));
+    assert!(field_text(&a).chars().count() <= 12);
+}
+
+#[test]
+fn a_new_value_from_the_extension_is_followed_unless_the_user_is_typing() {
+    use settingswin::Hit;
+    let mut a = rename_panel("settingswin-panel-input-follow", "Phone 1");
+    ext_feed(&mut a, rename_page("Pixel 8"));
+    settingswin::render(&mut a);
+    assert_eq!(field_text(&a), "Pixel 8", "it took the new name");
+    sw_press(&mut a, Hit::PanelInput);
+    type_text(&mut a, "!");
+    ext_feed(&mut a, rename_page("Other"));
+    settingswin::render(&mut a);
+    assert!(field_text(&a).ends_with('!'), "what is being typed is not taken away");
+}
+
+#[test]
+fn the_box_goes_when_the_page_goes() {
+    use settingswin::Hit;
+    let mut a = rename_panel("settingswin-panel-input-gone", "Phone 1");
+    assert!(a.sw.field.is_some());
+    sw_press(&mut a, Hit::PanelDetailBack);
+    settingswin::render(&mut a);
+    assert!(a.sw.field.is_none());
+}
+
+#[test]
+fn a_text_box_fits_in_both_languages() {
+    let _lang = i18n::restore_on_drop();
+    for id in [false, true] {
+        let a = sw_shot(&format!("{}settingswin-panel-input-fit", if id { "id-" } else { "" }), |a| {
+            if id {
+                indonesian(a);
+            }
+            panel_ext(a, rename_page("Phone 1"));
+            a.sw.panel = Some(0);
+        });
+        assert!(settingswin::cut(&a).is_empty(), "indonesian: {id}: cut texts {:?}", settingswin::cut(&a));
+    }
+}

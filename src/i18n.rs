@@ -150,6 +150,7 @@ const ID_TEXT: &[(&str, &str)] = &[
     ("Downloading dictionary", "Mengunduh kamus"),
     ("Download failed", "Unduhan gagal"),
     ("Retry", "Ulangi"),
+    ("Save", "Simpan"),
     ("Installed", "Terpasang"),
     ("No extensions found", "Tidak ada extension"),
     ("An extension is a small program that adds a slide or alerts to the notch. Its installer puts a folder in the extensions folder.", "Extension adalah program kecil yang menambah slide atau peringatan di notch. Installer-nya menaruh folder di folder extensions."),

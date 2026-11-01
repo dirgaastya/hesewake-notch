@@ -425,7 +425,7 @@ impl App {
         v
     }
 
-    fn ext_id(&self, i: usize) -> Option<String> {
+    pub(crate) fn ext_id(&self, i: usize) -> Option<String> {
         self.ext.list.get(i).and_then(|e| e.manifest.as_ref().ok()).map(|m| m.id.clone())
     }
 

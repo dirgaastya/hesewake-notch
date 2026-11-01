@@ -7,6 +7,7 @@
 //! without it and the Win32 calls that trigger them are made after `with_app` returns.
 
 use crate::extproto::{DetailMsg, SlideMsg};
+use crate::textfield::TextField;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -177,6 +178,9 @@ pub(crate) enum Hit {
     PanelStep(i32),
     PanelRetry,
     PanelSetup,
+    /// The text box of a page, and the button next to it.
+    PanelInput,
+    PanelInputSave,
     /// About > Updates: check now, or install / download the release found.
     Update,
 }
@@ -198,6 +202,21 @@ enum Knob {
     /// An extension's on/off switch, and its Toasts switch (by place in the list).
     Ext(u8),
     ExtMute(u8),
+}
+
+/// The text box of an extension's page while the panel shows one.
+pub(crate) struct FieldState {
+    /// Which page it belongs to: the extension, the page (`for`) and the input's id.
+    key: (usize, String, String),
+    /// What the extension said the text is; the box goes back to it when the user gives up.
+    original: String,
+    max: usize,
+    tf: TextField,
+    focused: bool,
+    /// When the caret last moved: it blinks from there.
+    since: Instant,
+    /// The first half of a character that came as two UTF-16 units.
+    high: Option<u16>,
 }
 
 pub(crate) struct Win {
@@ -225,6 +244,8 @@ pub(crate) struct Win {
     pub(crate) dict_confirm: Option<Instant>,
     /// The extension whose pages the Extensions page shows instead of the list (its Settings in panel mode).
     pub(crate) panel: Option<usize>,
+    /// The text box the panel's page shows, if it shows one.
+    pub(crate) field: Option<FieldState>,
     /// The update state last drawn (checking, release found, download progress): redraw when it changes.
     update_seen: (bool, Option<String>, Option<u8>),
 }
@@ -251,6 +272,7 @@ impl Win {
             autostart: false,
             dict_confirm: None,
             panel: None,
+            field: None,
             update_seen: (false, None, None),
         }
     }
@@ -479,6 +501,7 @@ impl App {
         self.sw.update_seen = upd;
         upd_changed
             || self.update_busy
+            || self.sw.field.as_ref().is_some_and(|f| f.focused)
             || matches!(dict::state(), dict::Dl::Running(_))
             || recent(self.sw.dict_confirm)
             || recent(self.cal_confirm)
@@ -631,6 +654,10 @@ impl App {
     }
 
     pub(crate) fn sw_click(&mut self, hit: Hit) {
+        // a click anywhere but in the text box leaves it
+        if !matches!(hit, Hit::PanelInput | Hit::PanelInputSave) {
+            self.sw_field_focus(false);
+        }
         // Remember where the knob / thumb is before the change, so it springs from there.
         match hit {
             Hit::Press(o) => {
@@ -690,6 +717,8 @@ impl App {
             Hit::PanelStep(d) => self.ext_panel_step(d),
             Hit::PanelRetry => self.ext_panel_action("retry"),
             Hit::PanelSetup => self.ext_panel_action("setup"),
+            Hit::PanelInput => self.sw_field_focus(true),
+            Hit::PanelInputSave => self.sw_field_commit(),
             Hit::Update => self.sw_update_button(),
             Hit::Close | Hit::Minimize => {}
         }
@@ -826,7 +855,7 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 Some(Hit::Close) => after = After::Close,
                 Some(Hit::Minimize) => after = After::Minimize,
                 Some(h) => a.sw_click(h),
-                None => {}
+                None => a.sw_field_focus(false),
             });
             match after {
                 After::Close => {
@@ -848,8 +877,20 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
             });
             LRESULT(0)
         }
+        WM_CHAR => {
+            let mut used = false;
+            with_app(|a| used = a.sw_field_char(wp.0 as u16));
+            if used {
+                let _ = InvalidateRect(hwnd, None, false);
+            }
+            LRESULT(0)
+        }
         WM_KEYDOWN => {
-            if wp.0 == VK_ESCAPE.0 as usize {
+            let (mut used, ctrl) = (false, windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState(0x11) < 0);
+            with_app(|a| used = a.sw_field_key(wp.0 as u16, ctrl));
+            if used {
+                let _ = InvalidateRect(hwnd, None, false);
+            } else if wp.0 == VK_ESCAPE.0 as usize {
                 let _ = DestroyWindow(hwnd);
             }
             LRESULT(0)
@@ -915,6 +956,7 @@ unsafe fn blit(a: &mut App, hdc: HDC) {
 // ---------------------------------------------------------------- drawing
 /// Draw the window into its canvas and remember where the clickable parts are.
 pub(crate) fn render(a: &mut App) {
+    a.sw_sync_field();
     let s = a.sw.scale;
     let mut g = match a.sw.gfx.take() {
         Some(g) if g.s == s => g,
@@ -1409,7 +1451,7 @@ impl Draw {
             }, None);
         }
         if let Some(d) = &e.detail {
-            return self.panel_detail(g, y, d);
+            return self.panel_detail(g, y, d, a.sw.field.as_ref());
         }
         let Some(s) = &e.slide else { return self.panel_message(g, y, tr("Loading\u{2026}"), None) };
         self.panel_slide(g, y, s, e.view.tab_sel.as_deref())
@@ -1529,7 +1571,7 @@ impl Draw {
         y + 8.0
     }
 
-    fn panel_detail(&mut self, g: &mut Gfx, y: f32, d: &DetailMsg) -> f32 {
+    fn panel_detail(&mut self, g: &mut Gfx, y: f32, d: &DetailMsg, field: Option<&FieldState>) -> f32 {
         use crate::extproto::State;
         match d.state {
             State::Loading => return self.panel_message(g, y, tr("Loading\u{2026}"), None),
@@ -1562,7 +1604,8 @@ impl Draw {
         }
         let text_h: f32 = 20.0 + lines.iter().map(|l| 17.0 + l.4).sum::<f32>();
         let buttons_h = if d.buttons.is_empty() { 0.0 } else { 46.0 };
-        let h = (text_h + buttons_h).max(qr.map_or(0.0, |q| q.2 + 36.0 + buttons_h)).max(80.0);
+        let input_h = if d.input.is_some() { 64.0 } else { 0.0 };
+        let h = (text_h + input_h + buttons_h).max(qr.map_or(0.0, |q| q.2 + 36.0 + buttons_h)).max(80.0);
         Self::card(g, y, h);
         let mut ly = y + 18.0;
         for (t, size, col, bold, gap) in &lines {
@@ -1574,6 +1617,29 @@ impl Draw {
                 g.txt(t, X0 + 20.0, ly, *size, *col, 1.0, text_w + 2.0);
             }
             ly += 17.0;
+        }
+        if let (Some(inp), Some(f)) = (&d.input, field) {
+            let save = if inp.button.is_empty() { tr("Save") } else { inp.button.as_str() };
+            let save_w = (g.width_ex(save, 12.0, true) + 24.0).max(56.0);
+            let (bx, by) = (X0 + 20.0, ly + 6.0 + 16.0);
+            let bw = text_w - save_w - 10.0;
+            if !inp.label.is_empty() {
+                self.check(g, &inp.label, 11.5, false, text_w);
+                g.txt(&inp.label, bx, ly + 6.0, 11.5, TEXT_FAINT, 1.0, text_w);
+            }
+            let frame = rrect(bx, by, bw, 30.0, 8.0);
+            g.fill(&frame, &paint(255, 255, 255, if f.focused { 0.12 } else { 0.07 }));
+            let edge = if f.focused { let m = g.acc.main; paint(m[0], m[1], m[2], 0.9) } else { paint(255, 255, 255, 0.14) };
+            g.stroke(&frame, &edge, 1.0);
+            // the text slides left when the caret would be outside the box
+            let (inner, before) = (bw - 20.0, g.width(&f.tf.before_cursor(), 13.0));
+            let off = (before - inner + 2.0).max(0.0);
+            g.txt_clip(&f.tf.text(), bx + 10.0 - off, by + ty(30.0, 13.0), 13.0, [245, 245, 248], 1.0, bx + 8.0, bx + bw - 8.0, 0.0);
+            if f.focused && (f.since.elapsed().as_millis() / 500) % 2 == 0 {
+                g.rect(bx + 10.0 - off + before, by + 6.0, 1.5, 18.0, &paint(255, 255, 255, 0.95));
+            }
+            self.hit(bx, by, bw, 30.0, Hit::PanelInput);
+            self.small_button(g, bx + bw + 10.0 + save_w, by + 2.0, save, Hit::PanelInputSave, true);
         }
         if let Some((m, px, side)) = qr {
             let (qx, qy) = (X1 - 20.0 - side, y + 18.0);
@@ -1715,5 +1781,116 @@ fn slide_sub(id: SlideId) -> &'static str {
         SlideId::Agenda => tr("What is left today"),
         SlideId::Prayer => tr("Today's prayer times"),
         SlideId::Ext(_) => "",
+    }
+}
+
+impl App {
+    /// Make the text box match the page the panel shows: made when a page with an `input` appears, dropped when it goes.
+    pub(crate) fn sw_sync_field(&mut self) {
+        let want = self.sw.panel.and_then(|i| {
+            let e = self.ext.list.get(i).filter(|e| e.connected)?;
+            let d = e.detail.as_ref()?;
+            Some((i, d.for_id.clone(), d.input.as_ref()?.clone()))
+        });
+        let Some((i, page, inp)) = want else {
+            self.sw.field = None;
+            return;
+        };
+        let key = (i, page, inp.id.clone());
+        match self.sw.field.as_mut() {
+            Some(f) if f.key == key => {
+                // the extension says the text is something else now (it took the new name): follow, unless it is being typed
+                if !f.focused && f.original != inp.value {
+                    f.original = inp.value.clone();
+                    f.tf = TextField::new(&inp.value, inp.max);
+                }
+            }
+            _ => self.sw.field = Some(FieldState { key, original: inp.value.clone(), max: inp.max, tf: TextField::new(&inp.value, inp.max), focused: false, since: Instant::now(), high: None }),
+        }
+    }
+
+    /// The box gets the keyboard (a click on it) or lets go of it (a click elsewhere). What was typed stays.
+    pub(crate) fn sw_field_focus(&mut self, on: bool) {
+        if let Some(f) = self.sw.field.as_mut() {
+            if on && !f.focused {
+                f.tf.end();
+            }
+            f.focused = on;
+            f.since = Instant::now();
+        }
+    }
+
+    /// A character typed (WM_CHAR, a UTF-16 unit). True if the box took it.
+    pub(crate) fn sw_field_char(&mut self, unit: u16) -> bool {
+        let Some(f) = self.sw.field.as_mut().filter(|f| f.focused) else { return false };
+        let c = match unit {
+            0xD800..=0xDBFF => {
+                f.high = Some(unit);
+                return true;
+            }
+            0xDC00..=0xDFFF => f.high.take().and_then(|h| char::decode_utf16([h, unit]).next()?.ok()),
+            u => {
+                f.high = None;
+                char::from_u32(u as u32)
+            }
+        };
+        if c.is_some_and(|c| f.tf.insert(c)) {
+            f.since = Instant::now();
+        }
+        true
+    }
+
+    /// A key pressed (WM_KEYDOWN). True if the box took it.
+    pub(crate) fn sw_field_key(&mut self, vk: u16, ctrl: bool) -> bool {
+        let hwnd = self.sw.hwnd;
+        let Some(f) = self.sw.field.as_mut().filter(|f| f.focused) else { return false };
+        f.since = Instant::now();
+        let mut commit = false;
+        match vk {
+            0x08 => f.tf.backspace(),
+            0x2E => f.tf.delete(),
+            0x25 => f.tf.left(),
+            0x27 => f.tf.right(),
+            0x24 => f.tf.home(),
+            0x23 => f.tf.end(),
+            0x0D => commit = true,
+            // Esc: give up, back to what the extension says
+            0x1B => {
+                f.tf = TextField::new(&f.original, f.max);
+                f.focused = false;
+            }
+            0x56 if ctrl => {
+                if let Some(t) = calendar::clipboard_text(hwnd) {
+                    f.tf.insert_str(&t);
+                }
+            }
+            _ => {}
+        }
+        if commit {
+            self.sw_field_commit();
+        }
+        true
+    }
+
+    /// Enter or the button: what is typed goes to the extension, which answers with the page it makes of it.
+    pub(crate) fn sw_field_commit(&mut self) {
+        let Some(f) = self.sw.field.as_mut() else { return };
+        f.focused = false;
+        let (i, id, text) = (f.key.0, f.key.2.clone(), f.tf.text());
+        if let Some(ext) = self.ext_id(i) {
+            self.ext_send_to(&ext, crate::extproto::input(&id, &text));
+        }
+    }
+}
+
+/// Tests look at the box without reaching into it.
+#[cfg(test)]
+impl FieldState {
+    pub(crate) fn tf_text(&self) -> String {
+        self.tf.text()
+    }
+
+    pub(crate) fn is_focused(&self) -> bool {
+        self.focused
     }
 }
