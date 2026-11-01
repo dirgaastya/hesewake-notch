@@ -54,6 +54,10 @@ pub(crate) struct Settings {
     /// Adhan when a prayer starts: adhan::OFF / SYSTEM / FILE, and the file the user picked.
     pub(crate) adhan: u8,
     pub(crate) adhan_file: String,
+    /// Wibu mode: an image behind the expanded notch, the file the user picked, and how much it is darkened (wibu.rs).
+    pub(crate) wibu: bool,
+    pub(crate) wibu_file: String,
+    pub(crate) wibu_dim: u8,
     /// Indeks di `scale::SIZES`: 0 = Auto (ikut scaling Windows), selebihnya ukuran tetap.
     pub(crate) notch_size: usize,
     /// Tampilan notch idle: 0 = bergantian jam/mata (10/15 menit), 1 = jam saja, 2 = mata saja.
@@ -97,6 +101,9 @@ impl Default for Settings {
             ramadan: false,
             adhan: adhan::OFF,
             adhan_file: String::new(),
+            wibu: false,
+            wibu_file: String::new(),
+            wibu_dim: wibu::DEFAULT_DIM,
             notch_size: 0,
             idle_display: 0,
             accent: 0,
@@ -135,6 +142,13 @@ impl Settings {
                 "ramadan" => s.ramadan = flag,
                 "adhan" => s.adhan = v.parse::<u8>().unwrap_or(adhan::OFF).min(adhan::MODES - 1),
                 "adhan_file" => s.adhan_file = v.to_string(),
+                "wibu" => s.wibu = flag,
+                "wibu_file" => s.wibu_file = v.to_string(),
+                "wibu_dim" => {
+                    if let Ok(n) = v.parse::<u8>() {
+                        s.wibu_dim = wibu::snap_dim(n);
+                    }
+                }
                 "update_check" => s.update_check = flag,
                 "update_seen" => s.update_seen = v.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')).take(32).collect(),
                 "monitor" => {
@@ -184,7 +198,7 @@ impl Settings {
 
     pub(crate) fn serialize(&self) -> String {
         format!(
-            "minimal={}\nnotifications={}\nbusy_on_maximized={}\nlyric_lead_ms={}\nromaji_lyrics={}\nnotif_avatar={}\nlock_toast={}\nprivacy_dot={}\nslide_hotkeys={}\nmic_hotkey={}\ndownloads={}\nhud_volume={}\nhud_brightness={}\nweather={}\nweather_city={}\nprayer={}\nimsak_terbit={}\nramadan={}\nadhan={}\nadhan_file={}\nmonitor={}\nnotch_size={}\nidle_display={}\naccent={}\nlang={}\nupdate_check={}\nupdate_seen={}\nslides={}\n",
+            "minimal={}\nnotifications={}\nbusy_on_maximized={}\nlyric_lead_ms={}\nromaji_lyrics={}\nnotif_avatar={}\nlock_toast={}\nprivacy_dot={}\nslide_hotkeys={}\nmic_hotkey={}\ndownloads={}\nhud_volume={}\nhud_brightness={}\nweather={}\nweather_city={}\nprayer={}\nimsak_terbit={}\nramadan={}\nadhan={}\nadhan_file={}\nwibu={}\nwibu_file={}\nwibu_dim={}\nmonitor={}\nnotch_size={}\nidle_display={}\naccent={}\nlang={}\nupdate_check={}\nupdate_seen={}\nslides={}\n",
             self.minimal as u8,
             self.notifications as u8,
             self.busy_on_maximized as u8,
@@ -205,6 +219,9 @@ impl Settings {
             self.ramadan as u8,
             self.adhan,
             self.adhan_file.replace(['\r', '\n'], ""),
+            self.wibu as u8,
+            self.wibu_file.replace(['\r', '\n'], ""),
+            self.wibu_dim,
             self.monitor,
             self.notch_size,
             self.idle_display,
@@ -335,6 +352,24 @@ mod tests {
         assert!(back.ramadan && !back.imsak_terbit);
         assert_eq!((back.adhan, back.adhan_file.as_str()), (adhan::FILE, "C:\\Users\\me\\Music\\adzan = makkah.mp3"));
         assert_eq!(Settings::parse("adhan=9\n").adhan, adhan::MODES - 1, "out of range is clamped");
+    }
+
+    #[test]
+    fn wibu_roundtrip_and_defaults() {
+        let s = Settings::parse("minimal=1\n");
+        assert!(!s.wibu, "old file = off");
+        assert_eq!((s.wibu_file.as_str(), s.wibu_dim), ("", wibu::DEFAULT_DIM));
+        let mut s = Settings::default();
+        s.wibu = true;
+        s.wibu_file = "C:\\Users\\me\\Pictures\\a = b.png".into();
+        s.wibu_dim = 50;
+        let back = Settings::parse(&s.serialize());
+        assert!(back.wibu);
+        assert_eq!((back.wibu_file.as_str(), back.wibu_dim), ("C:\\Users\\me\\Pictures\\a = b.png", 50));
+        assert_eq!(Settings::parse("wibu_dim=63").wibu_dim, 60, "nearest choice");
+        assert_eq!(Settings::parse("wibu_dim=0").wibu_dim, 50);
+        assert_eq!(Settings::parse("wibu_dim=255").wibu_dim, 80);
+        assert_eq!(Settings::parse("wibu_dim=x").wibu_dim, wibu::DEFAULT_DIM);
     }
 
     #[test]

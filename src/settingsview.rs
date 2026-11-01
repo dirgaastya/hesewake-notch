@@ -182,6 +182,9 @@ pub(crate) enum Rid {
     Ramadan,
     Adhan,
     AdhanFile,
+    Wibu,
+    WibuFile,
+    WibuDim,
     Accent,
     Romaji,
     Dictionary,
@@ -315,7 +318,18 @@ impl App {
                 Row { id: Rid::Minimal, label: tr("Minimal notch"), sub: tr("Thin line while idle"), kind: RowKind::Toggle(self.minimal) },
                 Row { id: Rid::ThinMaximized, label: tr("Thin on maximize"), sub: tr("Off: only on fullscreen"), kind: RowKind::Toggle(self.cfg.busy_on_maximized) },
                 Row { id: Rid::IdleDisplay, label: tr("Idle display"), sub: tr("Cycle: clock/eyes"), kind: RowKind::Stepper(settings::idle_display_label(self.cfg.idle_display).to_string()) },
-            ],
+                Row { id: Rid::Wibu, label: tr("Wibu mode"), sub: tr("Image behind the notch"), kind: RowKind::Toggle(self.cfg.wibu) },
+            ]
+            .into_iter()
+            // with Wibu mode on, a row to pick (or change) the image and one for how dark it is
+            .chain(self.cfg.wibu.then(|| Row {
+                id: Rid::WibuFile,
+                label: tr("Wibu image"),
+                sub: if self.wibu.failed { tr("Can't read the image") } else { tr("JPG, PNG or WebP") },
+                kind: RowKind::Button(if self.cfg.wibu_file.is_empty() { tr("Choose") } else { tr("Change") }.into()),
+            }))
+            .chain(self.cfg.wibu.then(|| Row { id: Rid::WibuDim, label: tr("Image dim"), sub: tr("For readable text"), kind: RowKind::Stepper(format!("{}%", self.cfg.wibu_dim)) }))
+            .collect(),
             2 => vec![
                 Row { id: Rid::Notifications, label: tr("Notifications"), sub: tr("Windows toasts + bell"), kind: RowKind::Toggle(self.notif_on) },
                 Row { id: Rid::ContactPhotos, label: tr("Contact photos"), sub: tr("In notifications"), kind: RowKind::Toggle(self.cfg.notif_avatar) },
@@ -680,6 +694,24 @@ impl App {
                 Rid::AdhanFile => {
                     if right {
                         adhan::pick_file(self.hwnd);
+                    }
+                }
+                Rid::Wibu => {
+                    self.cfg.wibu = !self.cfg.wibu;
+                    if self.cfg.wibu && self.cfg.wibu_file.is_empty() {
+                        wibu::pick_file(self.hwnd);
+                    } else {
+                        self.wibu_apply();
+                    }
+                }
+                Rid::WibuFile => {
+                    if right {
+                        wibu::pick_file(self.hwnd);
+                    }
+                }
+                Rid::WibuDim => {
+                    if right {
+                        self.cfg.wibu_dim = wibu::step_dim(self.cfg.wibu_dim, plus);
                     }
                 }
                 Rid::Accent => {
