@@ -246,24 +246,6 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                     present(a);
                     return;
                 }
-                if vertical && a.is_slide(SlideId::Settings) && a.sui.tab == 0 && a.slides_scrollable() {
-                    if a.last_wheel.elapsed() >= Duration::from_millis(90) {
-                        a.last_wheel = Instant::now();
-                        if a.settings_slides_wheel(d < 0) {
-                            present(a);
-                        }
-                    }
-                    return;
-                }
-                if vertical && a.is_slide(SlideId::Settings) && a.rows_scrollable() {
-                    if a.last_wheel.elapsed() >= Duration::from_millis(90) {
-                        a.last_wheel = Instant::now();
-                        if a.settings_rows_wheel(d < 0) {
-                            present(a);
-                        }
-                    }
-                    return;
-                }
                 if vertical && a.is_slide(SlideId::Agenda) && a.agenda_scrollable() {
                     if a.last_wheel.elapsed() >= Duration::from_millis(90) {
                         a.last_wheel = Instant::now();
@@ -493,6 +475,30 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                     a.cfg.save();
                     present(a);
                     schedule(a);
+                    a.sw_kick();
+                });
+            }
+            LRESULT(0)
+        }
+        wibu::WM_WIBU_FILE => {
+            if let Some(picked) = wibu::take_picked() {
+                with_app(|a| {
+                    a.wibu_picked(picked);
+                    a.cfg.save();
+                    present(a);
+                    schedule(a);
+                    a.sw_kick();
+                });
+            }
+            LRESULT(0)
+        }
+        wibu::WM_WIBU_READY => {
+            if let Some(loaded) = wibu::take_loaded() {
+                with_app(|a| {
+                    a.wibu_loaded(loaded);
+                    present(a);
+                    schedule(a);
+                    a.sw_kick();
                 });
             }
             LRESULT(0)
@@ -715,7 +721,7 @@ unsafe fn run_command(hwnd: HWND, cmd: i32) {
                 a.save_settings();
             }
             sys::CMD_ABOUT => show_about = true,
-            sys::CMD_SETTINGS => a.open_settings(),
+            sys::CMD_SETTINGS => a.open_settings_window(),
             sys::CMD_UPDATE_OPEN => {
                 if let Some(r) = &a.update {
                     sys::open_url(&r.url);

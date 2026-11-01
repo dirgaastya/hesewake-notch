@@ -13,6 +13,22 @@ const RETRY: Duration = Duration::from_secs(5 * 60);
 /// Lama tiap tahap (suhu / ikon) dan transisi di antaranya.
 const STAGE_SECS: f32 = 4.0;
 const TRANS_SECS: f32 = 0.38;
+/// Frame interval while a moving weather icon shows (rain, drizzle, storm, snow, the hot sun). The motions are small
+/// and slow, so 20 fps looks the same as 60.
+pub(crate) const ICON_MS: u32 = 50;
+
+/// Timer period the weather slot needs: 16 ms during the short change between temperature and icon, `ICON_MS` while a
+/// moving icon shows, and nothing otherwise. A moving icon holds still while nobody is at the computer (no input for
+/// `eye::EYE_STILL_AFTER_SECS`), like the idle eye.
+pub(crate) fn slot_frame_ms(transition: bool, icon_moving: bool, input_idle_secs: f32) -> u32 {
+    if transition {
+        16
+    } else if icon_moving && input_idle_secs < eye::EYE_STILL_AFTER_SECS {
+        ICON_MS
+    } else {
+        0
+    }
+}
 const HOT_C: f32 = 32.0;
 
 /// Kota bawaan untuk dipilih di Settings (nama, lintang, bujur). Tambah kota baru di sini (urutan lama dipertahankan agar indeks tersimpan tetap valid).
@@ -321,13 +337,14 @@ impl App {
     }
 
     /// Butuh frame: saat transisi, atau saat tahap ikon yang bergerak.
-    pub(crate) fn weather_animating(&self) -> bool {
+    /// Timer period for the weather slot now (0 = no frames needed); see `slot_frame_ms`.
+    pub(crate) fn weather_frame_ms(&self, input_idle_secs: f32) -> u32 {
         if !self.weather_shown() {
-            return false;
+            return 0;
         }
         let (v, n) = self.slots();
         let (_, stage, prog) = stage_of(secs(), n);
-        (n > 1 && prog < 1.0) || (v[stage] == Slot::Cond && current().map_or(false, animated))
+        slot_frame_ms(n > 1 && prog < 1.0, v[stage] == Slot::Cond && current().map_or(false, animated), input_idle_secs)
     }
 
     pub(crate) fn draw_weather(&self, g: &mut Gfx, w: f32, h: f32, ca: f32) {
@@ -501,6 +518,35 @@ mod tests {
         assert_eq!(stage_at(1.0).2, 1.0); // transisi selesai
         assert_eq!(stage_at(4.0).1, 1);
         assert_eq!(stage_at(8.5).1, 0);
+    }
+
+    #[test]
+    fn moving_icon_runs_at_20_fps_and_holds_still_when_nobody_is_there() {
+        assert_eq!(slot_frame_ms(true, true, 0.0), 16, "the change between stages stays smooth");
+        assert_eq!(slot_frame_ms(false, true, 0.0), ICON_MS);
+        assert_eq!(slot_frame_ms(false, true, eye::EYE_STILL_AFTER_SECS + 1.0), 0, "nobody there: the icon holds still");
+        assert_eq!(slot_frame_ms(true, true, eye::EYE_STILL_AFTER_SECS + 1.0), 16, "a stage change is still drawn through");
+        assert_eq!(slot_frame_ms(false, false, 0.0), 0, "temperature: nothing moves");
+    }
+
+    /// Frames per second of the clock phase with a moving icon, over one temperature + icon cycle: about 36 before
+    /// (the laptop measured 48 in the seconds that had frames, 30 over the whole minute), well under half now.
+    #[test]
+    fn clock_phase_draws_far_fewer_frames() {
+        let fps = |icon_ms: u32| {
+            let (mut t, mut frames) = (0.0f32, 0u32);
+            while t < 2.0 * STAGE_SECS {
+                let (_, stage, prog) = stage_of(t, 2);
+                let ms = if prog < 1.0 { 16 } else if stage == 1 { icon_ms } else { 0 };
+                // no frames: the poll timer looks again in 100 ms
+                t += if ms == 0 { 0.1 } else { ms as f32 / 1000.0 };
+                frames += (ms != 0) as u32;
+            }
+            frames as f32 / (2.0 * STAGE_SECS)
+        };
+        let (before, after) = (fps(16), fps(ICON_MS));
+        assert!((30.0..40.0).contains(&before), "before {before:.1} fps");
+        assert!(after < before * 0.5, "after {after:.1} fps vs {before:.1}");
     }
 
     #[test]

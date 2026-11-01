@@ -130,6 +130,9 @@ pub(crate) fn draw(a: &mut App) {
         None => notch_path(w, h),
     };
     g.fill(&shape, &paint(0, 0, 0, 1.0));
+    if p > 0.04 {
+        a.draw_wibu(&mut g, p);
+    }
 
     // Collapsed content only shows once the notch is tall enough for it, also right after a toast, when the notch
     // may be shrinking back to the thin busy line.
@@ -156,7 +159,6 @@ pub(crate) fn draw(a: &mut App) {
         for &(i, _, al) in &vis {
             match a.order[i] {
                 SlideId::Music => a.music_glow(&mut g, &shape, w, h, al),
-                SlideId::Water => glow(&mut g, &shape, h, (30, 110, 235), 0.40 * al),
                 // Other slides: one glow color (derived from the accent) so the slides feel consistent.
                 _ => {
                     let c = g.acc.glow;
@@ -171,7 +173,6 @@ pub(crate) fn draw(a: &mut App) {
                 SlideId::Todo => a.slide_todo(&mut g, ox, al),
                 SlideId::Ledge => a.slide_shelf(&mut g, ox, al),
                 SlideId::Notifications => a.slide_notifs(&mut g, ox, al),
-                SlideId::Settings => a.slide_settings(&mut g, ox, al),
                 SlideId::System => a.slide_system(&mut g, ox, al),
                 SlideId::Timer => a.slide_timer(&mut g, ox, al),
                 SlideId::Scrap => a.slide_note(&mut g, ox, al),
@@ -211,6 +212,10 @@ pub(crate) unsafe fn present(a: &mut App) {
     let draw_dur = t_draw.elapsed();
     let t_blit = Instant::now();
     let Some(g) = a.gfx.as_ref() else { return; };
+    // No window bitmap yet (tests draw an App without a window): drawing was all there is to do.
+    if a.bits == 0 {
+        return;
+    }
     // Bitmap window selalu seukuran kanvas (keduanya dibuat ulang bersama di `rescale`).
     let (pw, ph) = (g.pm.width() as usize, g.pm.height() as usize);
     if scale::canvas(a.scale) != (pw as i32, ph as i32) {

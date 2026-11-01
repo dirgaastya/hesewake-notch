@@ -26,7 +26,7 @@ impl App {
     }
 
     pub(crate) fn cur_id(&self) -> SlideId {
-        self.order.get(self.cur()).copied().unwrap_or(SlideId::Settings)
+        self.order.get(self.cur()).copied().unwrap_or(SlideId::Music)
     }
 
     pub(crate) fn is_slide(&self, id: SlideId) -> bool {

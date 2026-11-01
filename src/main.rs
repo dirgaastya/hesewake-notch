@@ -67,6 +67,7 @@ mod dict;
 mod downloads;
 mod dragdrop;
 mod eye;
+mod filepick;
 mod gfx;
 mod hotkeys;
 mod i18n;
@@ -86,6 +87,7 @@ mod notif;
 mod notif_img;
 mod notifview;
 mod note;
+mod opts;
 mod output;
 mod pace;
 mod perf;
@@ -96,7 +98,7 @@ mod render;
 mod romaji;
 mod scale;
 mod settings;
-mod settingsview;
+mod settingswin;
 mod shelf;
 mod slides;
 #[cfg(test)]
@@ -109,6 +111,7 @@ mod timer;
 mod toast;
 mod update;
 mod water;
+mod wibu;
 mod window;
 
 use accent::Accent;
@@ -174,6 +177,8 @@ struct App {
     prayer_sun: u16,
     /// The adhan plays until then (adhan.rs).
     adhan_until: Option<Instant>,
+    /// The image of Wibu mode, scaled to the canvas (wibu.rs).
+    wibu: wibu::Wibu,
     hover: bool,
     busy: bool,
     /// Mode "Minimal notch": garis tipis saat tidak ada musik, buka dengan hover.
@@ -296,10 +301,8 @@ struct App {
     /// Wheel delta on the output button not yet used (trackpads send small steps).
     out_acc: i32,
     order: Vec<SlideId>,
-    /// Slide Settings sedang dibuka (ada di carousel) dan slide asal sebelum dibuka.
-    settings_open: bool,
-    settings_prev: Option<SlideId>,
-    sui: settingsview::SettingsUi,
+    /// The Settings window (settingswin.rs).
+    sw: settingswin::Win,
     sys_ui: sysview::SysUi,
     /// Indeks tahap cuaca terakhir yang digambar (memicu transisi suhu <-> ikon).
     weather_idx: u64,
@@ -564,6 +567,7 @@ fn main() -> Result<()> {
             prayer_fired: None,
             prayer_sun: 0,
             adhan_until: None,
+            wibu: wibu::Wibu::default(),
             hover: false,
             busy: is_busy(hwnd, cfg.busy_on_maximized, &mon),
             minimal: cfg.minimal,
@@ -672,16 +676,15 @@ fn main() -> Result<()> {
             out_scroll: 0,
             out_t: Instant::now() - Duration::from_secs(10),
             out_acc: 0,
-            order: slides::visible_order(&slides::effective(&cfg.slides, cfg.prayer_on), false),
-            settings_open: false,
-            settings_prev: None,
-            sui: settingsview::SettingsUi::new(),
+            order: slides::visible_order(&slides::effective(&cfg.slides, cfg.prayer_on)),
+            sw: settingswin::Win::new(),
             sys_ui: sysview::SysUi::new(),
             weather_idx: 0,
             cfg,
         };
         app.prayer_refresh();
         app.out_refresh();
+        app.wibu_apply();
         let (tw, th) = target(&app);
         app.w = tw;
         app.h = th;
