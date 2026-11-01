@@ -67,6 +67,7 @@ mod dict;
 mod downloads;
 mod dragdrop;
 mod eye;
+mod extproto;
 mod filepick;
 mod gfx;
 mod hotkeys;
