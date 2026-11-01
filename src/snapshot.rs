@@ -842,6 +842,47 @@ fn accent_changes_the_rendered_slide() {
     }
 }
 
+/// The Water slide (and its toast) follow the accent too: each accent renders differently.
+#[test]
+fn water_follows_the_accent() {
+    let render = |i: usize, toast: bool| {
+        let mut a = test_app(1.0);
+        a.cfg.accent = i;
+        if toast {
+            show_toast(&mut a, ToastKind::Water);
+        } else {
+            open_slide(&mut a, SlideId::Water);
+        }
+        (a.w, a.h) = anim::target(&a);
+        a.sp = a.slide as f32;
+        render::draw(&mut a);
+        a.gfx.as_ref().expect("gfx").pm.data().to_vec()
+    };
+    for toast in [false, true] {
+        let shots: Vec<_> = (0..accent::ACCENTS.len()).map(|i| render(i, toast)).collect();
+        for i in 0..shots.len() {
+            for j in i + 1..shots.len() {
+                assert_ne!(shots[i], shots[j], "accents {i} and {j} render the Water {} the same", if toast { "toast" } else { "slide" });
+            }
+        }
+    }
+}
+
+#[test]
+fn snap_water_accents() {
+    for (i, ac) in accent::ACCENTS.iter().enumerate() {
+        let n = ac.name.to_lowercase();
+        shot(&format!("accent-{n}-water"), 1.0, |a| {
+            a.cfg.accent = i;
+            open_slide(a, SlideId::Water);
+        });
+        shot(&format!("accent-{n}-water-toast"), 1.0, |a| {
+            a.cfg.accent = i;
+            show_toast(a, ToastKind::Water);
+        });
+    }
+}
+
 #[test]
 fn snap_slide_hotkeys() {
     // Settings > Slides with each slide's shortcut, and General with the "Slide hotkeys" toggle

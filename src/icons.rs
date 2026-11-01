@@ -3,6 +3,25 @@
 
 use super::*;
 
+/// A drop (point at the top) centred on (cx, cy), `s` tall.
+fn drop_path(cx: f32, cy: f32, s: f32) -> Option<Path> {
+    let h = s / 2.0;
+    let q = |x: f32, y: f32| (cx + x * h, cy + y * h);
+    let mut pb = PathBuilder::new();
+    let a = q(0.0, -1.0);
+    pb.move_to(a.0, a.1);
+    let (c1, c2, e) = (q(0.55, -0.35), q(0.7, 0.05), q(0.7, 0.3));
+    pb.cubic_to(c1.0, c1.1, c2.0, c2.1, e.0, e.1);
+    let (c1, c2, e) = (q(0.7, 0.7), q(0.38, 1.0), q(0.0, 1.0));
+    pb.cubic_to(c1.0, c1.1, c2.0, c2.1, e.0, e.1);
+    let (c1, c2, e) = (q(-0.38, 1.0), q(-0.7, 0.7), q(-0.7, 0.3));
+    pb.cubic_to(c1.0, c1.1, c2.0, c2.1, e.0, e.1);
+    let (c1, c2, e) = (q(-0.7, 0.05), q(-0.55, -0.35), q(0.0, -1.0));
+    pb.cubic_to(c1.0, c1.1, c2.0, c2.1, e.0, e.1);
+    pb.close();
+    pb.finish()
+}
+
 fn path_of(pts: &[(f32, f32)], cx: f32, cy: f32, s: f32, close: bool) -> Option<Path> {
     let mut pb = PathBuilder::new();
     for (i, &(x, y)) in pts.iter().enumerate() {
@@ -204,24 +223,20 @@ impl Gfx {
         }
     }
 
-    /// Tetes air (terisi).
-    pub(crate) fn icon_drop(&mut self, cx: f32, cy: f32, s: f32, p: &Paint) {
+    /// A drop of water in the accent's colours that still reads as water: a very light tint of `pale` (mixed with
+    /// icy white-blue) at the top, a little more of `bright` at the bottom, and a white glint down the left side,
+    /// which is what makes it look wet and fresh in any colour.
+    pub(crate) fn icon_water_drop(&mut self, cx: f32, cy: f32, s: f32, pale: [u8; 3], bright: [u8; 3], a: f32) {
+        let mix = |c: [u8; 3], d: [u8; 3], t: f32| -> [u8; 3] { std::array::from_fn(|i| (c[i] as f32 + (d[i] as f32 - c[i] as f32) * t).round() as u8) };
         let h = s / 2.0;
-        let q = |x: f32, y: f32| (cx + x * h, cy + y * h);
-        let mut pb = PathBuilder::new();
-        let a = q(0.0, -1.0);
-        pb.move_to(a.0, a.1);
-        let (c1, c2, e) = (q(0.55, -0.35), q(0.7, 0.05), q(0.7, 0.3));
-        pb.cubic_to(c1.0, c1.1, c2.0, c2.1, e.0, e.1);
-        let (c1, c2, e) = (q(0.7, 0.7), q(0.38, 1.0), q(0.0, 1.0));
-        pb.cubic_to(c1.0, c1.1, c2.0, c2.1, e.0, e.1);
-        let (c1, c2, e) = (q(-0.38, 1.0), q(-0.7, 0.7), q(-0.7, 0.3));
-        pb.cubic_to(c1.0, c1.1, c2.0, c2.1, e.0, e.1);
-        let (c1, c2, e) = (q(-0.7, 0.05), q(-0.55, -0.35), q(0.0, -1.0));
-        pb.cubic_to(c1.0, c1.1, c2.0, c2.1, e.0, e.1);
-        pb.close();
-        if let Some(path) = pb.finish() {
-            self.fill(&path, p);
+        let (top, bottom) = (mix(pale, [235, 250, 255], 0.35), mix(bright, pale, 0.35));
+        if let Some(path) = drop_path(cx, cy, s) {
+            self.fill(&path, &vgrad(cy - h, cy + h, top, bottom, a));
+        }
+        let glint = [(-0.42, 0.12), (-0.43, 0.36), (-0.33, 0.58), (-0.18, 0.7)];
+        if let Some(path) = path_of(&glint, cx, cy, s, false) {
+            let st = Stroke { width: (s * 0.09).max(1.1), line_cap: LineCap::Round, ..Default::default() };
+            self.pm.stroke_path(&path, &paint(255, 255, 255, 0.85 * a), &st, self.ts, None);
         }
     }
 
