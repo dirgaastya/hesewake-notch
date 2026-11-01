@@ -513,7 +513,20 @@ impl App {
         }
         let muted = self.cfg.ext_mute.clone();
         let out = self.ext.apply(events, &muted, Instant::now());
-        !out.is_empty()
+        self.ext_out(out)
+    }
+
+    /// Act on what `ExtState::apply` found: toasts (not over a full-screen app). True if the screen should be redrawn.
+    pub(crate) fn ext_out(&mut self, out: Vec<Out>) -> bool {
+        let changed = !out.is_empty();
+        for o in out {
+            if let Out::Toast { id, title, sub, count, .. } = o {
+                if !sys::user_fullscreen() {
+                    self.push_toast(toast::ToastKind::Ext { id, title, sub, count });
+                }
+            }
+        }
+        changed
     }
 }
 

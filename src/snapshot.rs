@@ -2637,3 +2637,44 @@ fn snap_extensions_page_in_indonesian() {
         a.ext.list[1].problem = Some("file not found".into());
     });
 }
+
+// ---------------------------------------------------------------- extension toasts
+fn ext_toast_msg(count: u32) -> ext::Evt {
+    ext::Evt::Msg { id: "example-issues".into(), msg: extproto::FromExt::Toast { title: "#128 Fix crash on startup".into(), sub: "New \u{b7} To do".into(), count } }
+}
+
+#[test]
+fn an_extension_toast_shows_and_hovering_it_opens_the_slide() {
+    let mut a = test_app(1.0);
+    ext_setup(&mut a, ext_issues());
+    a.hover = false;
+    a.slide = 0;
+    let out = a.ext.apply(vec![ext_toast_msg(1)], &[], Instant::now());
+    assert!(a.ext_out(out));
+    assert!(matches!(a.toast.as_ref().map(|t| &t.kind), Some(ToastKind::Ext { id, count: 1, .. }) if id == "example-issues"));
+    assert!(!a.toast_has_button(), "no buttons: hovering is how it is answered");
+    a.hover = true;
+    assert!(a.toast_update());
+    assert!(a.toast.is_none() && a.cur_ext() == Some(0), "the extension's slide is open");
+}
+
+#[test]
+fn a_muted_extension_makes_no_toast() {
+    let mut a = test_app(1.0);
+    ext_setup(&mut a, ext_issues());
+    a.hover = false;
+    let out = a.ext.apply(vec![ext_toast_msg(1)], &["example-issues".to_string()], Instant::now());
+    assert!(!a.ext_out(out));
+    assert!(a.toast.is_none());
+}
+
+#[test]
+fn snap_extension_toast() {
+    for (name, count) in [("one", 1), ("many", 4)] {
+        shot(&format!("ext-toast-{name}"), 1.0, |a| {
+            ext_setup(a, ext_issues());
+            a.hover = false;
+            show_toast(a, ToastKind::Ext { id: "example-issues".into(), title: "#128 Fix crash on startup".into(), sub: "New \u{b7} To do".into(), count });
+        });
+    }
+}
