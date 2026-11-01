@@ -1,7 +1,7 @@
 # Hesewake Notch extensions (protocol draft, version 1)
 
-> **Status: draft for review. Nothing here is implemented yet.** It describes what the notch will offer to extensions
-> from the first release that supports them, and what an extension has to do.
+> **Status: version 1, implemented in the host (`ext.rs`, `extproto.rs`, `extapp.rs`, `extslide.rs`) and tried with the
+> example in `examples/hello-extension`. It is not frozen yet: it will be when the first real extensions work end to end.**
 
 An extension is a small program that runs next to the notch and talks to it over a local **named pipe**. The notch draws
 everything (slide, toasts, markers, animations); the extension only decides **what** to show and reacts to clicks. This
@@ -14,7 +14,7 @@ Examples in this document use an imaginary issue tracker. Nothing in the protoco
 
 | Capability | What it is |
 |---|---|
-| **Slide** (optional) | One slide in the carousel, with the extension's name and icon. It can show a *list page* or a *detail page* (see section 5). The user can hide it, move it or give it a hotkey like any other slide (`Ctrl+Alt+N`). |
+| **Slide** (optional) | One slide in the carousel, with the extension's name and icon. It can show a *list page* or a *detail page* (see section 5). It comes after the notch's own slides, in the order of the extensions list, and gets a `Ctrl+Alt+N` hotkey like the others. Switching the extension off in *Settings > Extensions* takes the slide away. |
 | **Toast** | A short message in the small notch ("title", "subtitle", optional count). Clicking it opens the extension's slide. |
 | **Marker** | A dot on the slide's navigation dot, until the slide is opened ("something new"). |
 | **Open a link** | Ask the notch to open an `http`/`https` link in the browser, after a click on the slide. |
@@ -53,6 +53,8 @@ An extension is registered by a **manifest** in the user's data folder:
   status and an on/off switch). Installing a manifest alone never runs anything.
 - The extension may also be started by something else (for example by the user). The notch accepts a connection from a
   program only if it is the `exe` of an enabled manifest (section 3).
+- When the notch starts the extension, the full name of the pipe is in its environment as `HESEWAKE_NOTCH_PIPE`. A
+  program started by anything else builds the name from the user's SID (section 3).
 
 ### Managing extensions (Settings > Extensions)
 
@@ -239,4 +241,14 @@ Characters are counted as Unicode scalar values. Anything over a limit is clippe
 5. Send "bye" and exit when you get "quit".
 ```
 
-A small example extension will live in `examples/` once the protocol is implemented.
+A complete small example is in `examples/hello-extension`. It uses only the standard library and `serde_json`, and shows
+every kind of page, a toast, a badge and a status.
+
+Two things worth knowing:
+
+- **A plain (synchronous) pipe handle cannot be read and written from two threads at once**: a read that waits blocks every
+  write on the same handle. The example only answers what it is sent. An extension that must send on its own schedule, for
+  example after polling a server, should open the pipe with `FILE_FLAG_OVERLAPPED` and use overlapped reads and writes, or
+  keep one thread that does both with `PeekNamedPipe`. The notch itself uses overlapped I/O.
+- The notch drops messages above 10 per second, silently. Send a whole page in one message, and do not send a `status`
+  after every message.

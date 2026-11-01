@@ -1,0 +1,13 @@
+[package]
+name = "hello-extension"
+version = "0.1.0"
+edition = "2021"
+description = "A small example extension for Hesewake Notch (docs/extensions.md)"
+license = "MIT"
+publish = false
+
+[dependencies]
+serde_json = "1"
+
+# Not part of the notch's build: build it on its own with `cargo build --release` in this folder.
+[workspace]

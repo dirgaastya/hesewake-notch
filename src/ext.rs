@@ -629,6 +629,66 @@ mod tests {
         close(c);
     }
 
+    /// Run by hand once the example is built (`cargo build --release` in examples/hello-extension):
+    /// `cargo test --release the_example_extension -- --ignored`. A real program, started like the notch starts one,
+    /// talking over a real pipe to the host.
+    #[test]
+    #[ignore = "needs examples/hello-extension built"]
+    fn the_example_extension_talks_to_the_host() {
+        let exe = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(r"examples\hello-extension\target\release\hello-extension.exe");
+        assert!(exe.exists(), "build the example first");
+        let exe = exe.to_string_lossy().into_owned();
+        let (host, name) = host_with(&[("hello-extension", &exe, true)], HELLO_WAIT);
+        let mut child = std::process::Command::new(&exe).env("HESEWAKE_NOTCH_PIPE", &name).spawn().unwrap();
+        let wait = |what: &str, want: &dyn Fn(&FromExt) -> bool| -> Vec<FromExt> {
+            let mut got = Vec::new();
+            for _ in 0..250 {
+                got.extend(host.take_events().into_iter().filter_map(|e| match e {
+                    Evt::Msg { msg, .. } => Some(msg),
+                    _ => None,
+                }));
+                if got.iter().any(want) {
+                    return got;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            panic!("{what}: nothing came, got {got:?}");
+        };
+        // a person clicks slower than the host's limit of messages per second, and the example answers each click with two
+        let send = |frame: Vec<u8>| {
+            std::thread::sleep(Duration::from_millis(400));
+            host.send("hello-extension", frame)
+        };
+        let home = wait("home page", &|m| matches!(m, FromExt::Slide(_)));
+        let FromExt::Slide(s) = home.iter().find(|m| matches!(m, FromExt::Slide(_))).unwrap() else { unreachable!() };
+        assert_eq!((s.title.as_str(), s.tabs.len(), s.actions.len(), s.sections[0].rows.len()), ("Hel|lo", 3, 2, 12));
+        assert!(send(proto::tab("odd")));
+        let odd = wait("odd tab", &|m| matches!(m, FromExt::Slide(s) if s.tab == "odd"));
+        assert!(odd.iter().any(|m| matches!(m, FromExt::Slide(s) if s.sections[0].rows.len() == 6)));
+        assert!(send(proto::row("3")));
+        let d = wait("detail", &|m| matches!(m, FromExt::Detail(_)));
+        assert!(d.iter().any(|m| matches!(m, FromExt::Detail(d) if d.for_id == "3" && d.buttons.len() == 3 && d.buttons[0].link.is_some() && d.buttons[1].copy.as_deref() == Some("Item 3"))));
+        assert!(send(proto::action("report")));
+        wait("report page", &|m| matches!(m, FromExt::Slide(s) if s.back && s.stepper.as_ref().is_some_and(|st| st.label == "today" && st.prev && !st.next)));
+        assert!(send(proto::step(-1)));
+        wait("yesterday", &|m| matches!(m, FromExt::Slide(s) if s.stepper.as_ref().is_some_and(|st| st.label == "yesterday" && st.next)));
+        assert!(send(proto::action("notify")));
+        wait("toast and badge", &|m| matches!(m, FromExt::Badge(true)));
+        assert!(send(proto::visible(true)));
+        wait("badge off", &|m| matches!(m, FromExt::Badge(false)));
+        // turning it off: the host sends quit, the program says bye and ends
+        host.set_allowed(vec![("hello-extension".into(), exe.clone(), false)]);
+        wait("bye", &|m| matches!(m, FromExt::Bye));
+        for _ in 0..100 {
+            if child.try_wait().unwrap().is_some() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let _ = child.kill();
+        panic!("the example did not end after quit");
+    }
+
     #[test]
     fn the_real_pipe_name_has_the_user_sid() {
         let n = pipe_name().expect("a SID");

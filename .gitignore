@@ -1,5 +1,6 @@
 # Hasil build Rust
 /target/
+/examples/hello-extension/target/
 
 # Kamus IPADIC Lindera (diunduh oleh scripts\fetch-dict.ps1)
 /dict/

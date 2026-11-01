@@ -169,6 +169,10 @@ fn spawn(m: &Manifest) -> std::result::Result<Child, String> {
     if let Some(dir) = Path::new(&m.exe).parent() {
         c.current_dir(dir);
     }
+    // the full name of the pipe, so the extension need not work it out from the user's SID
+    if let Some(pipe) = ext::pipe_name() {
+        c.env("HESEWAKE_NOTCH_PIPE", pipe);
+    }
     c.spawn().map_err(|e| start_error(&e))
 }
 
