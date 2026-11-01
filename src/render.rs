@@ -179,6 +179,7 @@ pub(crate) fn draw(a: &mut App) {
                 SlideId::Clipboard => a.slide_clipboard(&mut g, ox, al),
                 SlideId::Agenda => a.slide_agenda(&mut g, ox, al),
                 SlideId::Prayer => a.slide_prayer(&mut g, ox, al),
+                SlideId::Ext(i) => a.slide_ext(&mut g, i as usize, ox, al),
             }
         }
         if !a.lyric_screen() {

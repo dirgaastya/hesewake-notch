@@ -246,6 +246,15 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                     present(a);
                     return;
                 }
+                if vertical && a.cur_ext().is_some() && a.ext_scrollable() {
+                    if a.last_wheel.elapsed() >= Duration::from_millis(90) {
+                        a.last_wheel = Instant::now();
+                        if a.ext_wheel(d < 0) {
+                            present(a);
+                        }
+                    }
+                    return;
+                }
                 if vertical && a.is_slide(SlideId::Agenda) && a.agenda_scrollable() {
                     if a.last_wheel.elapsed() >= Duration::from_millis(90) {
                         a.last_wheel = Instant::now();

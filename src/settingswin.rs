@@ -1323,5 +1323,6 @@ fn slide_sub(id: SlideId) -> &'static str {
         SlideId::Clipboard => tr("Last 10 copied texts"),
         SlideId::Agenda => tr("What is left today"),
         SlideId::Prayer => tr("Today's prayer times"),
+        SlideId::Ext(_) => "",
     }
 }

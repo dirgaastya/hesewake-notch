@@ -68,6 +68,7 @@ mod downloads;
 mod dragdrop;
 mod ext;
 mod extapp;
+mod extslide;
 mod eye;
 mod extproto;
 mod filepick;

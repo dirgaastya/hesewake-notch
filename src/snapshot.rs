@@ -2310,3 +2310,220 @@ fn about_page_updates() {
         a.sw_show_page(about);
     });
 }
+
+// ---------------------------------------------------------------- extension slides
+fn ext_msg(j: serde_json::Value) -> extproto::FromExt {
+    match extproto::parse(j.to_string().as_bytes()) {
+        extproto::Parsed::Msg(m) => m,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// An extension is on, connected, and has sent `j` (a `slide` or a `detail`); its slide is the one shown.
+fn ext_setup(a: &mut App, j: serde_json::Value) {
+    a.ext.test_add("example-issues", "Issues", true);
+    a.cfg.ext_on.push("example-issues".into());
+    a.apply_slide_cfg();
+    open_slide(a, SlideId::Ext(0));
+    ext_feed(a, j);
+}
+
+fn ext_feed(a: &mut App, j: serde_json::Value) {
+    a.ext.list[0].connected = true;
+    match ext_msg(j) {
+        extproto::FromExt::Slide(s) => {
+            a.ext.list[0].slide = Some(s);
+            a.ext.list[0].detail = None;
+        }
+        extproto::FromExt::Detail(d) => a.ext.list[0].detail = Some(d),
+        other => panic!("{other:?}"),
+    }
+}
+
+fn ext_showing(j: serde_json::Value) -> App {
+    let mut a = test_app(1.0);
+    ext_setup(&mut a, j);
+    ext_draw(&mut a);
+    a
+}
+
+fn ext_draw(a: &mut App) {
+    let (w, h) = anim::target(a);
+    (a.w, a.h) = (w, h);
+    a.sp = a.slide as f32;
+    render::draw(a);
+}
+
+fn ext_click_on(a: &mut App, want: &extslide::ExtHit) -> bool {
+    let r = a.ext.list[0].view.hits.borrow().iter().find(|h| &h.4 == want).map(|h| (h.0 + h.2 / 2.0, h.1 + h.3 / 2.0));
+    let (x, y) = r.unwrap_or_else(|| panic!("{want:?} was not drawn"));
+    a.ext_click(x, y)
+}
+
+fn ext_sent(a: &App) -> Vec<serde_json::Value> {
+    a.ext.sent.iter().map(|(_, f)| serde_json::from_slice(&f[4..]).unwrap()).collect()
+}
+
+fn ext_issues() -> serde_json::Value {
+    serde_json::json!({
+        "t": "slide", "rev": 1, "title": "Is|sues",
+        "tabs": [{"id": "all", "label": "All", "count": 3}, {"id": "todo", "label": "To do"}],
+        "tab": "all",
+        "actions": [{"id": "refresh", "label": "Refresh"}, {"id": "report", "label": "Report"}],
+        "rows": [
+            {"id": "128", "text": "#128 Fix crash on startup", "sub": "To do", "mark": true},
+            {"id": "127", "text": "#127 Update the installer", "sub": "In progress"},
+            {"id": "126", "text": "#126 A very long title that has to be cut with an ellipsis before it runs into the stage name", "sub": "Review"}
+        ],
+        "foot": "Updated just now"
+    })
+}
+
+fn ext_ticket() -> serde_json::Value {
+    serde_json::json!({
+        "t": "detail", "rev": 2, "for": "128", "title": "#128 Fix crash on startup",
+        "meta": [{"k": "Project", "v": "Installer"}, {"k": "Stage", "v": "To do"}, {"k": "Due", "v": "2026-11-05"}],
+        "body": "The app closes when the settings file is empty. Steps: open the settings file, empty it and start the app.",
+        "notes": [{"who": "Dewi", "when": "2026-10-31 14:02", "text": "Reproduced on 0.12.0."}],
+        "buttons": [{"id": "open", "label": "Open", "link": "https://tracker.example/issues/128"}, {"id": "copy", "label": "Copy", "copy": "#128 Fix crash on startup"}, {"id": "more", "label": "More"}],
+        "foot": "2 attachments"
+    })
+}
+
+#[test]
+fn extension_slides_follow_what_is_on() {
+    let mut a = test_app(1.0);
+    let before = a.order.clone();
+    a.ext.test_add("a-ext", "A", true);
+    a.ext.test_add("b-bg", "B", false);
+    a.ext.test_add("c-ext", "C", true);
+    a.apply_slide_cfg();
+    assert_eq!(a.order, before, "nothing on: no extension slides");
+    a.cfg.ext_on = vec!["b-bg".into(), "c-ext".into()];
+    a.apply_slide_cfg();
+    assert_eq!(a.order.len(), before.len() + 1, "a background extension has no slide");
+    assert_eq!(a.order.last(), Some(&SlideId::Ext(2)), "the slide is the third in the list, after the built-in ones");
+    a.cfg.ext_on.push("a-ext".into());
+    a.apply_slide_cfg();
+    assert_eq!(&a.order[before.len()..], &[SlideId::Ext(0), SlideId::Ext(2)], "in the order of the list");
+    for i in 3..8 {
+        a.ext.test_add(&format!("more-{i}"), "M", true);
+        a.cfg.ext_on.push(format!("more-{i}"));
+    }
+    a.apply_slide_cfg();
+    assert_eq!(a.order.len() - before.len(), 4, "at most four extension slides");
+}
+
+#[test]
+fn the_list_page_draws_and_its_hits_work() {
+    let mut a = ext_showing(ext_issues());
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Tab("todo".into())));
+    assert_eq!(a.ext.list[0].view.tab_sel.as_deref(), Some("todo"), "the chip moves at once");
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Row("127".into())));
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Action(0)));
+    assert_eq!(ext_sent(&a), vec![serde_json::json!({"t": "tab", "id": "todo"}), serde_json::json!({"t": "row", "id": "127"}), serde_json::json!({"t": "action", "id": "refresh"})]);
+    assert!(a.ext.sent.iter().all(|(id, _)| id == "example-issues"));
+    // the extension answers with its own tab: that one counts from then on
+    a.ext.apply(vec![ext::Evt::Msg { id: "example-issues".into(), msg: ext_msg(ext_issues()) }], &[], Instant::now());
+    assert_eq!(a.ext.list[0].view.tab_sel, None);
+}
+
+#[test]
+fn the_detail_page_opens_copies_and_goes_back() {
+    let mut a = ext_showing(ext_ticket());
+    let _ = sys::opened();
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Button(0)));
+    assert_eq!(sys::opened(), vec!["https://tracker.example/issues/128".to_string()], "a link opens in the browser");
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Button(1)));
+    assert_eq!(a.ext.copied_text.as_deref(), Some("#128 Fix crash on startup"));
+    assert!(a.ext.list[0].view.copied.is_some(), "the Copied mark is up");
+    assert!(a.ext.sent.is_empty(), "opening and copying are the notch's own, nothing is sent for them");
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Button(2)));
+    assert_eq!(ext_sent(&a), vec![serde_json::json!({"t": "action", "id": "more"})], "a button with neither is passed on");
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Back));
+    assert!(a.ext.list[0].detail.is_none(), "Back leaves the page at once");
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "back"})));
+}
+
+#[test]
+fn a_page_that_says_it_is_not_ready_is_drawn_that_way() {
+    let msg = |state: &str| serde_json::json!({"t": "slide", "rev": 1, "state": state, "message": "Something to say", "setup_label": "Set it up"});
+    for (state, hit) in [("loading", None), ("empty", None), ("error", Some(extslide::ExtHit::Retry)), ("setup", Some(extslide::ExtHit::Setup))] {
+        let mut a = ext_showing(msg(state));
+        match hit {
+            Some(h) => assert!(ext_click_on(&mut a, &h), "{state}"),
+            None => assert!(a.ext.list[0].view.hits.borrow().is_empty(), "{state}: nothing to click"),
+        }
+    }
+    let mut a = ext_showing(msg("error"));
+    ext_click_on(&mut a, &extslide::ExtHit::Retry);
+    assert_eq!(ext_sent(&a), vec![serde_json::json!({"t": "action", "id": "retry"})]);
+    let mut a = ext_showing(msg("setup"));
+    ext_click_on(&mut a, &extslide::ExtHit::Setup);
+    assert_eq!(ext_sent(&a), vec![serde_json::json!({"t": "action", "id": "setup"})]);
+}
+
+#[test]
+fn a_page_with_sections_and_a_stepper() {
+    let rows = |n: usize, p: &str| (0..n).map(|i| serde_json::json!({"id": format!("{p}{i}"), "text": format!("#{i} Something done"), "sub": "Review"})).collect::<Vec<_>>();
+    let mut a = ext_showing(serde_json::json!({"t": "slide", "rev": 3, "title": "Re|port", "back": true,
+        "stepper": {"label": "2026-10-31", "prev": true, "next": false},
+        "actions": [{"id": "copy", "label": "Copy", "copy": "Worked on 2026-10-31"}],
+        "sections": [{"title": "Worked on", "rows": rows(3, "w")}, {"title": "Queue today", "rows": rows(2, "q")}]}));
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Back));
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Step(-1)));
+    assert!(!a.ext.list[0].view.hits.borrow().iter().any(|h| h.4 == extslide::ExtHit::Step(1)), "a disabled arrow is not clickable");
+    assert_eq!(ext_sent(&a), vec![serde_json::json!({"t": "back"}), serde_json::json!({"t": "step", "dir": -1})]);
+    assert!(ext_click_on(&mut a, &extslide::ExtHit::Action(0)));
+    assert_eq!(a.ext.copied_text.as_deref(), Some("Worked on 2026-10-31"), "a header action can copy too");
+    assert!(a.ext_scrollable() && a.ext_wheel(true) && a.ext.list[0].view.scroll == 1, "7 lines, 3 show: the wheel scrolls the list");
+    assert!(a.ext_wheel(false) && !a.ext_wheel(false), "and stops at the top");
+}
+
+#[test]
+fn a_long_detail_page_scrolls() {
+    let mut j = ext_ticket();
+    j["body"] = serde_json::json!(("A line of the description that goes on.\n").repeat(12));
+    let mut a = ext_showing(j);
+    assert!(a.ext_scrollable());
+    let first = a.ext.list[0].view.dscroll;
+    assert!(a.ext_wheel(true) && a.ext.list[0].view.dscroll == first + 1);
+    ext_draw(&mut a);
+}
+
+#[test]
+fn an_extension_that_is_not_there_is_explained_not_empty() {
+    let mut a = ext_showing(ext_issues());
+    a.ext.list[0].connected = false;
+    a.ext.list[0].problem = Some("file not found".into());
+    ext_draw(&mut a);
+    assert!(a.ext.list[0].view.hits.borrow().is_empty(), "nothing to click");
+    assert!(!a.ext_scrollable());
+    assert!(!a.ext_click(300.0, 60.0));
+}
+
+#[test]
+fn the_dot_of_an_extension_slide_shows_a_marker() {
+    let mut a = ext_showing(ext_issues());
+    let i = a.order.iter().position(|s| *s == SlideId::Ext(0)).unwrap();
+    assert!(!a.ext_dot_badge(i));
+    a.ext.apply(vec![ext::Evt::Msg { id: "example-issues".into(), msg: extproto::FromExt::Badge(true) }], &[], Instant::now());
+    assert!(a.ext_dot_badge(i) && !a.ext_dot_badge(0));
+    ext_draw(&mut a);
+}
+
+/// The extension slide in the snapshot folder, for a look by eye.
+#[test]
+fn snap_extension_slide() {
+    for s in SCALES {
+        for (name, j) in [("list", ext_issues()), ("detail", ext_ticket())] {
+            shot(&format!("ext-{name}"), s, |a| ext_setup(a, j));
+        }
+    }
+    shot("ext-setup", 1.0, |a| ext_setup(a, serde_json::json!({"t": "slide", "rev": 1, "state": "setup", "message": "The tracker is not set up yet", "setup_label": "Open settings"})));
+    shot("ext-not-running", 1.0, |a| {
+        ext_setup(a, ext_issues());
+        a.ext.list[0].connected = false;
+        a.ext.list[0].problem = Some("blocked by a policy".into());
+    });
+}

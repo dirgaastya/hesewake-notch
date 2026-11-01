@@ -48,6 +48,8 @@ pub(crate) struct Ext {
     pub(crate) slide: Option<SlideMsg>,
     pub(crate) detail: Option<DetailMsg>,
     pub(crate) badge: bool,
+    /// What the notch remembers about the page it shows (scroll, tab, hit boxes).
+    pub(crate) view: crate::extslide::ExtView,
 }
 
 /// What the Settings page says about an extension.
@@ -82,7 +84,13 @@ impl Ext {
             slide: None,
             detail: None,
             badge: false,
+            view: Default::default(),
         }
+    }
+
+    /// The notch started a program for it and it has not ended.
+    pub(crate) fn child_running(&self) -> bool {
+        self.child.is_some()
     }
 
     pub(crate) fn id(&self) -> &str {
@@ -137,6 +145,11 @@ pub(crate) enum Out {
 pub(crate) struct ExtState {
     pub(crate) list: Vec<Ext>,
     serving: bool,
+    /// Tests: what the notch would have sent to extensions, and the last text it would have copied.
+    #[cfg(test)]
+    pub(crate) sent: Vec<(String, Vec<u8>)>,
+    #[cfg(test)]
+    pub(crate) copied_text: Option<String>,
 }
 
 fn start_error(e: &std::io::Error) -> String {
@@ -160,6 +173,13 @@ fn spawn(m: &Manifest) -> std::result::Result<Child, String> {
 }
 
 impl ExtState {
+    /// Tests: an extension that is already known and valid (with a slide if `slide`).
+    #[cfg(test)]
+    pub(crate) fn test_add(&mut self, id: &str, name: &str, slide: bool) {
+        let m = Manifest { id: id.into(), name: name.into(), version: "1".into(), exe: r"C:\x\x.exe".into(), args: vec![], slide };
+        self.list.push(Ext::new(id.into(), Ok(m)));
+    }
+
     pub(crate) fn find(&self, id: &str) -> Option<&Ext> {
         self.list.iter().find(|e| e.id() == id)
     }
@@ -297,8 +317,15 @@ impl ExtState {
                         FromExt::Slide(s) => {
                             e.slide = Some(s);
                             e.detail = None;
+                            // the extension answers the tab the user clicked with its own
+                            e.view.tab_sel = None;
                         }
-                        FromExt::Detail(d) => e.detail = Some(d),
+                        FromExt::Detail(d) => {
+                            if e.detail.as_ref().map_or(true, |old| old.for_id != d.for_id) {
+                                e.view.dscroll = 0;
+                            }
+                            e.detail = Some(d);
+                        }
                         FromExt::Badge(on) => e.badge = on,
                         FromExt::Status(t) => e.status = t,
                         FromExt::Bye => e.parked = true,
@@ -326,6 +353,9 @@ impl App {
         self.ext.scan(&dir);
         self.ext_sync();
         self.ext_serve();
+        if self.order != self.slide_order() {
+            self.apply_slide_cfg();
+        }
     }
 
     /// Open the pipe once there is something to serve.
@@ -344,14 +374,36 @@ impl App {
     pub(crate) fn ext_sync(&mut self) {
         let host = ext::host();
         host.set_allowed(self.ext.allowed(&self.cfg.ext_on));
-        let lang = if self.cfg.lang == i18n::ID { "id" } else { "en" };
+        let lang = if self.cfg.lang == 1 { "id" } else { "en" };
         host.set_info(lang, accent::ACCENTS[self.cfg.accent.min(accent::ACCENTS.len() - 1)].main);
     }
 
-    /// About every half second: start, restart and stop the programs.
-    pub(crate) fn ext_tick(&mut self) {
+    /// About every half second: start, restart and stop the programs. True if the page needs a redraw (the "Copied" mark
+    /// went away).
+    pub(crate) fn ext_tick(&mut self) -> bool {
         let on = self.cfg.ext_on.clone();
         self.ext.tick(Instant::now(), &on, ext::host());
+        let mut redraw = false;
+        for e in &mut self.ext.list {
+            if e.view.copied.is_some_and(|t| t.elapsed().as_secs_f32() >= extslide::COPIED_SECS) {
+                e.view.copied = None;
+                redraw = true;
+            }
+        }
+        redraw && self.cur_ext().is_some()
+    }
+
+    /// The carousel: the slides the user turned on, then the slides of the extensions that are on (at most four).
+    pub(crate) fn slide_order(&self) -> Vec<SlideId> {
+        let mut v = slides::visible_order(&self.slide_cfg());
+        let on = |e: &Ext| e.manifest.as_ref().is_ok_and(|m| m.slide && self.cfg.ext_on.contains(&m.id));
+        v.extend(self.ext.list.iter().enumerate().filter(|(_, e)| on(e)).take(4).map(|(i, _)| SlideId::Ext(i as u8)));
+        v
+    }
+
+    /// An extension slide has something new: the dot of slide `i` gets a marker.
+    pub(crate) fn ext_dot_badge(&self, i: usize) -> bool {
+        matches!(self.order.get(i), Some(SlideId::Ext(k)) if self.ext.list.get(*k as usize).is_some_and(|e| e.badge))
     }
 
     /// `WM_EXT`: the pipe host has something for us. True if a redraw is needed.

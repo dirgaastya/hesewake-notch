@@ -80,6 +80,11 @@ impl App {
             } else {
                 g.circle(dot_x(i, n), EXP_H - 11.0, r, &paint(255, 255, 255, a));
             }
+            // an extension has something new
+            if self.ext_dot_badge(i) {
+                let c = g.acc.bright;
+                g.circle(dot_x(i, n) + 5.0, EXP_H - 17.0, 2.4, &paint(c[0], c[1], c[2], p));
+            }
         }
     }
 }
