@@ -66,6 +66,7 @@ mod data;
 mod dict;
 mod downloads;
 mod dragdrop;
+mod ext;
 mod eye;
 mod extproto;
 mod filepick;
