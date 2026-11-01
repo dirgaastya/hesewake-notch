@@ -50,6 +50,8 @@ pub(crate) struct ExtView {
     /// The tab the user just clicked, until the extension answers with its own.
     pub(crate) tab_sel: Option<String>,
     pub(crate) copied: Option<Instant>,
+    /// The picture of the page's hero, decoded once: what it was made from (a hash of its bytes) and the square.
+    pub(crate) hero_pm: RefCell<Option<(u64, Pixmap)>>,
 }
 
 enum Item<'a> {

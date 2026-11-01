@@ -22,6 +22,10 @@ pub(crate) const MAX_BUTTONS: usize = 4;
 /// The biggest `matrix` (modules on a side): a QR code of version 20 is 97.
 pub(crate) const MAX_MATRIX: usize = 100;
 
+/// The biggest picture of a `hero`, decoded (the notch draws it as a small square).
+pub(crate) const MAX_HERO_IMAGE: usize = 48 * 1024;
+/// The longest line of a `hero`.
+pub(crate) const LEN_HERO: usize = 80;
 /// The longest text a page's `input` can hold.
 pub(crate) const MAX_INPUT: usize = 40;
 
@@ -311,6 +315,17 @@ pub(crate) struct Row {
     pub(crate) text: String,
     pub(crate) sub: String,
     pub(crate) mark: bool,
+    pub(crate) tone: Tone,
+}
+
+/// The colour of a row's `sub` text and the dot before it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum Tone {
+    #[default]
+    None,
+    Good,
+    Warn,
+    Muted,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -340,7 +355,19 @@ pub(crate) struct SlideMsg {
     pub(crate) sections: Vec<Section>,
     pub(crate) stepper: Option<Stepper>,
     pub(crate) back: bool,
+    /// A card at the top of the page with a picture (the Settings panel).
+    pub(crate) hero: Option<Hero>,
     pub(crate) foot: String,
+}
+
+/// `{ "title": "Song", "sub": "Artist", "text": "Phone 1 - Playing", "image": { "mime": "image/jpeg", "data": "<base64>" } }`
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Hero {
+    pub(crate) title: String,
+    pub(crate) sub: String,
+    pub(crate) text: String,
+    /// The picture's bytes (PNG or JPEG), decoded from base64; None if it was missing or not allowed.
+    pub(crate) image: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -442,9 +469,47 @@ fn parse_rows(v: &Value, key: &str, room: usize) -> Vec<Row> {
                 text: clip(r.get("text"), LEN_ROW, false),
                 sub: clip(r.get("sub"), LEN_SUB, false),
                 mark: r.get("mark").and_then(Value::as_bool).unwrap_or(false),
+                tone: match r.get("tone").and_then(Value::as_str) {
+                    Some("good") => Tone::Good,
+                    Some("warn") => Tone::Warn,
+                    Some("muted") => Tone::Muted,
+                    _ => Tone::None,
+                },
             })
         })
         .collect()
+}
+
+/// Standard base64 (`+`, `/`, padding optional). None for anything else, and for stray bits.
+pub(crate) fn b64_decode_std(s: &str) -> Option<Vec<u8>> {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let s = s.trim_end_matches('=');
+    if s.len() % 4 == 1 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let (mut acc, mut bits) = (0u32, 0);
+    for c in s.bytes() {
+        acc = acc << 6 | A.iter().position(|&a| a == c)? as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    (acc == 0).then_some(out)
+}
+
+fn parse_hero(v: &Value) -> Option<Hero> {
+    let h = v.get("hero").filter(|h| h.is_object())?;
+    let image = h.get("image").filter(|i| i.is_object()).and_then(|i| {
+        let png_or_jpeg = matches!(i.get("mime").and_then(Value::as_str), Some("image/png" | "image/jpeg"));
+        let data = i.get("data").and_then(Value::as_str)?;
+        // base64 is a third bigger than what it holds: refuse before decoding something huge
+        (png_or_jpeg && data.len() <= MAX_HERO_IMAGE / 3 * 4 + 8).then(|| b64_decode_std(data)).flatten().filter(|b| !b.is_empty() && b.len() <= MAX_HERO_IMAGE)
+    });
+    Some(Hero { title: clip(h.get("title"), LEN_HERO, false), sub: clip(h.get("sub"), LEN_HERO, false), text: clip(h.get("text"), LEN_HERO, false), image })
 }
 
 fn parse_slide(v: &Value) -> Option<SlideMsg> {
@@ -482,6 +547,7 @@ fn parse_slide(v: &Value) -> Option<SlideMsg> {
         sections,
         stepper,
         back: v.get("back").and_then(Value::as_bool).unwrap_or(false),
+        hero: parse_hero(v),
         foot: clip(v.get("foot"), LEN_LINE, false),
     })
 }
@@ -977,5 +1043,95 @@ mod input_tests {
         let long = read(super::input("rename", &format!("{}\n\u{7}x", "a".repeat(60))));
         assert_eq!(long["value"].as_str().unwrap().chars().count(), MAX_INPUT);
         assert!(!long["value"].as_str().unwrap().contains('\n'));
+    }
+}
+
+#[cfg(test)]
+mod hero_tests {
+    use super::*;
+
+    fn b64(data: &[u8]) -> String {
+        const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::new();
+        for c in data.chunks(3) {
+            let n = c.iter().enumerate().fold(0u32, |acc, (i, &b)| acc | (b as u32) << (16 - 8 * i));
+            for i in 0..c.len() + 1 {
+                out.push(A[(n >> (18 - 6 * i) & 63) as usize] as char);
+            }
+            out.extend(std::iter::repeat('=').take(3 - c.len()));
+        }
+        out
+    }
+
+    fn slide(extra: serde_json::Value) -> SlideMsg {
+        match parse(serde_json::json!({"t": "slide", "rev": 1, "hero": extra}).to_string().as_bytes()) {
+            Parsed::Msg(FromExt::Slide(s)) => s,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn standard_base64_is_read_with_and_without_padding() {
+        let bytes = [0xfb, 0xff, 0xbe, 0xfb, 0xef];
+        assert_eq!(b64(&bytes), "+/++++8=");
+        assert_eq!(b64_decode_std("+/++++8="), Some(bytes.to_vec()));
+        assert_eq!(b64_decode_std("+/++++8"), Some(bytes.to_vec()));
+        assert_eq!(b64_decode_std("-_----8="), None, "base64url is not standard base64");
+        assert_eq!(b64_decode_std("A"), None);
+        assert_eq!(b64_decode_std("AB"), None, "stray bits");
+        for n in 0..30 {
+            let d: Vec<u8> = (0..n as u8).map(|i| i.wrapping_mul(53)).collect();
+            assert_eq!(b64_decode_std(&b64(&d)), Some(d));
+        }
+    }
+
+    #[test]
+    fn a_hero_with_a_picture() {
+        let img = vec![7u8; 5000];
+        let h = slide(serde_json::json!({"title": "Cupid", "sub": "FIFTY FIFTY", "text": "Phone 1 \u{b7} Playing", "image": {"mime": "image/jpeg", "data": b64(&img)}})).hero.unwrap();
+        assert_eq!((h.title.as_str(), h.sub.as_str(), h.text.as_str()), ("Cupid", "FIFTY FIFTY", "Phone 1 \u{b7} Playing"));
+        assert_eq!(h.image, Some(img));
+    }
+
+    #[test]
+    fn a_picture_that_is_not_allowed_is_left_out_and_the_words_stay() {
+        let ok = b64(&[1u8; 100]);
+        for (name, image) in [
+            ("a gif", serde_json::json!({"mime": "image/gif", "data": ok})),
+            ("no mime", serde_json::json!({"data": ok})),
+            ("no data", serde_json::json!({"mime": "image/png"})),
+            ("bad base64", serde_json::json!({"mime": "image/png", "data": "!!!"})),
+            ("empty", serde_json::json!({"mime": "image/png", "data": ""})),
+            ("too big", serde_json::json!({"mime": "image/png", "data": b64(&vec![1u8; MAX_HERO_IMAGE + 1])})),
+            ("huge", serde_json::json!({"mime": "image/png", "data": "A".repeat(MAX_HERO_IMAGE * 2)})),
+            ("not an object", serde_json::json!("image/png")),
+        ] {
+            let h = slide(serde_json::json!({"title": "Cupid", "image": image})).hero.unwrap();
+            assert_eq!((h.title.as_str(), h.image.is_none()), ("Cupid", true), "{name}");
+        }
+        assert!(slide(serde_json::json!({"title": "x", "image": {"mime": "image/png", "data": b64(&vec![1u8; MAX_HERO_IMAGE])}})).hero.unwrap().image.is_some(), "the biggest allowed");
+    }
+
+    #[test]
+    fn the_words_of_a_hero_are_clipped_and_a_hero_that_is_not_one_is_none() {
+        let h = slide(serde_json::json!({"title": "t".repeat(300), "sub": "a\u{7}b\nc"})).hero.unwrap();
+        assert_eq!(h.title.chars().count(), LEN_HERO);
+        assert_eq!(h.sub, "ab c");
+        for bad in [serde_json::json!("hero"), serde_json::json!(7), serde_json::json!(null)] {
+            assert!(slide(bad).hero.is_none());
+        }
+    }
+
+    #[test]
+    fn rows_have_a_tone() {
+        let rows = |tone: serde_json::Value| match parse(serde_json::json!({"t": "slide", "rev": 1, "rows": [{"id": "a", "text": "A", "tone": tone}]}).to_string().as_bytes()) {
+            Parsed::Msg(FromExt::Slide(s)) => s.sections[0].rows[0].tone,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(rows(serde_json::json!("good")), Tone::Good);
+        assert_eq!(rows(serde_json::json!("warn")), Tone::Warn);
+        assert_eq!(rows(serde_json::json!("muted")), Tone::Muted);
+        assert_eq!(rows(serde_json::json!("purple")), Tone::None, "an unknown tone is none");
+        assert_eq!(rows(serde_json::json!(5)), Tone::None);
     }
 }

@@ -150,6 +150,9 @@ pub(crate) struct ExtState {
     pub(crate) sent: Vec<(String, Vec<u8>)>,
     #[cfg(test)]
     pub(crate) copied_text: Option<String>,
+    /// Tests: the folder everything is read from and removed in. Without one a test never touches the user's own folder.
+    #[cfg(test)]
+    pub(crate) test_root: Option<std::path::PathBuf>,
 }
 
 fn start_error(e: &std::io::Error) -> String {
@@ -287,6 +290,30 @@ impl ExtState {
                 }
             }
         }
+    }
+
+    /// Take extension `i` out of the notch: stop it and delete its manifest folder under `root` (what an installer put
+    /// there goes with it; a program installed somewhere else stays). The folder must be a plain directory directly under
+    /// `root`: a name with a separator or `..`, or a folder that is really a link to somewhere else, is refused and nothing
+    /// is deleted. Returns the extension's id.
+    pub(crate) fn remove(&mut self, i: usize, root: &Path, host: &Host) -> std::result::Result<String, &'static str> {
+        let e = self.list.get(i).ok_or("no such extension")?;
+        let folder = e.folder.clone();
+        if folder.is_empty() || folder == "." || folder == ".." || folder.contains(['/', '\\', ':']) {
+            return Err("not a plain folder name");
+        }
+        let dir = root.join(&folder);
+        let meta = std::fs::symlink_metadata(&dir).map_err(|_| "the folder is gone")?;
+        // 0x400: a reparse point, which is what a junction or a link is on Windows
+        if !meta.is_dir() || meta.file_type().is_symlink() || std::os::windows::fs::MetadataExt::file_attributes(&meta) & 0x400 != 0 {
+            return Err("the folder is a link, not a folder");
+        }
+        let id = e.id().to_string();
+        host.disconnect(&id);
+        self.list[i].end_child();
+        std::fs::remove_dir_all(&dir).map_err(|_| "the folder could not be deleted")?;
+        self.list.remove(i);
+        Ok(id)
     }
 
     /// Stop one extension and start it again on the next `tick` (if it is on).
@@ -564,9 +591,46 @@ impl App {
         sys::open_url(&path.to_string_lossy());
     }
 
+    /// The Remove button, in two steps: the first press asks "Sure?", a second one within three seconds does it.
+    pub(crate) fn ext_remove(&mut self, i: usize) {
+        let root = self.ext_root();
+        self.ext_remove_in(i, &root);
+    }
+
+    /// The folder the extensions' manifests are in. (A test has one of its own, never the user's.)
+    pub(crate) fn ext_root(&self) -> std::path::PathBuf {
+        #[cfg(test)]
+        return self.ext.test_root.clone().unwrap_or_else(|| std::env::temp_dir().join("hesewake-test-no-extensions"));
+        #[cfg(not(test))]
+        data_path("extensions")
+    }
+
+    pub(crate) fn ext_remove_in(&mut self, i: usize, root: &Path) {
+        let sure = self.sw.remove_confirm.is_some_and(|(n, t)| n == i && t.elapsed().as_secs_f32() < 3.0);
+        if !sure {
+            self.sw.remove_confirm = Some((i, Instant::now()));
+            return;
+        }
+        self.sw.remove_confirm = None;
+        self.ext_panel_close();
+        let id = match self.ext.remove(i, root, ext::host()) {
+            Ok(id) => id,
+            Err(why) => {
+                perf::note(&format!("extensions: not removed: {why}"));
+                return;
+            }
+        };
+        self.cfg.ext_on.retain(|x| *x != id);
+        self.cfg.ext_mute.retain(|x| *x != id);
+        self.save_settings();
+        self.ext_sync();
+        self.apply_slide_cfg();
+    }
+
     /// Look at the extensions folder again (a new extension was installed).
     pub(crate) fn ext_rescan(&mut self) {
-        self.ext_rescan_in(&data_path("extensions"));
+        let root = self.ext_root();
+        self.ext_rescan_in(&root);
     }
 
     pub(crate) fn ext_rescan_in(&mut self, dir: &Path) {
@@ -747,7 +811,7 @@ mod tests {
         let mut s = state_with("shower", &whoami());
         let now = Instant::now();
         let id = || "shower".to_string();
-        let slide = |rev| FromExt::Slide(crate::extproto::SlideMsg { rev, title: "T".into(), state: crate::extproto::State::Ready, message: String::new(), setup_label: String::new(), tabs: vec![], tab: String::new(), actions: vec![], sections: vec![], stepper: None, back: false, foot: String::new() });
+        let slide = |rev| FromExt::Slide(crate::extproto::SlideMsg { rev, title: "T".into(), state: crate::extproto::State::Ready, message: String::new(), setup_label: String::new(), tabs: vec![], tab: String::new(), actions: vec![], sections: vec![], stepper: None, back: false, hero: None, foot: String::new() });
         let out = s.apply(vec![Evt::Connected { id: id() }, Evt::Msg { id: id(), msg: slide(1) }, Evt::Msg { id: id(), msg: FromExt::Badge(true) }, Evt::Msg { id: id(), msg: FromExt::Status("Syncing".into()) }], &[], now);
         assert!(out.contains(&Out::Redraw));
         let e = s.find("shower").unwrap();

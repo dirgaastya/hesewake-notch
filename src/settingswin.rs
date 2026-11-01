@@ -6,7 +6,7 @@
 //! the app is locked (window creation, destroying it from a click) must not need the app, so those are handled
 //! without it and the Win32 calls that trigger them are made after `with_app` returns.
 
-use crate::extproto::{DetailMsg, SlideMsg};
+use crate::extproto::{DetailMsg, Hero, SlideMsg, Tone};
 use crate::textfield::TextField;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -167,6 +167,8 @@ pub(crate) enum Hit {
     /// Open the folder all extensions live in, or look for them again.
     ExtRoot,
     ExtScan,
+    /// Take an extension out of the notch (two presses).
+    ExtRemove(usize),
     /// The panel of an extension in panel mode: back to the list, back out of a detail page, a row, a header action, a
     /// detail button, a tab, a stepper arrow, Retry and the setup button.
     PanelBack,
@@ -244,6 +246,8 @@ pub(crate) struct Win {
     pub(crate) dict_confirm: Option<Instant>,
     /// The extension whose pages the Extensions page shows instead of the list (its Settings in panel mode).
     pub(crate) panel: Option<usize>,
+    /// Remove was pressed once for this extension, and when: a second press soon after does it.
+    pub(crate) remove_confirm: Option<(usize, Instant)>,
     /// The text box the panel's page shows, if it shows one.
     pub(crate) field: Option<FieldState>,
     /// The update state last drawn (checking, release found, download progress): redraw when it changes.
@@ -272,6 +276,7 @@ impl Win {
             autostart: false,
             dict_confirm: None,
             panel: None,
+            remove_confirm: None,
             field: None,
             update_seen: (false, None, None),
         }
@@ -501,6 +506,7 @@ impl App {
         self.sw.update_seen = upd;
         upd_changed
             || self.update_busy
+            || self.sw.remove_confirm.is_some_and(|(_, t)| t.elapsed().as_secs_f32() < 4.0)
             || self.sw.field.as_ref().is_some_and(|f| f.focused)
             || matches!(dict::state(), dict::Dl::Running(_))
             || recent(self.sw.dict_confirm)
@@ -708,6 +714,7 @@ impl App {
             Hit::ExtFolder(i) => self.ext_open_folder(Some(i)),
             Hit::ExtRoot => self.ext_open_folder(None),
             Hit::ExtScan => self.ext_rescan(),
+            Hit::ExtRemove(i) => self.ext_remove(i),
             Hit::PanelBack => self.ext_panel_close(),
             Hit::PanelDetailBack => self.ext_panel_detail_back(),
             Hit::PanelRow(n) => self.ext_panel_row(n),
@@ -1383,7 +1390,7 @@ impl Draw {
             g.stroke(&ib, &paint(255, 255, 255, 0.07), 1.0);
             g.slide_icon(SlideId::Ext(i as u8), X0 + 30.0, cy, 14.0, &if enabled { g.sacc(1.0) } else { rgb(TEXT_FAINT, 1.0) });
             let right = X1 - 16.0;
-            let tw = (right - 46.0 - 14.0 - X0 - 60.0).max(40.0);
+            let tw = (right - 46.0 - 14.0 - X0 - 60.0 - if valid { 0.0 } else { 30.0 }).max(40.0);
             let name = match &e.manifest {
                 Ok(m) if m.version.is_empty() => m.name.clone(),
                 Ok(m) => format!("{}  {}", m.name, m.version),
@@ -1392,6 +1399,12 @@ impl Draw {
             let status = crate::extapp::status_text(e, enabled, now);
             self.check(g, &name, 13.5, true, tw);
             self.check(g, &status, 11.5, false, tw);
+            // a manifest that is no good can only be taken out
+            let sure = a.sw.remove_confirm.is_some_and(|(n, t)| n == i && t.elapsed().as_secs_f32() < 3.0);
+            let remove = if sure { tr("Sure?") } else { tr("Remove") };
+            if !valid {
+                self.small_button(g, X1 - 16.0, cy - 13.0, remove, Hit::ExtRemove(i), true);
+            }
             g.txtb(&name, X0 + 60.0, cy - 17.0, 13.5, if enabled || !valid { [255, 255, 255] } else { TEXT_FAINT }, 1.0, tw);
             let status = fit(g, &status, 11.5, tw);
             g.txt(&status, X0 + 60.0, cy + 2.0, 11.5, TEXT_FAINT, 1.0, tw + 2.0);
@@ -1406,6 +1419,7 @@ impl Draw {
                 rx = self.small_button(g, rx, by, tr("Open folder"), Hit::ExtFolder(i), true);
                 rx = self.small_button(g, rx - 6.0, by, tr("Restart"), Hit::ExtRestart(i), enabled);
                 rx = self.small_button(g, rx - 6.0, by, tr("Settings"), Hit::ExtConfig(i), e.connected);
+                rx = self.small_button(g, rx - 6.0, by, remove, Hit::ExtRemove(i), true);
                 // Toasts: a label and a small switch
                 let muted = a.cfg.ext_mute.iter().any(|x| x == e.id());
                 let sx = rx - 6.0 - 38.0;
@@ -1454,7 +1468,7 @@ impl Draw {
             return self.panel_detail(g, y, d, a.sw.field.as_ref());
         }
         let Some(s) = &e.slide else { return self.panel_message(g, y, tr("Loading\u{2026}"), None) };
-        self.panel_slide(g, y, s, e.view.tab_sel.as_deref())
+        self.panel_slide(g, y, s, e.view.tab_sel.as_deref(), &e.view)
     }
 
     /// One line of text (and a button under it), in a card.
@@ -1472,7 +1486,54 @@ impl Draw {
         y + h + 22.0
     }
 
-    fn panel_slide(&mut self, g: &mut Gfx, y: f32, s: &SlideMsg, tab_sel: Option<&str>) -> f32 {
+    /// The page's hero: the picture (the middle of it, as a square), a title, a line under it and a small line.
+    fn panel_hero(&mut self, g: &mut Gfx, y: f32, h: &Hero, view: &crate::extslide::ExtView) -> f32 {
+        const SIDE: f32 = 96.0;
+        let card_h = SIDE + 20.0;
+        Self::card(g, y, card_h);
+        let (px, py) = (X0 + 14.0, y + 10.0);
+        // decoded once for as long as the bytes are the same
+        let key = h.image.as_ref().map(|b| {
+            use std::hash::{Hash, Hasher};
+            let mut s = std::collections::hash_map::DefaultHasher::new();
+            b.hash(&mut s);
+            s.finish()
+        });
+        {
+            let mut c = view.hero_pm.borrow_mut();
+            match (key, c.as_ref().map(|(k, _)| *k)) {
+                (None, _) => *c = None,
+                (Some(k), have) if have != Some(k) => *c = h.image.as_deref().and_then(|b| hero_pixmap(b, 192)).map(|p| (k, p)),
+                _ => {}
+            }
+        }
+        match view.hero_pm.borrow().as_ref() {
+            Some((_, pm)) => draw_picture(g, pm, px, py, SIDE, 10.0),
+            None => {
+                // no picture: a tile with the extension's own mark
+                g.fill(&rrect(px, py, SIDE, SIDE, 10.0), &rgb(WELL, 1.0));
+                g.stroke(&rrect(px, py, SIDE, SIDE, 10.0), &paint(255, 255, 255, 0.07), 1.0);
+                g.slide_icon(SlideId::Ext(0), px + SIDE / 2.0, py + SIDE / 2.0, 30.0, &rgb(TEXT_FAINT, 1.0));
+            }
+        }
+        let tx = px + SIDE + 18.0;
+        let tw = X1 - 18.0 - tx;
+        for (text, size, bold, dy, col) in [(&h.title, 16.0, true, 8.0, [255, 255, 255]), (&h.sub, 12.5, false, 34.0, TEXT_DIM), (&h.text, 11.5, false, 58.0, TEXT_FAINT)] {
+            if text.is_empty() {
+                continue;
+            }
+            let shown = fit(g, text, size, tw);
+            self.check(g, text, size, bold, tw);
+            if bold {
+                g.txtb(&shown, tx, py + dy, size, col, 1.0, tw + 2.0);
+            } else {
+                g.txt(&shown, tx, py + dy, size, col, 1.0, tw + 2.0);
+            }
+        }
+        y + card_h + 14.0
+    }
+
+    fn panel_slide(&mut self, g: &mut Gfx, y: f32, s: &SlideMsg, tab_sel: Option<&str>, view: &crate::extslide::ExtView) -> f32 {
         use crate::extproto::State;
         let mut y = y;
         // actions and the stepper, on the right
@@ -1485,6 +1546,9 @@ impl Draw {
             let next = self.small_button(g, rx, y - 46.0, "\u{203a}", Hit::PanelStep(1), st.next);
             g.txt_c(&st.label, next - 8.0 - lw / 2.0, y - 46.0 + ty(26.0, 12.0), 12.0, [235, 235, 235], 1.0, lw + 4.0, true);
             self.small_button(g, next - 8.0 - lw - 6.0, y - 46.0, "\u{2039}", Hit::PanelStep(-1), st.prev);
+        }
+        if let (Some(h), State::Ready) = (&s.hero, s.state) {
+            y = self.panel_hero(g, y, h, view);
         }
         match s.state {
             State::Loading => return self.panel_message(g, y, tr("Loading\u{2026}"), None),
@@ -1552,9 +1616,18 @@ impl Draw {
                     g.circle(tx + 3.0, cy, 3.5, &paint(c[0], c[1], c[2], 1.0));
                     tx += 14.0;
                 }
-                let sub_w = if r.sub.is_empty() { 0.0 } else { g.width(&r.sub, 11.5) + 8.0 };
+                let dot = if r.tone != Tone::None && !r.sub.is_empty() { 12.0 } else { 0.0 };
+                let sub_w = if r.sub.is_empty() { 0.0 } else { g.width(&r.sub, 11.5) + 8.0 + dot };
                 if sub_w > 0.0 {
-                    g.txt(&r.sub, X1 - 18.0 - sub_w + 8.0, cy - 7.0, 11.5, TEXT_FAINT, 1.0, sub_w);
+                    let col = match r.tone {
+                        Tone::Good => [100, 215, 140],
+                        Tone::Warn => [255, 195, 80],
+                        _ => TEXT_FAINT,
+                    };
+                    if dot > 0.0 {
+                        g.circle(X1 - 18.0 - sub_w + 8.0 + 3.5, cy, 3.5, &paint(col[0], col[1], col[2], 1.0));
+                    }
+                    g.txt(&r.sub, X1 - 18.0 - sub_w + 8.0 + dot, cy - 7.0, 11.5, col, 1.0, sub_w);
                 }
                 let tw = X1 - 18.0 - sub_w - tx - 8.0;
                 self.check(g, &r.text, 13.5, true, tw);
@@ -1893,4 +1966,20 @@ impl FieldState {
     pub(crate) fn is_focused(&self) -> bool {
         self.focused
     }
+}
+
+
+/// A square of `side` pixels from the middle of a picture (PNG or JPEG), for drawing. None if it is not one we can read.
+fn hero_pixmap(bytes: &[u8], side: u32) -> Option<Pixmap> {
+    let img = decode_limited(bytes)?.resize_to_fill(side, side, image::imageops::FilterType::Triangle);
+    pixmap_from_rgba(&img.to_rgba8().into_raw(), side)
+}
+
+/// `pm` as a rounded square of `size` pixels at (x, y).
+fn draw_picture(g: &mut Gfx, pm: &Pixmap, x: f32, y: f32, size: f32, r: f32) {
+    let k = size / pm.width() as f32;
+    let mut p = Paint::default();
+    p.shader = Pattern::new(pm.as_ref(), SpreadMode::Pad, FilterQuality::Bilinear, 1.0, Transform::from_row(k, 0.0, 0.0, k, x, y));
+    p.anti_alias = true;
+    g.fill(&rrect(x, y, size, size, r), &p);
 }
