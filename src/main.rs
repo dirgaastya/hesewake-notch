@@ -70,6 +70,7 @@ mod ext;
 mod extapp;
 mod extslide;
 mod eye;
+mod extjob;
 mod extproto;
 mod filepick;
 mod gfx;

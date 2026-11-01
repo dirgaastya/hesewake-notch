@@ -65,6 +65,8 @@ pub(crate) struct Manifest {
     /// The Settings button of *Settings > Extensions* opens the extension's pages in a panel of the Settings window (true),
     /// or asks the extension to open its own window with `config` (false, the default).
     pub(crate) panel: bool,
+    /// May the program start other programs? No unless the manifest says `"processes": "allow"` (see extjob.rs).
+    pub(crate) processes: bool,
 }
 
 pub(crate) fn valid_id(id: &str) -> bool {
@@ -127,6 +129,12 @@ impl Manifest {
             Some(Value::String(s)) if s == "panel" => true,
             _ => return Err("settings must be \"window\" or \"panel\""),
         };
+        let processes = match v.get("processes") {
+            None | Some(Value::Null) => false,
+            Some(Value::String(s)) if s == "none" => false,
+            Some(Value::String(s)) if s == "allow" => true,
+            _ => return Err("processes must be \"none\" or \"allow\""),
+        };
         Ok(Manifest {
             id: id.to_string(),
             name,
@@ -135,6 +143,7 @@ impl Manifest {
             args,
             slide: v.get("slide").and_then(Value::as_bool).unwrap_or(true),
             panel,
+            processes,
         })
     }
 }

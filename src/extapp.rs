@@ -8,6 +8,7 @@
 use super::*;
 use crate::ext::{self, Evt, Host};
 use crate::extproto::{self as proto, DetailMsg, FromExt, Manifest, SlideMsg};
+use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -34,6 +35,8 @@ pub(crate) struct Ext {
     pub(crate) folder: String,
     pub(crate) manifest: std::result::Result<Manifest, String>,
     child: Option<Child>,
+    /// The limits the program runs under; letting go of it ends the program.
+    job: Option<crate::extjob::Job>,
     fails: u32,
     retry_at: Option<Instant>,
     connected_at: Option<Instant>,
@@ -73,6 +76,7 @@ impl Ext {
             folder,
             manifest,
             child: None,
+            job: None,
             fails: 0,
             retry_at: None,
             connected_at: None,
@@ -130,6 +134,7 @@ impl Ext {
             let _ = c.kill();
             let _ = c.wait();
         }
+        self.job = None;
     }
 }
 
@@ -166,9 +171,11 @@ fn start_error(e: &std::io::Error) -> String {
     }
 }
 
-fn spawn(m: &Manifest) -> std::result::Result<Child, String> {
+/// Start the program, suspended, put it under its limits (a Job Object: dies with the notch, no other programs unless the
+/// manifest allows them) and only then let it run. If the limits cannot be set the program is not started.
+fn spawn(m: &Manifest) -> std::result::Result<(Child, crate::extjob::Job), String> {
     let mut c = Command::new(&m.exe);
-    c.args(&m.args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).creation_flags(CREATE_NO_WINDOW);
+    c.args(&m.args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).creation_flags(CREATE_NO_WINDOW | crate::extjob::CREATE_SUSPENDED);
     if let Some(dir) = Path::new(&m.exe).parent() {
         c.current_dir(dir);
     }
@@ -176,14 +183,24 @@ fn spawn(m: &Manifest) -> std::result::Result<Child, String> {
     if let Some(pipe) = ext::pipe_name() {
         c.env("HESEWAKE_NOTCH_PIPE", pipe);
     }
-    c.spawn().map_err(|e| start_error(&e))
+    let mut child = c.spawn().map_err(|e| start_error(&e))?;
+    let handle = windows::Win32::Foundation::HANDLE(child.as_raw_handle());
+    let job = crate::extjob::Job::new(m.processes);
+    match job {
+        Some(job) if job.assign(handle) && crate::extjob::resume(handle) => Ok((child, job)),
+        _ => {
+            let _ = child.kill();
+            let _ = child.wait();
+            Err("could not limit the program".to_string())
+        }
+    }
 }
 
 impl ExtState {
     /// Tests: an extension that is already known and valid (with a slide if `slide`).
     #[cfg(test)]
     pub(crate) fn test_add(&mut self, id: &str, name: &str, slide: bool) {
-        let m = Manifest { id: id.into(), name: name.into(), version: "1".into(), exe: r"C:\x\x.exe".into(), args: vec![], slide, panel: false };
+        let m = Manifest { id: id.into(), name: name.into(), version: "1".into(), exe: r"C:\x\x.exe".into(), args: vec![], slide, panel: false, processes: false };
         self.list.push(Ext::new(id.into(), Ok(m)));
     }
 
@@ -246,6 +263,7 @@ impl ExtState {
             if let Some(c) = e.child.as_mut() {
                 if let Ok(Some(code)) = c.try_wait() {
                     e.child = None;
+                    e.job = None;
                     if enabled && !e.parked && e.stop_at.is_none() {
                         e.fails += 1;
                         e.problem = Some(format!("ended (code {})", code.code().unwrap_or(-1)));
@@ -277,8 +295,9 @@ impl ExtState {
             }
             if e.child.is_none() && !e.parked && e.retry_at.map_or(true, |t| now >= t) {
                 match spawn(&m) {
-                    Ok(c) => {
+                    Ok((c, job)) => {
                         e.child = Some(c);
+                        e.job = Some(job);
                         e.problem = None;
                         e.retry_at = None;
                     }
@@ -828,5 +847,97 @@ mod tests {
         s.apply(vec![Evt::Gone { id: id(), why: "bad data" }], &[], now);
         assert_eq!(s.find("shower").unwrap().problem.as_deref(), Some("sent broken data"));
         assert!(s.apply(vec![Evt::Msg { id: "stranger".into(), msg: FromExt::Bye }], &[], now).is_empty(), "an unknown id is ignored");
+    }
+}
+
+#[cfg(test)]
+mod job_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn system32(exe: &str) -> String {
+        format!(r"{}\System32\{exe}", std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()))
+    }
+
+    /// An extension whose program is `exe` with `args`, found by a scan of a folder of its own.
+    fn state(id: &str, exe: &str, args: &[&str], extra: serde_json::Value) -> ExtState {
+        let dir = std::env::temp_dir().join(format!("hesewake-job-{}-{id}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(id)).unwrap();
+        let mut m = json!({"id": id, "name": id, "exe": exe, "args": args, "proto": 1});
+        for (k, v) in extra.as_object().into_iter().flatten() {
+            m[k] = v.clone();
+        }
+        std::fs::write(dir.join(id).join("extension.json"), m.to_string()).unwrap();
+        let mut s = ExtState::default();
+        s.scan(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        s
+    }
+
+    /// Start it and wait until it has ended; what `tick` made of the end.
+    fn run_to_the_end(s: &mut ExtState, id: &str) -> String {
+        let (host, on) = (Host::new("t"), vec![id.to_string()]);
+        s.tick(Instant::now(), &on, &host);
+        for _ in 0..100 {
+            std::thread::sleep(Duration::from_millis(50));
+            s.tick(Instant::now(), &on, &host);
+            if s.list[0].child.is_none() {
+                break;
+            }
+        }
+        s.list[0].problem.clone().unwrap_or_default()
+    }
+
+    #[test]
+    fn a_program_cannot_start_other_programs_by_default() {
+        // cmd.exe starts whoami.exe: with the limit, that second program does not get to run
+        let mut s = state("limited", &system32("cmd.exe"), &["/c", "whoami"], json!({}));
+        assert!(s.list[0].manifest.as_ref().is_ok_and(|m| !m.processes), "none unless said otherwise");
+        let ended = run_to_the_end(&mut s, "limited");
+        assert!(ended.starts_with("ended") && !ended.contains("code 0)"), "the program it tried to start was stopped: {ended}");
+        // the same program with the permission: whoami runs, cmd ends well
+        let mut s = state("allowed", &system32("cmd.exe"), &["/c", "whoami"], json!({"processes": "allow"}));
+        assert!(s.list[0].manifest.as_ref().is_ok_and(|m| m.processes));
+        assert_eq!(run_to_the_end(&mut s, "allowed"), "ended (code 0)", "allowed: it works");
+    }
+
+    #[test]
+    fn a_program_ends_when_the_job_is_let_go() {
+        let mut s = state("mortal", &system32("PING.EXE"), &["-n", "30", "127.0.0.1"], json!({}));
+        let (host, on) = (Host::new("t"), vec!["mortal".to_string()]);
+        s.tick(Instant::now(), &on, &host);
+        let e = &mut s.list[0];
+        assert!(e.child.is_some() && e.job.is_some(), "it runs, under a job");
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(e.child.as_mut().unwrap().try_wait().unwrap().is_none(), "still going after a moment");
+        e.job = None; // the notch lets go (or ends)
+        let mut gone = false;
+        for _ in 0..60 {
+            if e.child.as_mut().unwrap().try_wait().unwrap().is_some() {
+                gone = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(gone, "the job took the program with it");
+    }
+
+    #[test]
+    fn ending_a_program_lets_go_of_its_job_too() {
+        let mut s = state("tidy", &system32("PING.EXE"), &["-n", "30", "127.0.0.1"], json!({}));
+        let (host, on) = (Host::new("t"), vec!["tidy".to_string()]);
+        s.tick(Instant::now(), &on, &host);
+        s.list[0].end_child();
+        assert!(s.list[0].child.is_none() && s.list[0].job.is_none());
+    }
+
+    #[test]
+    fn the_manifest_says_what_may_be_started() {
+        let m = |extra: &str| Manifest::parse("p", &format!(r#"{{"id":"p","name":"P","exe":"C:\\Tools\\p.exe","proto":1{extra}}}"#));
+        assert!(!m("").unwrap().processes);
+        assert!(!m(r#","processes":"none""#).unwrap().processes);
+        assert!(m(r#","processes":"allow""#).unwrap().processes);
+        assert!(m(r#","processes":"yes""#).is_err() && m(r#","processes":true"#).is_err(), "anything else is a mistake");
     }
 }
