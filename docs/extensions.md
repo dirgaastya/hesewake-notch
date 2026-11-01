@@ -116,7 +116,7 @@ If the notch supports a newer `proto` than the extension, it answers with the ex
 ### 4.2 Extension → notch
 
 **`slide`**: the whole content of the slide. Send it again, complete, whenever something changes (the notch replaces
-what it had; there is no patching). `rev` is any number that grows; the notch ignores a message older than the last.
+what it had; there is no patching). `rev` is a number that grows, counted across `slide` and `detail` of one connection; the notch drops a message whose `rev` is not newer than the last one it took.
 
 ```json
 {
@@ -221,7 +221,7 @@ row sub: 40, button labels: 16).
 | Messages per second | 10 (the rest are dropped) |
 | Tabs / header actions / rows (all sections together) | 8 / 3 / 100 |
 | Detail meta / notes / buttons | 6 / 5 / 4 |
-| Text lengths | tab label 12, action and button label 16, row text 120, row sub 40, meta value 80, note text 400, body 4,000, toast title 80, toast sub 60 |
+| Text lengths | ids 64, titles, meta keys, authors, dates, section and stepper labels 24, messages, detail titles and footers 120, tab label 12, action and button label 16, row text 120, row sub 40, meta value 80, note text 400, body 4,000, toast title 80, toast sub 60 |
 | Copy text | 8,000 |
 | Sections | 4 |
 | Links | `http`/`https`, at most 500 characters, no credentials in the URL |
