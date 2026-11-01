@@ -180,7 +180,7 @@ impl ExtState {
     /// Tests: an extension that is already known and valid (with a slide if `slide`).
     #[cfg(test)]
     pub(crate) fn test_add(&mut self, id: &str, name: &str, slide: bool) {
-        let m = Manifest { id: id.into(), name: name.into(), version: "1".into(), exe: r"C:\x\x.exe".into(), args: vec![], slide };
+        let m = Manifest { id: id.into(), name: name.into(), version: "1".into(), exe: r"C:\x\x.exe".into(), args: vec![], slide, panel: false };
         self.list.push(Ext::new(id.into(), Ok(m)));
     }
 
@@ -465,10 +465,82 @@ impl App {
         self.save_settings();
     }
 
-    /// Ask a connected extension to open its own settings window.
+    /// The Settings button of an extension: its pages in a panel of the Settings window if its manifest says `panel`, else
+    /// a message that makes it open its own window. Only while it is connected.
     pub(crate) fn ext_open_config(&mut self, i: usize) {
-        if let Some(id) = self.ext_id(i).filter(|_| self.ext.list[i].connected) {
+        let Some(id) = self.ext_id(i).filter(|_| self.ext.list[i].connected) else { return };
+        if self.ext.list[i].manifest.as_ref().is_ok_and(|m| m.panel) {
+            self.ext_panel_close();
+            self.sw.panel = Some(i);
+            self.sw.to_top();
+            // it is looked at now, like a slide that comes into view
+            self.ext_send_to(&id, proto::visible(true));
+        } else {
             self.ext_send_to(&id, proto::config());
+        }
+    }
+
+    /// Leave the panel (back to the list, another page of the window, or the window closed).
+    pub(crate) fn ext_panel_close(&mut self) {
+        if let Some(i) = self.sw.panel.take() {
+            self.sw.to_top();
+            if let Some(id) = self.ext_id(i) {
+                self.ext_send_to(&id, proto::visible(false));
+            }
+        }
+    }
+
+    /// Back out of a detail page: gone at once, and the extension is told.
+    pub(crate) fn ext_panel_detail_back(&mut self) {
+        let Some(i) = self.sw.panel else { return };
+        if let (Some(id), Some(e)) = (self.ext_id(i), self.ext.list.get_mut(i)) {
+            e.detail = None;
+            e.view.dscroll = 0;
+            self.ext_send_to(&id, proto::back());
+        }
+    }
+
+    pub(crate) fn ext_panel_row(&mut self, n: usize) {
+        let Some(i) = self.sw.panel else { return };
+        let row = self.ext.list.get(i).and_then(|e| e.slide.as_ref()).and_then(|s| crate::extslide::rows_of(s).get(n).map(|r| r.id.clone()));
+        if let (Some(ext), Some(row)) = (self.ext_id(i), row) {
+            self.ext_send_to(&ext, proto::row(&row));
+        }
+    }
+
+    pub(crate) fn ext_panel_act(&mut self, n: usize) {
+        let Some(i) = self.sw.panel else { return };
+        if let Some(b) = self.ext.list.get(i).and_then(|e| e.slide.as_ref()).and_then(|s| s.actions.get(n)).cloned() {
+            self.ext_press(i, &b);
+        }
+    }
+
+    pub(crate) fn ext_panel_button(&mut self, n: usize) {
+        let Some(i) = self.sw.panel else { return };
+        if let Some(b) = self.ext.list.get(i).and_then(|e| e.detail.as_ref()).and_then(|d| d.buttons.get(n)).cloned() {
+            self.ext_press(i, &b);
+        }
+    }
+
+    pub(crate) fn ext_panel_tab(&mut self, n: usize) {
+        let Some(i) = self.sw.panel else { return };
+        let tab = self.ext.list.get(i).and_then(|e| e.slide.as_ref()).and_then(|s| s.tabs.get(n)).map(|t| t.id.clone());
+        if let (Some(ext), Some(tab)) = (self.ext_id(i), tab) {
+            self.ext.list[i].view.tab_sel = Some(tab.clone());
+            self.ext_send_to(&ext, proto::tab(&tab));
+        }
+    }
+
+    pub(crate) fn ext_panel_step(&mut self, dir: i32) {
+        if let Some(id) = self.sw.panel.and_then(|i| self.ext_id(i)) {
+            self.ext_send_to(&id, proto::step(dir));
+        }
+    }
+
+    /// Retry or the setup button of a page: the extension is told which.
+    pub(crate) fn ext_panel_action(&mut self, id: &str) {
+        if let Some(ext) = self.sw.panel.and_then(|i| self.ext_id(i)) {
+            self.ext_send_to(&ext, proto::action(id));
         }
     }
 
@@ -517,6 +589,10 @@ impl App {
         }
         let muted = self.cfg.ext_mute.clone();
         let out = self.ext.apply(events, &muted, Instant::now());
+        // the Settings window shows the pages of an extension in panel mode, and its status
+        if self.sw.hwnd != 0 {
+            self.sw_kick();
+        }
         self.ext_out(out)
     }
 

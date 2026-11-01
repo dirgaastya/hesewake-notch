@@ -19,6 +19,9 @@ pub(crate) const MAX_META: usize = 6;
 pub(crate) const MAX_NOTES: usize = 5;
 pub(crate) const MAX_BUTTONS: usize = 4;
 
+/// The biggest `matrix` (modules on a side): a QR code of version 20 is 97.
+pub(crate) const MAX_MATRIX: usize = 100;
+
 pub(crate) const LEN_ID: usize = 64;
 pub(crate) const LEN_TAB: usize = 12;
 pub(crate) const LEN_LABEL: usize = 16;
@@ -52,6 +55,9 @@ pub(crate) struct Manifest {
     pub(crate) args: Vec<String>,
     /// Has a slide in the carousel (default); false = runs in the background.
     pub(crate) slide: bool,
+    /// The Settings button of *Settings > Extensions* opens the extension's pages in a panel of the Settings window (true),
+    /// or asks the extension to open its own window with `config` (false, the default).
+    pub(crate) panel: bool,
 }
 
 pub(crate) fn valid_id(id: &str) -> bool {
@@ -108,6 +114,12 @@ impl Manifest {
             }
             _ => return Err("bad args"),
         };
+        let panel = match v.get("settings") {
+            None | Some(Value::Null) => false,
+            Some(Value::String(s)) if s == "window" => false,
+            Some(Value::String(s)) if s == "panel" => true,
+            _ => return Err("settings must be \"window\" or \"panel\""),
+        };
         Ok(Manifest {
             id: id.to_string(),
             name,
@@ -115,6 +127,7 @@ impl Manifest {
             exe: exe.to_string(),
             args,
             slide: v.get("slide").and_then(Value::as_bool).unwrap_or(true),
+            panel,
         })
     }
 }
@@ -340,7 +353,21 @@ pub(crate) struct DetailMsg {
     pub(crate) body: String,
     pub(crate) notes: Vec<Note>,
     pub(crate) buttons: Vec<Button>,
+    pub(crate) matrix: Option<Matrix>,
     pub(crate) foot: String,
+}
+
+/// A small square picture of black and white modules (a QR code), `size` x `size`, row by row.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Matrix {
+    pub(crate) size: usize,
+    pub(crate) dark: Vec<bool>,
+}
+
+impl Matrix {
+    pub(crate) fn at(&self, x: usize, y: usize) -> bool {
+        self.dark.get(y * self.size + x).copied().unwrap_or(false)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -439,6 +466,25 @@ fn parse_slide(v: &Value) -> Option<SlideMsg> {
     })
 }
 
+/// `{"size": 3, "rows": ["101", "010", "101"]}`. Anything that is not exactly that is no matrix (the rest of the page stays).
+fn parse_matrix(v: &Value) -> Option<Matrix> {
+    let m = v.get("matrix")?;
+    let size = usize::try_from(m.get("size")?.as_u64()?).ok().filter(|s| (1..=MAX_MATRIX).contains(s))?;
+    let rows = m.get("rows")?.as_array().filter(|r| r.len() == size)?;
+    let mut dark = Vec::with_capacity(size * size);
+    for r in rows {
+        let r = r.as_str().filter(|r| r.len() == size)?;
+        for c in r.bytes() {
+            match c {
+                b'0' => dark.push(false),
+                b'1' => dark.push(true),
+                _ => return None,
+            }
+        }
+    }
+    Some(Matrix { size, dark })
+}
+
 fn parse_detail(v: &Value) -> Option<DetailMsg> {
     Some(DetailMsg {
         rev: v.get("rev")?.as_u64()?,
@@ -457,6 +503,7 @@ fn parse_detail(v: &Value) -> Option<DetailMsg> {
             .map(|n| Note { who: clip(n.get("who"), LEN_SHORT, false), when: clip(n.get("when"), LEN_SHORT, false), text: clip(n.get("text"), LEN_NOTE, true) })
             .collect(),
         buttons: parse_buttons(v, "buttons", MAX_BUTTONS),
+        matrix: parse_matrix(v),
         foot: clip(v.get("foot"), LEN_LINE, false),
     })
 }
@@ -795,5 +842,68 @@ mod tests {
         assert!(!g.allow(t0 + Duration::from_secs(4)));
         assert!(g.allow(t0 + Duration::from_secs(5)));
         assert!(!g.allow(t0 + Duration::from_secs(6)), "the gap counts from the last one shown");
+    }
+}
+
+#[cfg(test)]
+mod panel_tests {
+    use super::*;
+
+    const BASE: &str = r#"{"id":"media-bridge","name":"Media Bridge","exe":"C:\\Tools\\mb.exe","proto":1"#;
+
+    fn manifest(extra: &str) -> Result<Manifest, &'static str> {
+        Manifest::parse("media-bridge", &format!("{BASE}{extra}}}"))
+    }
+
+    #[test]
+    fn the_settings_button_says_where_the_settings_are() {
+        assert!(!manifest("").unwrap().panel, "its own window unless said otherwise");
+        assert!(!manifest(r#","settings":"window""#).unwrap().panel);
+        assert!(manifest(r#","settings":"panel""#).unwrap().panel);
+        assert!(!manifest(r#","settings":null"#).unwrap().panel);
+        assert!(manifest(r#","settings":"tab""#).is_err(), "anything else is a mistake");
+        assert!(manifest(r#","settings":true"#).is_err());
+        let both = manifest(r#","slide":false,"settings":"panel""#).unwrap();
+        assert!(!both.slide && both.panel, "an extension without a slide has its settings in the panel");
+    }
+
+    fn detail(matrix: serde_json::Value) -> Option<Matrix> {
+        match parse(serde_json::json!({"t": "detail", "rev": 1, "matrix": matrix}).to_string().as_bytes()) {
+            Parsed::Msg(FromExt::Detail(d)) => d.matrix,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_matrix_is_squares_of_ones_and_zeros() {
+        let m = detail(serde_json::json!({"size": 3, "rows": ["101", "010", "111"]})).unwrap();
+        assert_eq!(m.size, 3);
+        assert_eq!([m.at(0, 0), m.at(1, 0), m.at(1, 1), m.at(0, 1), m.at(2, 2)], [true, false, true, false, true]);
+        assert!(!m.at(3, 0) && !m.at(0, 3), "outside is white");
+        let big = vec!["1".repeat(MAX_MATRIX); MAX_MATRIX];
+        assert!(detail(serde_json::json!({"size": MAX_MATRIX, "rows": big})).is_some(), "the biggest one");
+    }
+
+    #[test]
+    fn a_matrix_that_is_not_one_is_dropped_and_the_page_stays() {
+        for bad in [
+            serde_json::json!({"size": 0, "rows": []}),
+            serde_json::json!({"size": 101, "rows": vec!["1".repeat(101); 101]}),
+            serde_json::json!({"size": 3, "rows": ["101", "010"]}),
+            serde_json::json!({"size": 3, "rows": ["101", "010", "11"]}),
+            serde_json::json!({"size": 3, "rows": ["101", "0x0", "111"]}),
+            serde_json::json!({"size": 3, "rows": ["101", "010", 7]}),
+            serde_json::json!({"size": "3", "rows": ["101", "010", "111"]}),
+            serde_json::json!({"rows": ["1"]}),
+            serde_json::json!("101"),
+            serde_json::json!(null),
+        ] {
+            assert_eq!(detail(bad.clone()), None, "{bad}");
+        }
+        // the page around it is still read
+        match parse(serde_json::json!({"t": "detail", "rev": 1, "title": "Pair", "matrix": {"size": 2, "rows": ["1"]}}).to_string().as_bytes()) {
+            Parsed::Msg(FromExt::Detail(d)) => assert_eq!((d.title.as_str(), d.matrix), ("Pair", None)),
+            other => panic!("{other:?}"),
+        }
     }
 }

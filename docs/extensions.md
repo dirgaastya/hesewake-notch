@@ -40,6 +40,7 @@ An extension is registered by a **manifest** in the user's data folder:
   "exe": "C:\\Users\\me\\AppData\\Local\\Programs\\example-issues\\example-issues.exe",
   "args": ["--notch"],
   "slide": true,
+  "settings": "window",
   "proto": 1
 }
 ```
@@ -47,6 +48,7 @@ An extension is registered by a **manifest** in the user's data folder:
 - `id`: 1 to 32 characters, `a-z`, `0-9`, `-`. It must equal the folder name.
 - `slide`: `true` (default) gives the extension a slide. With `false` it has no slide: it runs in the background (a
   service, a bridge to something else) and can still send `toast`, `status` and take part in *Settings > Extensions*.
+- `settings`: where the extension's settings are, `"window"` (default) or `"panel"`. See *Managing extensions* below.
 - `exe`: absolute path. The notch starts it without a shell, with `args`, no window, when the notch starts and the
   extension is enabled. If it exits, the notch restarts it with a growing delay (5 s, 15 s, 60 s, then every 5 minutes).
 - Extensions are **off until the user turns them on** in *Settings > Extensions* (the page lists each manifest, its
@@ -64,7 +66,7 @@ Every manifest is listed with its name, version and a status line, and the user 
 |---|---|
 | On / off | Starts or stops the extension (`quit`, then the process is ended after 3 seconds if it is still there). Saved. |
 | Toasts | Mutes the extension's toasts without stopping it. |
-| **Settings** | Sends `config` so the extension opens its own settings window. Greyed out while it is not connected. |
+| **Settings** | With `"settings": "window"` it sends `config`, and the extension opens its own settings window. With `"settings": "panel"` the extension's pages open **inside the Settings window**, in place of the list: the same `slide` and `detail` pages as for the notch (including `actions`, `tabs`, `stepper`, buttons and `matrix`), drawn in the style of the Settings window, and clicks come back as the same messages. The extension is sent `visible` with `on: true` when the panel opens and `on: false` when it closes; **Back** goes to the list. Greyed out while the extension is not connected. An extension with no slide uses the panel for everything it has to show. |
 | **Restart** | Stops and starts it again (for an extension that is stuck). |
 | **Open folder** | Opens the manifest's folder in Explorer. |
 
@@ -174,6 +176,7 @@ it, or let the user click Back (the notch sends `back`).
   on the clipboard (at most 8,000 characters). Both happen **only as the direct result of the user's click on that button**,
   so the extension cannot open pages or write the clipboard on its own. A button with neither only sends `action`.
 - `state` works like in `slide` (`loading`, `error`, ...).
+- `matrix`: a small black-and-white picture, such as a QR code: `{ "size": 3, "rows": ["101", "010", "111"] }`. `size` is 1 to 100, there are `size` rows, and each row is `size` characters of `0` (light) or `1` (dark). The notch draws it as squares on white, with a margin around it, on the right of the page. It is shown in the Settings panel, not on the carousel's slide. A matrix that is not exactly that is left out and the rest of the page stays. The notch never reads the picture, so an extension that shows a QR code encodes it itself.
 
 **`toast`**: show a message in the small notch (not while a full-screen app is in front, and only if the user has not
 muted the extension).
@@ -223,6 +226,7 @@ row sub: 40, button labels: 16).
 | Messages per second | 10 (the rest are dropped) |
 | Tabs / header actions / rows (all sections together) | 8 / 3 / 100 |
 | Detail meta / notes / buttons | 6 / 5 / 4 |
+| Matrix | 100 x 100 |
 | Text lengths | ids 64, titles, meta keys, authors, dates, section and stepper labels 24, messages, detail titles and footers 120, tab label 12, action and button label 16, row text 120, row sub 40, meta value 80, note text 400, body 4,000, toast title 80, toast sub 60 |
 | Copy text | 8,000 |
 | Sections | 4 |

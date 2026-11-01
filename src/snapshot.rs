@@ -2678,3 +2678,152 @@ fn snap_extension_toast() {
         });
     }
 }
+
+// ---------------------------------------------------------------- the panel of an extension in Settings
+/// An extension without a slide, connected, with its Settings in the panel; the Extensions page is showing.
+fn panel_ext(a: &mut App, first: serde_json::Value) {
+    a.ext.test_add("media-bridge", "Media Bridge", false);
+    a.ext.list[0].manifest.as_mut().unwrap().panel = true;
+    a.cfg.ext_on.push("media-bridge".into());
+    a.apply_slide_cfg();
+    a.sw_show_page(EXTENSIONS);
+    ext_feed(a, first);
+}
+
+fn panel_home() -> serde_json::Value {
+    serde_json::json!({
+        "t": "slide", "rev": 1, "title": "Pho|ne",
+        "actions": [{"id": "pair", "label": "Pair a phone"}],
+        "rows": [{"id": "a1b2", "text": "Phone 1", "sub": "Connected"}, {"id": "c3d4", "text": "Phone 2", "sub": "Offline", "mark": true}],
+        "foot": "Fake Song One \u{b7} The Test Band"
+    })
+}
+
+/// A QR-like square: ones and zeros in a pattern.
+fn panel_qr() -> serde_json::Value {
+    let rows: Vec<String> = (0..33).map(|r| (0..33).map(|c| if (r * 7 + c * 3 + r * c) % 5 < 2 || (r < 7 && c < 7) { '1' } else { '0' }).collect()).collect();
+    serde_json::json!({
+        "t": "detail", "rev": 2, "for": "pairing", "title": "Pair a phone",
+        "meta": [{"k": "PC", "v": "THINKPAD"}, {"k": "Time left", "v": "1:42"}],
+        "body": "On your phone, open Hesewake Media Bridge and pick this PC, or scan the code.",
+        "matrix": {"size": 33, "rows": rows},
+        "buttons": [{"id": "pair_cancel", "label": "Cancel"}],
+        "foot": "Phones can only pair while this page is open"
+    })
+}
+
+#[test]
+fn the_settings_button_opens_a_panel_for_a_panel_extension() {
+    use settingswin::Hit;
+    let mut a = sw_shot("settingswin-extensions-panel-before", |a| panel_ext(a, panel_home()));
+    assert!(settingswin::hit_center(&a, Hit::ExtConfig(0)).is_some(), "Settings is there while it is connected");
+    sw_press(&mut a, Hit::ExtConfig(0));
+    assert_eq!(a.sw.panel, Some(0));
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "visible", "on": true})), "it is told that its page is being looked at");
+    assert!(a.ext.sent.iter().all(|(_, f)| serde_json::from_slice::<serde_json::Value>(&f[4..]).unwrap()["t"] != "config"), "no window is asked for");
+    settingswin::render(&mut a);
+    assert!(settingswin::hit_center(&a, Hit::ExtOn(0)).is_none(), "the list is replaced by the pages");
+    // a row, an action, the foot
+    sw_press(&mut a, Hit::PanelRow(1));
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "row", "id": "c3d4"})));
+    sw_press(&mut a, Hit::PanelAct(0));
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "action", "id": "pair"})));
+    // back to the list: the extension is told that nobody looks any more
+    sw_press(&mut a, Hit::PanelBack);
+    assert_eq!(a.sw.panel, None);
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "visible", "on": false})));
+    settingswin::render(&mut a);
+    assert!(settingswin::hit_center(&a, Hit::ExtOn(0)).is_some(), "the list is back");
+}
+
+#[test]
+fn leaving_the_page_closes_the_panel_too() {
+    use settingswin::Hit;
+    let mut a = sw_shot("settingswin-extensions-panel-leave", |a| panel_ext(a, panel_home()));
+    sw_press(&mut a, Hit::ExtConfig(0));
+    assert_eq!(a.sw.panel, Some(0));
+    sw_press(&mut a, Hit::Nav(0));
+    assert_eq!(a.sw.panel, None, "another page of the window");
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "visible", "on": false})));
+}
+
+#[test]
+fn a_page_with_a_qr_code_draws_it_and_its_buttons_work() {
+    use settingswin::Hit;
+    let mut a = sw_shot("settingswin-panel-qr", |a| {
+        panel_ext(a, panel_qr());
+        a.sw.panel = Some(0);
+    });
+    let px: Vec<u8> = settingswin::canvas(&a).unwrap().data().to_vec();
+    let white = px.chunks_exact(4).filter(|p| p[0] > 250 && p[1] > 250 && p[2] > 250).count();
+    let dark_in_white = px.chunks_exact(4).filter(|p| p[0] < 5 && p[1] < 5 && p[2] < 5).count();
+    assert!(white > 1000 && dark_in_white > 200, "a white square with black modules is on the page ({white} white, {dark_in_white} black)");
+    sw_press(&mut a, Hit::PanelButton(0));
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "action", "id": "pair_cancel"})));
+    sw_press(&mut a, Hit::PanelDetailBack);
+    assert!(a.ext.list[0].detail.is_none(), "Back leaves a detail page at once");
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "back"})));
+}
+
+#[test]
+fn the_other_pages_of_the_panel() {
+    use settingswin::Hit;
+    // tabs and a stepper
+    let mut a = sw_shot("settingswin-panel-tabs", |a| {
+        panel_ext(a, serde_json::json!({"t": "slide", "rev": 1, "title": "Re|port", "tabs": [{"id": "all", "label": "All"}, {"id": "odd", "label": "Odd", "count": 3}], "tab": "all",
+            "stepper": {"label": "2026-11-01", "prev": true, "next": false}, "rows": [{"id": "1", "text": "One"}]}));
+        a.sw.panel = Some(0);
+    });
+    sw_press(&mut a, Hit::PanelTab(1));
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "tab", "id": "odd"})));
+    assert_eq!(a.ext.list[0].view.tab_sel.as_deref(), Some("odd"), "the chip moves at once");
+    sw_press(&mut a, Hit::PanelStep(-1));
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "step", "dir": -1})));
+    assert!(settingswin::hit_center(&a, Hit::PanelStep(1)).is_none(), "a disabled arrow does not answer");
+    // error and setup
+    for (state, hit, id) in [("error", Hit::PanelRetry, "retry"), ("setup", Hit::PanelSetup, "setup")] {
+        let mut a = sw_shot(&format!("settingswin-panel-{state}"), |a| {
+            panel_ext(a, serde_json::json!({"t": "slide", "rev": 1, "state": state, "message": "Something to say", "setup_label": "Set it up"}));
+            a.sw.panel = Some(0);
+        });
+        sw_press(&mut a, hit);
+        assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "action", "id": id})), "{state}");
+    }
+    // not connected: the notch says why
+    let a = sw_shot("settingswin-panel-away", |a| {
+        panel_ext(a, panel_home());
+        a.ext.list[0].connected = false;
+        a.ext.list[0].problem = Some("file not found".into());
+        a.sw.panel = Some(0);
+    });
+    assert!(settingswin::hit_center(&a, Hit::PanelRow(0)).is_none() && settingswin::hit_center(&a, Hit::PanelBack).is_some(), "only the way back");
+}
+
+#[test]
+fn panel_text_fits_in_both_languages() {
+    let _lang = i18n::restore_on_drop();
+    for id in [false, true] {
+        for (name, j) in [("home", panel_home()), ("qr", panel_qr())] {
+            let a = sw_shot(&format!("{}settingswin-panel-fit-{name}", if id { "id-" } else { "" }), |a| {
+                if id {
+                    indonesian(a);
+                }
+                panel_ext(a, j);
+                a.sw.panel = Some(0);
+            });
+            assert!(settingswin::cut(&a).is_empty(), "{name} (indonesian: {id}): cut texts {:?}", settingswin::cut(&a));
+        }
+    }
+}
+
+#[test]
+fn a_window_extension_still_gets_the_config_message() {
+    use settingswin::Hit;
+    let mut a = sw_shot("settingswin-extensions-window-mode", |a| {
+        panel_ext(a, panel_home());
+        a.ext.list[0].manifest.as_mut().unwrap().panel = false;
+    });
+    sw_press(&mut a, Hit::ExtConfig(0));
+    assert_eq!(a.sw.panel, None);
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "config"})));
+}

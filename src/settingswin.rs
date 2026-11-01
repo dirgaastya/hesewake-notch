@@ -6,6 +6,7 @@
 //! the app is locked (window creation, destroying it from a click) must not need the app, so those are handled
 //! without it and the Win32 calls that trigger them are made after `with_app` returns.
 
+use crate::extproto::{DetailMsg, SlideMsg};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -23,6 +24,8 @@ const WM_MOUSELEAVE: u32 = 0x02A3;
 // ---------------------------------------------------------------- layout (logical px)
 const WIN_W: f32 = 820.0;
 const WIN_H: f32 = 560.0;
+/// One row of an extension's page in the panel.
+const PANEL_ROW_H: f32 = 46.0;
 const SIDE_W: f32 = 214.0;
 const BAR_H: f32 = 46.0;
 const NAV_Y: f32 = 62.0;
@@ -163,6 +166,17 @@ pub(crate) enum Hit {
     /// Open the folder all extensions live in, or look for them again.
     ExtRoot,
     ExtScan,
+    /// The panel of an extension in panel mode: back to the list, back out of a detail page, a row, a header action, a
+    /// detail button, a tab, a stepper arrow, Retry and the setup button.
+    PanelBack,
+    PanelDetailBack,
+    PanelRow(usize),
+    PanelAct(usize),
+    PanelButton(usize),
+    PanelTab(usize),
+    PanelStep(i32),
+    PanelRetry,
+    PanelSetup,
     /// About > Updates: check now, or install / download the release found.
     Update,
 }
@@ -209,6 +223,8 @@ pub(crate) struct Win {
     pub(crate) autostart: bool,
     /// The dictionary's Delete was pressed once: a second press within `CONFIRM_SECS` deletes it.
     pub(crate) dict_confirm: Option<Instant>,
+    /// The extension whose pages the Extensions page shows instead of the list (its Settings in panel mode).
+    pub(crate) panel: Option<usize>,
     /// The update state last drawn (checking, release found, download progress): redraw when it changes.
     update_seen: (bool, Option<String>, Option<u8>),
 }
@@ -234,8 +250,15 @@ impl Win {
             tracking: false,
             autostart: false,
             dict_confirm: None,
+            panel: None,
             update_seen: (false, None, None),
         }
+    }
+
+    /// Scroll back to the top of the page.
+    pub(crate) fn to_top(&mut self) {
+        self.scroll = 0.0;
+        self.scroll_to = 0.0;
     }
 
     fn knob(&self, k: Knob, on: bool) -> f32 {
@@ -634,6 +657,7 @@ impl App {
         match hit {
             Hit::Nav(i) => {
                 if self.sw.sec != i {
+                    self.ext_panel_close();
                     self.sw.sec = i;
                     self.sw.scroll = 0.0;
                     self.sw.scroll_to = 0.0;
@@ -657,6 +681,15 @@ impl App {
             Hit::ExtFolder(i) => self.ext_open_folder(Some(i)),
             Hit::ExtRoot => self.ext_open_folder(None),
             Hit::ExtScan => self.ext_rescan(),
+            Hit::PanelBack => self.ext_panel_close(),
+            Hit::PanelDetailBack => self.ext_panel_detail_back(),
+            Hit::PanelRow(n) => self.ext_panel_row(n),
+            Hit::PanelAct(n) => self.ext_panel_act(n),
+            Hit::PanelButton(n) => self.ext_panel_button(n),
+            Hit::PanelTab(n) => self.ext_panel_tab(n),
+            Hit::PanelStep(d) => self.ext_panel_step(d),
+            Hit::PanelRetry => self.ext_panel_action("retry"),
+            Hit::PanelSetup => self.ext_panel_action("setup"),
             Hit::Update => self.sw_update_button(),
             Hit::Close | Hit::Minimize => {}
         }
@@ -839,6 +872,7 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
         }
         WM_DESTROY => {
             with_app(|a| {
+                a.ext_panel_close();
                 a.sw.hwnd = 0;
                 a.sw.gfx = None;
                 a.sw.buf = Vec::new();
@@ -1276,6 +1310,9 @@ impl Draw {
     }
 
     fn extensions(&mut self, a: &App, g: &mut Gfx, y: f32) -> f32 {
+        if let Some(i) = a.sw.panel.filter(|&i| i < a.ext.list.len()) {
+            return self.ext_panel(a, g, y, i);
+        }
         Self::header(g, tr("Installed"), y);
         let mut y = y + 22.0;
         let now = Instant::now();
@@ -1343,6 +1380,232 @@ impl Draw {
         let rx = self.small_button(g, X1, by, tr("Open extensions folder"), Hit::ExtRoot, true);
         self.small_button(g, rx - 6.0, by, tr("Rescan"), Hit::ExtScan, true);
         by + 26.0 + 22.0
+    }
+
+    /// A button whose left edge is at `x`; returns its right edge.
+    fn left_button(&mut self, g: &mut Gfx, x: f32, y: f32, label: &str, hit: Hit) -> f32 {
+        let w = (g.width_ex(label, 12.0, true) + 24.0).max(56.0);
+        self.small_button(g, x + w, y, label, hit, true);
+        x + w
+    }
+
+    /// The Settings button of an extension in panel mode: its pages, drawn here in the style of this window. The extension
+    /// sends the same `slide` and `detail` pages as for the notch; clicks go back to it as the same messages.
+    fn ext_panel(&mut self, a: &App, g: &mut Gfx, y: f32, i: usize) -> f32 {
+        let Some(e) = a.ext.list.get(i) else { return y };
+        let name = e.manifest.as_ref().map_or(e.folder.clone(), |m| m.name.clone());
+        let mut x = self.left_button(g, X0, y, tr("Extensions"), Hit::PanelBack);
+        if e.connected && e.detail.is_some() {
+            x = self.left_button(g, x + 6.0, y, tr("Back"), Hit::PanelDetailBack);
+        }
+        self.check(g, &name, 15.0, true, X1 - x - 20.0);
+        g.txtb(&name, x + 14.0, y + ty(26.0, 15.0), 15.0, [255, 255, 255], 1.0, X1 - x - 20.0);
+        let y = y + 46.0;
+        if !e.connected {
+            return self.panel_message(g, y, &match (&e.problem, e.child_running()) {
+                (Some(p), _) => fill(tr("Not running: {}"), &[p]),
+                (None, true) => tr("Starting\u{2026}").to_string(),
+                (None, false) => tr("Not connected").to_string(),
+            }, None);
+        }
+        if let Some(d) = &e.detail {
+            return self.panel_detail(g, y, d);
+        }
+        let Some(s) = &e.slide else { return self.panel_message(g, y, tr("Loading\u{2026}"), None) };
+        self.panel_slide(g, y, s, e.view.tab_sel.as_deref())
+    }
+
+    /// One line of text (and a button under it), in a card.
+    fn panel_message(&mut self, g: &mut Gfx, y: f32, line: &str, button: Option<(&str, Hit)>) -> f32 {
+        let h = if button.is_some() { 110.0 } else { 70.0 };
+        Self::card(g, y, h);
+        let w = X1 - X0 - 40.0;
+        let shown = fit(g, line, 13.0, w);
+        self.check(g, line, 13.0, false, w);
+        g.txt_c(&shown, (X0 + X1) / 2.0, y + 24.0, 13.0, TEXT_DIM, 1.0, w, false);
+        if let Some((label, hit)) = button {
+            let bw = (g.width_ex(label, 12.0, true) + 28.0).max(80.0);
+            self.small_button(g, (X0 + X1) / 2.0 + bw / 2.0, y + 58.0, label, hit, true);
+        }
+        y + h + 22.0
+    }
+
+    fn panel_slide(&mut self, g: &mut Gfx, y: f32, s: &SlideMsg, tab_sel: Option<&str>) -> f32 {
+        use crate::extproto::State;
+        let mut y = y;
+        // actions and the stepper, on the right
+        let mut rx = X1;
+        for (n, b) in s.actions.iter().enumerate().rev() {
+            rx = self.small_button(g, rx, y - 46.0, &b.label, Hit::PanelAct(n), true) - 6.0;
+        }
+        if let Some(st) = &s.stepper {
+            let lw = g.width_ex(&st.label, 12.0, true);
+            let next = self.small_button(g, rx, y - 46.0, "\u{203a}", Hit::PanelStep(1), st.next);
+            g.txt_c(&st.label, next - 8.0 - lw / 2.0, y - 46.0 + ty(26.0, 12.0), 12.0, [235, 235, 235], 1.0, lw + 4.0, true);
+            self.small_button(g, next - 8.0 - lw - 6.0, y - 46.0, "\u{2039}", Hit::PanelStep(-1), st.prev);
+        }
+        match s.state {
+            State::Loading => return self.panel_message(g, y, tr("Loading\u{2026}"), None),
+            State::Empty => return self.panel_message(g, y, if s.message.is_empty() { tr("Nothing here") } else { &s.message }, None),
+            State::Error => return self.panel_message(g, y, &s.message, Some((tr("Retry"), Hit::PanelRetry))),
+            State::Setup => {
+                let label = if s.setup_label.is_empty() { tr("Open settings") } else { &s.setup_label };
+                return self.panel_message(g, y, &s.message, Some((label, Hit::PanelSetup)));
+            }
+            State::Ready => {}
+        }
+        if !s.tabs.is_empty() {
+            let sel = tab_sel.unwrap_or(&s.tab);
+            let mut x = X0;
+            for (n, t) in s.tabs.iter().enumerate() {
+                let label = match t.count {
+                    Some(c) => format!("{} {}", t.label, c),
+                    None => t.label.clone(),
+                };
+                let w = (g.width_ex(&label, 12.0, true) + 24.0).max(48.0);
+                if x + w > X1 {
+                    break;
+                }
+                let on = t.id == sel;
+                let hit = Hit::PanelTab(n);
+                let hot = self.is_hover(hit);
+                if on {
+                    let c = g.acc.deep;
+                    g.pill(x, y, w, 26.0, c, 0.9, 1.0);
+                } else {
+                    g.pill(x, y, w, 26.0, [255, 255, 255], if hot { 0.2 } else { 0.1 }, 1.0);
+                }
+                self.check(g, &label, 12.0, true, w - 8.0);
+                g.txt_c(&label, x + w / 2.0, y + ty(26.0, 12.0), 12.0, if on { [255, 255, 255] } else { [215, 215, 222] }, 1.0, w - 4.0, true);
+                self.hit(x, y, w, 26.0, hit);
+                x += w + 6.0;
+            }
+            y += 38.0;
+        }
+        let mut flat = 0usize;
+        for sec in &s.sections {
+            if !sec.title.is_empty() {
+                Self::header(g, &sec.title, y);
+                y += 22.0;
+            }
+            if sec.rows.is_empty() {
+                continue;
+            }
+            let h = sec.rows.len() as f32 * PANEL_ROW_H + 8.0;
+            Self::card(g, y, h);
+            for (k, r) in sec.rows.iter().enumerate() {
+                let ry = y + 4.0 + k as f32 * PANEL_ROW_H;
+                let cy = ry + PANEL_ROW_H / 2.0;
+                let hit = Hit::PanelRow(flat);
+                flat += 1;
+                if k > 0 {
+                    g.rect(X0 + 16.0, ry, X1 - X0 - 32.0, 1.0, &paint(255, 255, 255, 0.05));
+                }
+                if self.is_hover(hit) {
+                    g.fill(&rrect(X0 + 6.0, ry + 2.0, X1 - X0 - 12.0, PANEL_ROW_H - 4.0, 8.0), &paint(255, 255, 255, 0.06));
+                }
+                let mut tx = X0 + 18.0;
+                if r.mark {
+                    let c = g.acc.bright;
+                    g.circle(tx + 3.0, cy, 3.5, &paint(c[0], c[1], c[2], 1.0));
+                    tx += 14.0;
+                }
+                let sub_w = if r.sub.is_empty() { 0.0 } else { g.width(&r.sub, 11.5) + 8.0 };
+                if sub_w > 0.0 {
+                    g.txt(&r.sub, X1 - 18.0 - sub_w + 8.0, cy - 7.0, 11.5, TEXT_FAINT, 1.0, sub_w);
+                }
+                let tw = X1 - 18.0 - sub_w - tx - 8.0;
+                self.check(g, &r.text, 13.5, true, tw);
+                g.txtb(&r.text, tx, cy - 8.0, 13.5, [255, 255, 255], 1.0, tw);
+                self.hit(X0 + 6.0, ry, X1 - X0 - 12.0, PANEL_ROW_H, hit);
+            }
+            y += h + 14.0;
+        }
+        if !s.foot.is_empty() {
+            self.check(g, &s.foot, 11.5, false, X1 - X0 - 8.0);
+            g.txt(&s.foot, X0 + 4.0, y, 11.5, TEXT_FAINT, 1.0, X1 - X0 - 8.0);
+            y += 24.0;
+        }
+        y + 8.0
+    }
+
+    fn panel_detail(&mut self, g: &mut Gfx, y: f32, d: &DetailMsg) -> f32 {
+        use crate::extproto::State;
+        match d.state {
+            State::Loading => return self.panel_message(g, y, tr("Loading\u{2026}"), None),
+            State::Empty | State::Setup => return self.panel_message(g, y, &d.message, None),
+            State::Error => return self.panel_message(g, y, &d.message, Some((tr("Retry"), Hit::PanelRetry))),
+            State::Ready => {}
+        }
+        // text on the left, the matrix (a QR code) on the right when there is one
+        let qr = d.matrix.as_ref().map(|m| {
+            let px = (176 / (m.size + 8)).max(2) as f32;
+            (m, px, (m.size + 8) as f32 * px)
+        });
+        let text_w = X1 - X0 - 40.0 - qr.map_or(0.0, |q| q.2 + 20.0);
+        let mut lines: Vec<(String, f32, [u8; 3], bool, f32)> = Vec::new();
+        if !d.title.is_empty() {
+            let t = fit(g, &d.title, 15.0, text_w);
+            lines.push((t, 15.0, [255, 255, 255], true, 0.0));
+        }
+        if !d.meta.is_empty() {
+            let joined = d.meta.iter().map(|(k, v)| format!("{k}: {v}")).collect::<Vec<_>>().join("   \u{b7}   ");
+            lines.extend(wrap_lines(g, &joined, 12.0, text_w).into_iter().enumerate().map(|(n, l)| (l, 12.0, TEXT_DIM, false, if n == 0 { 6.0 } else { 0.0 })));
+        }
+        for (n, l) in wrap_lines(g, &d.body, 12.5, text_w).into_iter().enumerate() {
+            lines.push((l, 12.5, [235, 235, 238], false, if n == 0 { 10.0 } else { 0.0 }));
+        }
+        for n in &d.notes {
+            let head = if n.when.is_empty() { n.who.clone() } else { format!("{} \u{b7} {}", n.who, n.when) };
+            lines.push((head, 11.0, TEXT_FAINT, false, 10.0));
+            lines.extend(wrap_lines(g, &n.text, 12.0, text_w).into_iter().map(|l| (l, 12.0, [220, 220, 226], false, 0.0)));
+        }
+        let text_h: f32 = 20.0 + lines.iter().map(|l| 17.0 + l.4).sum::<f32>();
+        let buttons_h = if d.buttons.is_empty() { 0.0 } else { 46.0 };
+        let h = (text_h + buttons_h).max(qr.map_or(0.0, |q| q.2 + 36.0 + buttons_h)).max(80.0);
+        Self::card(g, y, h);
+        let mut ly = y + 18.0;
+        for (t, size, col, bold, gap) in &lines {
+            ly += gap;
+            self.check(g, t, *size, *bold, text_w + 2.0);
+            if *bold {
+                g.txtb(t, X0 + 20.0, ly, *size, *col, 1.0, text_w + 2.0);
+            } else {
+                g.txt(t, X0 + 20.0, ly, *size, *col, 1.0, text_w + 2.0);
+            }
+            ly += 17.0;
+        }
+        if let Some((m, px, side)) = qr {
+            let (qx, qy) = (X1 - 20.0 - side, y + 18.0);
+            g.fill(&rrect(qx, qy, side, side, 6.0), &paint(255, 255, 255, 1.0));
+            for r in 0..m.size {
+                let mut c = 0;
+                while c < m.size {
+                    if !m.at(c, r) {
+                        c += 1;
+                        continue;
+                    }
+                    let start = c;
+                    while c < m.size && m.at(c, r) {
+                        c += 1;
+                    }
+                    g.rect(qx + (4 + start) as f32 * px, qy + (4 + r) as f32 * px, (c - start) as f32 * px, px, &paint(0, 0, 0, 1.0));
+                }
+            }
+        }
+        if !d.buttons.is_empty() {
+            let by = y + h - 38.0;
+            let mut rx = X1 - 16.0;
+            for (n, b) in d.buttons.iter().enumerate().rev() {
+                rx = self.small_button(g, rx, by, &b.label, Hit::PanelButton(n), true) - 6.0;
+            }
+        }
+        let mut y = y + h + 14.0;
+        if !d.foot.is_empty() {
+            g.txt(&d.foot, X0 + 4.0, y, 11.5, TEXT_FAINT, 1.0, X1 - X0 - 8.0);
+            y += 24.0;
+        }
+        y + 8.0
     }
 
     /// A small pill button whose right edge is at `rx`; returns its left edge. A disabled one is drawn dim and does not
