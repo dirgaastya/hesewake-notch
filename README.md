@@ -28,7 +28,7 @@ Hesewake Notch sits flush against the top edge of your screen as a small black n
 
 ## <img src="https://api.iconify.design/lucide/plus.svg?color=%23ff453a" width="20" align="top"> What this fork adds to Poch
 
-Synced lyrics (with a scrolling lyrics mode), cover art in the notch, a redesigned Water slide, Windows notifications with contact photos, toasts (charger, Bluetooth, Caps/Num/Scroll Lock, microphone/camera in use), volume control by scrolling, a **Settings** window (a sidebar of categories: show/hide/reorder slides, appearance, screens, music, alerts, weather and calendar), a tray menu, a blue theme, and an installer. See [CHANGELOG.md](CHANGELOG.md) for details.
+Synced lyrics (with a scrolling lyrics mode), cover art in the notch, a redesigned Water slide, Windows notifications with contact photos that open their app on click, toasts (charger, Bluetooth, Caps/Num/Scroll Lock, microphone/camera in use), volume control by scrolling, a **Settings** window (a sidebar of categories: show/hide/reorder slides, appearance, screens, music, alerts, weather and calendar), a tray menu, a blue theme, and an installer. See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ---
 
@@ -106,6 +106,7 @@ The executable is created at `target\release\hesewake-notch.exe`. Japanese romaj
 | `prayer.rs`, `adhan.rs`                      | Prayer times, Prayer slide, Ramadan mode, adhan sound              |
 | `wibu.rs`, `filepick.rs`                     | Wibu mode: image behind the notch; the shared Open dialog          |
 | `extproto.rs`, `ext.rs`, `extapp.rs`, `extslide.rs` | Extensions: protocol rules, the pipe, the extension list and the slide |
+| `notif.rs`, `notif_img.rs`, `notifview.rs`, `notifopen.rs` | Windows notifications: reading them, contact photos, the slide, opening the app on click |
 | `clock.rs`                                   | Clock and date helpers                                             |
 | `water.rs`, `todo.rs`, `shelf.rs`, `note.rs` | Water, To-do, Ledge and Scrap slides                               |
 | `i18n.rs`                                    | UI language: English text as the key, Indonesian table             |

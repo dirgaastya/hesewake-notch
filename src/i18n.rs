@@ -334,6 +334,7 @@ const ID_TEXT: &[(&str, &str)] = &[
     ("Copied", "Disalin"),
     // Notifications, Music, Scrap, Ledge
     ("Clear all", "Hapus semua"),
+    ("Couldn't open app", "Gagal membuka aplikasi"),
     ("Notification access is off", "Akses notifikasi mati"),
     ("Allow Hesewake Notch in Windows Settings to see them here.", "Izinkan Hesewake Notch di Pengaturan Windows agar tampil di sini."),
     ("Open Settings", "Buka Pengaturan"),

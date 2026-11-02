@@ -25,8 +25,10 @@ pub(crate) enum Access {
 }
 
 pub(crate) enum NotifEvent {
-    Added { id: u32, app: String, title: String, body: String, at_unix: u64, icon: Option<Vec<u8>>, avatar: Option<Vec<u8>>, initial: bool },
+    Added { id: u32, app: String, aumid: Option<String>, title: String, body: String, at_unix: u64, icon: Option<Vec<u8>>, avatar: Option<Vec<u8>>, initial: bool },
     Removed(u32),
+    /// Hasil membuka aplikasi asal notifikasi (notifopen.rs).
+    Opened { id: u32, ok: bool },
     Status(Access),
 }
 
@@ -35,6 +37,8 @@ pub(crate) type NotifSlot = Arc<Mutex<Vec<NotifEvent>>>;
 pub(crate) struct NotifItem {
     pub(crate) id: u32,
     pub(crate) app: String,
+    /// AppUserModelId aplikasi asal, dipakai untuk membukanya saat diklik.
+    pub(crate) aumid: Option<String>,
     pub(crate) title: String,
     pub(crate) body: String,
     pub(crate) at_unix: u64,
@@ -44,6 +48,8 @@ pub(crate) struct NotifItem {
     pub(crate) avatar: Option<Pixmap>,
     /// Mulai animasi hapus (None = tampil normal); item dibuang setelah animasi selesai.
     pub(crate) dismiss: Option<Instant>,
+    /// Sedang dibuka (menunggu `NotifEvent::Opened`): klik berikutnya diabaikan supaya aplikasi tidak dibuka dua kali.
+    pub(crate) opening: bool,
 }
 
 const ICON_PX: u32 = 32;
@@ -51,7 +57,7 @@ const ICON_PX: u32 = 32;
 // Listener harus hidup selama app jalan agar event tetap datang.
 static LISTENER: Mutex<Option<UserNotificationListener>> = Mutex::new(None);
 
-fn push(slot: &NotifSlot, hwnd: isize, ev: NotifEvent) {
+pub(crate) fn push(slot: &NotifSlot, hwnd: isize, ev: NotifEvent) {
     slot.lock().unwrap_or_else(|p| p.into_inner()).push(ev);
     unsafe {
         let _ = PostMessageW(HWND(hwnd as *mut c_void), WM_NOTIF, WPARAM(0), LPARAM(0));
@@ -200,6 +206,7 @@ pub(crate) fn split_texts(texts: &[String]) -> (String, String) {
 fn convert(n: &UserNotification, initial: bool) -> Option<NotifEvent> {
     let id = n.Id().ok()?;
     let info = n.AppInfo().ok();
+    let aumid = info.as_ref().and_then(|a: &AppInfo| a.AppUserModelId().ok()).map(|s| s.to_string()).filter(|s| !s.is_empty());
     let display = info.as_ref().and_then(|a: &AppInfo| a.DisplayInfo().ok());
     let app = display.as_ref().and_then(|d| d.DisplayName().ok()).map(|s| s.to_string()).unwrap_or_default();
 
@@ -220,7 +227,7 @@ fn convert(n: &UserNotification, initial: bool) -> Option<NotifEvent> {
     let icon = display.as_ref().and_then(|d| logo_with_timeout(d.clone()));
     perf::note(&format!("notif: convert id={id} app='{app}' icon={} ({} ms) mem={:.1}MB", icon.is_some(), t0.elapsed().as_millis(), perf::mem_mb()));
     let avatar = if AVATAR.load(Ordering::Relaxed) { notif_img::avatar_rgba(id) } else { None };
-    Some(NotifEvent::Added { id, app, title, body, at_unix, icon, avatar, initial })
+    Some(NotifEvent::Added { id, app, aumid, title, body, at_unix, icon, avatar, initial })
 }
 
 /// Baca logo di thread sendiri dengan batas waktu: beberapa logo aplikasi tidak pernah selesai dimuat dan tidak
@@ -258,6 +265,7 @@ pub(crate) fn demo_items() -> Vec<NotifItem> {
     let mk = |id: u32, app: &str, title: &str, body: &str, ago: u64, unread: bool| NotifItem {
         id,
         app: app.to_string(),
+        aumid: None,
         title: title.to_string(),
         body: body.to_string(),
         at_unix: now.saturating_sub(ago),
@@ -265,6 +273,7 @@ pub(crate) fn demo_items() -> Vec<NotifItem> {
         icon: None,
         avatar: None,
         dismiss: None,
+        opening: false,
     };
     vec![
         mk(1, "Screenshot", "Lightshot", "Your screenshot is copied to clipboard", 120, false),
@@ -333,13 +342,14 @@ impl App {
             match ev {
                 NotifEvent::Status(a) => self.notif_access = a,
                 NotifEvent::Removed(id) => self.notifs.retain(|n| n.id != id),
-                NotifEvent::Added { id, app, title, body, at_unix, icon, avatar, initial } => {
+                NotifEvent::Opened { id, ok } => self.notif_opened(id, ok),
+                NotifEvent::Added { id, app, aumid, title, body, at_unix, icon, avatar, initial } => {
                     if !self.notif_on || self.notifs.iter().any(|n| n.id == id) || notif_muted(&app) {
                         continue;
                     }
                     let icon = icon.and_then(|rgba| pixmap_from_rgba(&rgba, ICON_PX));
                     let avatar = avatar.and_then(|rgba| pixmap_from_rgba(&rgba, notif_img::AVATAR_PX));
-                    self.notifs.push(NotifItem { id, app, title, body, at_unix, unread: !initial, icon, avatar, dismiss: None });
+                    self.notifs.push(NotifItem { id, app, aumid, title, body, at_unix, unread: !initial, icon, avatar, dismiss: None, opening: false });
                     self.notifs.sort_by(|a, b| b.at_unix.cmp(&a.at_unix));
                     self.notifs.truncate(MAX_ITEMS);
                     if !initial {
