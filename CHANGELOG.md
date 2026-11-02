@@ -4,6 +4,8 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/), versi mengikut
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-02
+
 ### Added
 - **Kotak teks, kartu hero, dan nada baris** di panel extension: halaman `detail` bisa memuat `input` (satu baris yang bisa diedit pengguna, maksimal 40 karakter, dikirim balik sebagai pesan `input` saat Enter atau tombol Save), halaman `slide` bisa memuat `hero` (kartu di atas dengan gambar kecil PNG atau JPEG, judul, dan dua baris teks), dan baris bisa memuat `tone` (`good`, `warn`, `muted`) yang mewarnai teks status.
 - **Remove** di Settings > Extensions: menghentikan extension, mematikannya, dan menghapus folder manifest-nya (dua kali tekan; hanya folder biasa tepat di dalam folder extensions, tidak pernah tautan ke tempat lain). Tersedia juga untuk manifest yang tidak terbaca.
