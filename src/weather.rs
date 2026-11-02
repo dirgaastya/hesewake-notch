@@ -313,7 +313,8 @@ impl App {
             v[1] = Slot::Cond;
             n = 2;
         }
-        if self.countdown_on() {
+        // with weather and no timer pill the countdown has its own place right of the clock (`countdown_right`)
+        if self.countdown_on() && !self.countdown_right() {
             v[n] = Slot::Prayer;
             n += 1;
         }
@@ -375,6 +376,10 @@ impl App {
                 _ => {}
             }
         };
+        // the countdown that stays right of the clock while the weather alternates on the left
+        if let (Some(lx), Some((lbl, col))) = (self.idle_label_cx(w), label.as_ref()) {
+            g.txt_c(lbl, lx, ty(h, 12.0), 12.0, *col, ca, 80.0, false);
+        }
         // transisi: tahap lama naik + memudar, tahap baru naik dari bawah
         let e = ss(0.0, 1.0, prog);
         if n > 1 {

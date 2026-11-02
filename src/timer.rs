@@ -350,8 +350,15 @@ fn idle_slots(eye: bool, weather: Option<f32>, bell: bool, wide: bool) -> IdleSl
 
 /// Idle notch layout without a timer while the prayer countdown shows, using the same spacing:
 /// [margin][label][clock][margin or bell]. The (missing) pill position is set to the clock's right edge.
-fn prayer_layout(bell: bool) -> IdleSlots {
+/// With weather: [margin][weather][clock][label][margin or bell], the label where the timer pill would be.
+fn prayer_layout(bell: bool, weather: bool) -> IdleSlots {
     let right = if bell { BELL_PAD } else { PAD };
+    if weather {
+        let weather_c = PAD + WEATHER_W / 2.0;
+        let clock_c = PAD + WEATHER_W + GAP + CLOCK_W / 2.0;
+        let label = clock_c + CLOCK_W / 2.0 + GAP;
+        return IdleSlots { raw: label + prayer::LABEL_W + right, clock: Some((Some(weather_c), clock_c, label)) };
+    }
     let label_c = PAD + prayer::LABEL_W / 2.0;
     let clock_c = PAD + prayer::LABEL_W + GAP + CLOCK_W / 2.0;
     let end = clock_c + CLOCK_W / 2.0;
@@ -369,7 +376,7 @@ impl App {
     }
 
     /// Pil timer tampil di notch idle: timer berjalan dan notch kecil dalam keadaan diam.
-    fn timer_chip_active(&self) -> bool {
+    pub(crate) fn timer_chip_active(&self) -> bool {
         self.tm.running() && !self.expanded() && self.toast.is_none() && !self.thin() && !self.media.playing && self.splash_t().is_none()
     }
 
@@ -391,7 +398,22 @@ impl App {
     /// Idle notch layout while the prayer countdown shows without a timer pill; None otherwise.
     pub(crate) fn prayer_slots(&self) -> Option<IdleSlots> {
         let on = self.timer_slots().is_none() && self.weather_shown() && self.countdown_on();
-        on.then(|| prayer_layout(self.bell_pos().is_some()))
+        on.then(|| prayer_layout(self.bell_pos().is_some(), self.countdown_right()))
+    }
+
+    /// The prayer countdown sits right of the clock, so the weather stays on the left: there is weather to show and no timer
+    /// pill wants that place. Otherwise the countdown takes turns with the weather in the slot left of the clock.
+    pub(crate) fn countdown_right(&self) -> bool {
+        self.countdown_on() && self.cfg.weather_on && weather::current().is_some() && !self.timer_chip_active()
+    }
+
+    /// Center of the countdown label right of the clock, if it sits there.
+    pub(crate) fn idle_label_cx(&self, w: f32) -> Option<f32> {
+        if !self.countdown_right() {
+            return None;
+        }
+        let (_, _, label) = self.prayer_slots()?.clock?;
+        Some(CX - w / 2.0 + label + prayer::LABEL_W / 2.0)
     }
 
     /// The idle notch layout in effect: timer pill, or prayer countdown.
@@ -770,13 +792,20 @@ mod tests {
         assert!((p.raw - s.raw - (72.0 - WEATHER_W)).abs() < 0.01);
         // fase mata simetris terhadap tengah
         // prayer countdown without a timer: label + clock, left margin = right margin, same gap
-        let q = prayer_layout(false);
+        let q = prayer_layout(false, false);
         let (qlc, qcc, qend) = q.clock.unwrap();
         let qlc = qlc.unwrap();
         assert!((qlc - prayer::LABEL_W / 2.0 - PAD).abs() < 0.01, "left margin");
         assert!(((qcc - CLOCK_W / 2.0) - (qlc + prayer::LABEL_W / 2.0) - GAP).abs() < 0.01, "label-clock gap");
         assert!((q.raw - qend - PAD).abs() < 0.01, "right margin");
-        assert!((prayer_layout(true).raw - q.raw - (BELL_PAD - PAD)).abs() < 0.01, "the bell adds room on the right");
+        assert!((prayer_layout(true, false).raw - q.raw - (BELL_PAD - PAD)).abs() < 0.01, "the bell adds room on the right");
+        // with weather: weather, clock, label in the pill's place, same spacing
+        let r = prayer_layout(false, true);
+        let (rwc, rcc, rlx) = r.clock.unwrap();
+        assert!((rwc.unwrap() - WEATHER_W / 2.0 - PAD).abs() < 0.01, "left margin");
+        assert!((rlx - (rcc + CLOCK_W / 2.0) - GAP).abs() < 0.01, "clock-label gap");
+        assert!((r.raw - (rlx + prayer::LABEL_W) - PAD).abs() < 0.01, "right margin");
+        assert!((r.raw - idle_slots(false, Some(WEATHER_W), false, false).raw - (prayer::LABEL_W - PILL_W)).abs() < 0.01, "the label takes the pill's place");
         let e = idle_slots(true, None, false, false);
         assert!(e.clock.is_none() && (e.raw / 2.0 - (EYE_GAP + PILL_W + PAD)).abs() < 0.01);
     }

@@ -2678,3 +2678,531 @@ fn snap_extension_toast() {
         });
     }
 }
+
+// ---------------------------------------------------------------- the panel of an extension in Settings
+/// An extension without a slide, connected, with its Settings in the panel; the Extensions page is showing.
+fn panel_ext(a: &mut App, first: serde_json::Value) {
+    a.ext.test_add("media-bridge", "Media Bridge", false);
+    a.ext.list[0].manifest.as_mut().unwrap().panel = true;
+    a.cfg.ext_on.push("media-bridge".into());
+    a.apply_slide_cfg();
+    a.sw_show_page(EXTENSIONS);
+    ext_feed(a, first);
+}
+
+fn panel_home() -> serde_json::Value {
+    serde_json::json!({
+        "t": "slide", "rev": 1, "title": "Pho|ne",
+        "actions": [{"id": "pair", "label": "Pair a phone"}],
+        "rows": [{"id": "a1b2", "text": "Phone 1", "sub": "Connected"}, {"id": "c3d4", "text": "Phone 2", "sub": "Offline", "mark": true}],
+        "foot": "Fake Song One \u{b7} The Test Band"
+    })
+}
+
+/// A QR-like square: ones and zeros in a pattern.
+fn panel_qr() -> serde_json::Value {
+    let rows: Vec<String> = (0..33).map(|r| (0..33).map(|c| if (r * 7 + c * 3 + r * c) % 5 < 2 || (r < 7 && c < 7) { '1' } else { '0' }).collect()).collect();
+    serde_json::json!({
+        "t": "detail", "rev": 2, "for": "pairing", "title": "Pair a phone",
+        "meta": [{"k": "PC", "v": "THINKPAD"}, {"k": "Time left", "v": "1:42"}],
+        "body": "On your phone, open Hesewake Media Bridge and pick this PC, or scan the code.",
+        "matrix": {"size": 33, "rows": rows},
+        "buttons": [{"id": "pair_cancel", "label": "Cancel"}],
+        "foot": "Phones can only pair while this page is open"
+    })
+}
+
+#[test]
+fn the_settings_button_opens_a_panel_for_a_panel_extension() {
+    use settingswin::Hit;
+    let mut a = sw_shot("settingswin-extensions-panel-before", |a| panel_ext(a, panel_home()));
+    assert!(settingswin::hit_center(&a, Hit::ExtConfig(0)).is_some(), "Settings is there while it is connected");
+    sw_press(&mut a, Hit::ExtConfig(0));
+    assert_eq!(a.sw.panel, Some(0));
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "visible", "on": true})), "it is told that its page is being looked at");
+    assert!(a.ext.sent.iter().all(|(_, f)| serde_json::from_slice::<serde_json::Value>(&f[4..]).unwrap()["t"] != "config"), "no window is asked for");
+    settingswin::render(&mut a);
+    assert!(settingswin::hit_center(&a, Hit::ExtOn(0)).is_none(), "the list is replaced by the pages");
+    // a row, an action, the foot
+    sw_press(&mut a, Hit::PanelRow(1));
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "row", "id": "c3d4"})));
+    sw_press(&mut a, Hit::PanelAct(0));
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "action", "id": "pair"})));
+    // back to the list: the extension is told that nobody looks any more
+    sw_press(&mut a, Hit::PanelBack);
+    assert_eq!(a.sw.panel, None);
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "visible", "on": false})));
+    settingswin::render(&mut a);
+    assert!(settingswin::hit_center(&a, Hit::ExtOn(0)).is_some(), "the list is back");
+}
+
+#[test]
+fn leaving_the_page_closes_the_panel_too() {
+    use settingswin::Hit;
+    let mut a = sw_shot("settingswin-extensions-panel-leave", |a| panel_ext(a, panel_home()));
+    sw_press(&mut a, Hit::ExtConfig(0));
+    assert_eq!(a.sw.panel, Some(0));
+    sw_press(&mut a, Hit::Nav(0));
+    assert_eq!(a.sw.panel, None, "another page of the window");
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "visible", "on": false})));
+}
+
+#[test]
+fn a_page_with_a_qr_code_draws_it_and_its_buttons_work() {
+    use settingswin::Hit;
+    let mut a = sw_shot("settingswin-panel-qr", |a| {
+        panel_ext(a, panel_qr());
+        a.sw.panel = Some(0);
+    });
+    let px: Vec<u8> = settingswin::canvas(&a).unwrap().data().to_vec();
+    let white = px.chunks_exact(4).filter(|p| p[0] > 250 && p[1] > 250 && p[2] > 250).count();
+    let dark_in_white = px.chunks_exact(4).filter(|p| p[0] < 5 && p[1] < 5 && p[2] < 5).count();
+    assert!(white > 1000 && dark_in_white > 200, "a white square with black modules is on the page ({white} white, {dark_in_white} black)");
+    sw_press(&mut a, Hit::PanelButton(0));
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "action", "id": "pair_cancel"})));
+    sw_press(&mut a, Hit::PanelDetailBack);
+    assert!(a.ext.list[0].detail.is_none(), "Back leaves a detail page at once");
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "back"})));
+}
+
+#[test]
+fn the_other_pages_of_the_panel() {
+    use settingswin::Hit;
+    // tabs and a stepper
+    let mut a = sw_shot("settingswin-panel-tabs", |a| {
+        panel_ext(a, serde_json::json!({"t": "slide", "rev": 1, "title": "Re|port", "tabs": [{"id": "all", "label": "All"}, {"id": "odd", "label": "Odd", "count": 3}], "tab": "all",
+            "stepper": {"label": "2026-11-01", "prev": true, "next": false}, "rows": [{"id": "1", "text": "One"}]}));
+        a.sw.panel = Some(0);
+    });
+    sw_press(&mut a, Hit::PanelTab(1));
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "tab", "id": "odd"})));
+    assert_eq!(a.ext.list[0].view.tab_sel.as_deref(), Some("odd"), "the chip moves at once");
+    sw_press(&mut a, Hit::PanelStep(-1));
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "step", "dir": -1})));
+    assert!(settingswin::hit_center(&a, Hit::PanelStep(1)).is_none(), "a disabled arrow does not answer");
+    // error and setup
+    for (state, hit, id) in [("error", Hit::PanelRetry, "retry"), ("setup", Hit::PanelSetup, "setup")] {
+        let mut a = sw_shot(&format!("settingswin-panel-{state}"), |a| {
+            panel_ext(a, serde_json::json!({"t": "slide", "rev": 1, "state": state, "message": "Something to say", "setup_label": "Set it up"}));
+            a.sw.panel = Some(0);
+        });
+        sw_press(&mut a, hit);
+        assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "action", "id": id})), "{state}");
+    }
+    // not connected: the notch says why
+    let a = sw_shot("settingswin-panel-away", |a| {
+        panel_ext(a, panel_home());
+        a.ext.list[0].connected = false;
+        a.ext.list[0].problem = Some("file not found".into());
+        a.sw.panel = Some(0);
+    });
+    assert!(settingswin::hit_center(&a, Hit::PanelRow(0)).is_none() && settingswin::hit_center(&a, Hit::PanelBack).is_some(), "only the way back");
+}
+
+#[test]
+fn panel_text_fits_in_both_languages() {
+    let _lang = i18n::restore_on_drop();
+    for id in [false, true] {
+        for (name, j) in [("home", panel_home()), ("qr", panel_qr())] {
+            let a = sw_shot(&format!("{}settingswin-panel-fit-{name}", if id { "id-" } else { "" }), |a| {
+                if id {
+                    indonesian(a);
+                }
+                panel_ext(a, j);
+                a.sw.panel = Some(0);
+            });
+            assert!(settingswin::cut(&a).is_empty(), "{name} (indonesian: {id}): cut texts {:?}", settingswin::cut(&a));
+        }
+    }
+}
+
+#[test]
+fn a_window_extension_still_gets_the_config_message() {
+    use settingswin::Hit;
+    let mut a = sw_shot("settingswin-extensions-window-mode", |a| {
+        panel_ext(a, panel_home());
+        a.ext.list[0].manifest.as_mut().unwrap().panel = false;
+    });
+    sw_press(&mut a, Hit::ExtConfig(0));
+    assert_eq!(a.sw.panel, None);
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "config"})));
+}
+
+// ---------------------------------------------------------------- a text box on an extension's page
+fn rename_page(value: &str) -> serde_json::Value {
+    serde_json::json!({
+        "t": "detail", "rev": 3, "for": "a1b2", "title": "Phone 1",
+        "meta": [{"k": "Status", "v": "Connected"}, {"k": "Paired", "v": "2026-11-01"}],
+        "body": "Forget this phone to take away its access.",
+        "input": {"id": "rename", "label": "Name", "value": value, "max": 12, "button": "Save"},
+        "buttons": [{"id": "forget:a1b2", "label": "Forget"}]
+    })
+}
+
+/// The panel with the rename page showing and the first frame drawn.
+fn rename_panel(name: &str, value: &str) -> App {
+    sw_shot(name, |a| {
+        panel_ext(a, rename_page(value));
+        a.sw.panel = Some(0);
+    })
+}
+
+fn type_text(a: &mut App, s: &str) {
+    for u in s.encode_utf16() {
+        assert!(a.sw_field_char(u), "the box has the keyboard");
+    }
+}
+
+fn key(a: &mut App, vk: u16) -> bool {
+    a.sw_field_key(vk, false)
+}
+
+fn field_text(a: &App) -> String {
+    a.sw.field.as_ref().expect("a text box").tf_text()
+}
+
+#[test]
+fn a_text_box_takes_typing_and_sends_it_on_enter() {
+    use settingswin::Hit;
+    let mut a = rename_panel("settingswin-panel-input", "Phone 1");
+    assert!(settingswin::hit_center(&a, Hit::PanelInput).is_some() && settingswin::hit_center(&a, Hit::PanelInputSave).is_some());
+    assert!(!a.sw_field_char(b'x' as u16), "it does not take keys before it is clicked");
+    assert!(!key(&mut a, 0x08));
+    sw_press(&mut a, Hit::PanelInput);
+    assert_eq!(field_text(&a), "Phone 1");
+    for _ in 0..7 {
+        key(&mut a, 0x08);
+    }
+    type_text(&mut a, "Pixel 8");
+    assert_eq!(field_text(&a), "Pixel 8");
+    settingswin::render(&mut a);
+    key(&mut a, 0x0D);
+    assert_eq!(ext_sent(&a).last(), Some(&serde_json::json!({"t": "input", "id": "rename", "value": "Pixel 8"})));
+    assert!(!a.sw_field_char(b'x' as u16), "after Enter the box lets go of the keyboard");
+}
+
+#[test]
+fn the_save_button_sends_it_too_and_clicking_elsewhere_keeps_what_was_typed() {
+    use settingswin::Hit;
+    let mut a = rename_panel("settingswin-panel-input-save", "Phone 1");
+    sw_press(&mut a, Hit::PanelInput);
+    key(&mut a, 0x24);
+    type_text(&mut a, "My ");
+    // a click on something else lets go of the box, the text stays
+    sw_press(&mut a, Hit::PanelButton(0));
+    assert!(!a.sw.field.as_ref().unwrap().is_focused());
+    assert_eq!(field_text(&a), "My Phone 1");
+    a.ext.sent.clear();
+    sw_press(&mut a, Hit::PanelInputSave);
+    assert_eq!(ext_sent(&a), vec![serde_json::json!({"t": "input", "id": "rename", "value": "My Phone 1"})]);
+}
+
+#[test]
+fn escape_gives_up_and_the_box_is_never_longer_than_the_page_says() {
+    use settingswin::Hit;
+    let mut a = rename_panel("settingswin-panel-input-esc", "Phone 1");
+    sw_press(&mut a, Hit::PanelInput);
+    type_text(&mut a, "xxxxxxxxxxxxxxxx");
+    assert_eq!(field_text(&a).chars().count(), 12, "the page said 12");
+    assert!(key(&mut a, 0x1B));
+    assert_eq!(field_text(&a), "Phone 1", "back to what the extension said");
+    assert!(!a.sw.field.as_ref().unwrap().is_focused());
+    assert!(a.ext.sent.iter().all(|(_, f)| serde_json::from_slice::<serde_json::Value>(&f[4..]).unwrap()["t"] != "input"), "nothing was sent");
+}
+
+#[test]
+fn the_caret_keys_and_characters_that_come_in_two_halves_work() {
+    use settingswin::Hit;
+    let mut a = rename_panel("settingswin-panel-input-keys", "Phone 1");
+    sw_press(&mut a, Hit::PanelInput);
+    key(&mut a, 0x24);
+    key(&mut a, 0x2E);
+    assert_eq!(field_text(&a), "hone 1", "Home, then Delete");
+    key(&mut a, 0x23);
+    key(&mut a, 0x25);
+    key(&mut a, 0x25);
+    type_text(&mut a, "!");
+    assert_eq!(field_text(&a), "hone! 1", "End, two Left, a character in the middle");
+    key(&mut a, 0x27);
+    key(&mut a, 0x08);
+    assert_eq!(field_text(&a), "hone!1");
+    // a character outside the first plane arrives as two UTF-16 units
+    type_text(&mut a, "\u{1F600}");
+    assert!(field_text(&a).contains('\u{1F600}'));
+    assert!(a.sw_field_char(0x16), "a control character (Ctrl+V) is taken and ignored");
+    calendar::TEST_CLIPBOARD.with(|c| *c.borrow_mut() = Some("ab\ncd".into()));
+    assert!(a.sw_field_key(0x56, true));
+    assert!(field_text(&a).chars().count() <= 12);
+}
+
+#[test]
+fn a_new_value_from_the_extension_is_followed_unless_the_user_is_typing() {
+    use settingswin::Hit;
+    let mut a = rename_panel("settingswin-panel-input-follow", "Phone 1");
+    ext_feed(&mut a, rename_page("Pixel 8"));
+    settingswin::render(&mut a);
+    assert_eq!(field_text(&a), "Pixel 8", "it took the new name");
+    sw_press(&mut a, Hit::PanelInput);
+    type_text(&mut a, "!");
+    ext_feed(&mut a, rename_page("Other"));
+    settingswin::render(&mut a);
+    assert!(field_text(&a).ends_with('!'), "what is being typed is not taken away");
+}
+
+#[test]
+fn the_box_goes_when_the_page_goes() {
+    use settingswin::Hit;
+    let mut a = rename_panel("settingswin-panel-input-gone", "Phone 1");
+    assert!(a.sw.field.is_some());
+    sw_press(&mut a, Hit::PanelDetailBack);
+    settingswin::render(&mut a);
+    assert!(a.sw.field.is_none());
+}
+
+#[test]
+fn a_text_box_fits_in_both_languages() {
+    let _lang = i18n::restore_on_drop();
+    for id in [false, true] {
+        let a = sw_shot(&format!("{}settingswin-panel-input-fit", if id { "id-" } else { "" }), |a| {
+            if id {
+                indonesian(a);
+            }
+            panel_ext(a, rename_page("Phone 1"));
+            a.sw.panel = Some(0);
+        });
+        assert!(settingswin::cut(&a).is_empty(), "indonesian: {id}: cut texts {:?}", settingswin::cut(&a));
+    }
+}
+
+// ---------------------------------------------------------------- a hero card with a picture
+fn std_b64(data: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for c in data.chunks(3) {
+        let n = c.iter().enumerate().fold(0u32, |acc, (i, &b)| acc | (b as u32) << (16 - 8 * i));
+        for i in 0..c.len() + 1 {
+            out.push(A[(n >> (18 - 6 * i) & 63) as usize] as char);
+        }
+        out.extend(std::iter::repeat('=').take(3 - c.len()));
+    }
+    out
+}
+
+/// A JPEG of 160 x 160: red to the right, green downwards, a little blue.
+fn hero_jpeg() -> Vec<u8> {
+    let img = image::RgbImage::from_fn(160, 160, |x, y| image::Rgb([(x * 255 / 159) as u8, (y * 255 / 159) as u8, 140]));
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85).encode_image(&img).expect("a JPEG");
+    out
+}
+
+fn hero_home(with_picture: bool) -> serde_json::Value {
+    let mut hero = serde_json::json!({"title": "Cupid (Twin Version)", "sub": "FIFTY FIFTY \u{b7} The Beginning: Cupid", "text": "Phone 1 \u{b7} Playing"});
+    if with_picture {
+        hero["image"] = serde_json::json!({"mime": "image/jpeg", "data": std_b64(&hero_jpeg())});
+    }
+    serde_json::json!({
+        "t": "slide", "rev": 1, "title": "Pho|ne", "hero": hero,
+        "actions": [{"id": "pair", "label": "Pair a phone"}],
+        "rows": [{"id": "a1b2", "text": "Pixel 8", "sub": "Connected", "tone": "good"}, {"id": "c3d4", "text": "Phone 2", "sub": "Offline", "tone": "muted"}, {"id": "e5f6", "text": "Old phone", "sub": "Needs attention", "tone": "warn"}]
+    })
+}
+
+#[test]
+fn a_hero_draws_its_picture_once_and_keeps_it() {
+    let a = sw_shot("settingswin-panel-hero", |a| {
+        panel_ext(a, hero_home(true));
+        a.sw.panel = Some(0);
+    });
+    let key = a.ext.list[0].view.hero_pm.borrow().as_ref().map(|(k, pm)| (*k, pm.width()));
+    assert_eq!(key.map(|k| k.1), Some(192), "the picture was decoded to a square");
+    // the picture is on the card: the colours of the gradient, not the grey tile
+    let px = settingswin::canvas(&a).unwrap().data().to_vec();
+    let at = |x: usize, y: usize| {
+        let i = (y * 820 + x) * 4;
+        [px[i], px[i + 1], px[i + 2]]
+    };
+    let (tl, br) = (at(268, 200), at(342, 270));
+    assert!(br[0] > tl[0] + 60 && br[1] > tl[1] + 60, "red grows to the right and green downwards: {tl:?} {br:?}");
+    // drawing again does not decode again: the same cached picture
+    let mut a = a;
+    settingswin::render(&mut a);
+    assert_eq!(a.ext.list[0].view.hero_pm.borrow().as_ref().map(|(k, _)| *k), key.map(|k| k.0));
+    // a different picture replaces it
+    let mut other = hero_home(true);
+    other["hero"]["image"]["data"] = serde_json::json!(std_b64(&{
+        let img = image::RgbImage::from_pixel(64, 64, image::Rgb([200, 30, 30]));
+        let mut out = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85).encode_image(&img).unwrap();
+        out
+    }));
+    ext_feed(&mut a, other);
+    settingswin::render(&mut a);
+    assert_ne!(a.ext.list[0].view.hero_pm.borrow().as_ref().map(|(k, _)| *k), key.map(|k| k.0));
+    // and one that is no picture falls back to the tile
+    let mut broken = hero_home(true);
+    broken["hero"]["image"]["data"] = serde_json::json!(std_b64(b"this is not a picture"));
+    ext_feed(&mut a, broken);
+    settingswin::render(&mut a);
+    assert!(a.ext.list[0].view.hero_pm.borrow().is_none(), "unreadable: the tile");
+}
+
+#[test]
+fn a_hero_without_a_picture_and_rows_with_tones() {
+    let mut a = sw_shot("settingswin-panel-hero-tile", |a| {
+        panel_ext(a, hero_home(false));
+        a.sw.panel = Some(0);
+    });
+    assert!(a.ext.list[0].view.hero_pm.borrow().is_none());
+    assert!(settingswin::hit_center(&a, settingswin::Hit::PanelRow(2)).is_some(), "the rows are below the hero and still clickable");
+    settingswin::render(&mut a);
+}
+
+#[test]
+fn a_hero_fits_in_both_languages() {
+    let _lang = i18n::restore_on_drop();
+    for id in [false, true] {
+        let a = sw_shot(&format!("{}settingswin-panel-hero-fit", if id { "id-" } else { "" }), |a| {
+            if id {
+                indonesian(a);
+            }
+            panel_ext(a, hero_home(true));
+            a.sw.panel = Some(0);
+        });
+        assert!(settingswin::cut(&a).is_empty(), "indonesian: {id}: cut texts {:?}", settingswin::cut(&a));
+    }
+}
+
+// ---------------------------------------------------------------- taking an extension out
+fn remove_root(name: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("hesewake-ext-remove-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+fn put_manifest(root: &std::path::Path, id: &str) {
+    let exe = format!(r"{}\System32\whoami.exe", std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()));
+    std::fs::create_dir_all(root.join(id)).unwrap();
+    std::fs::write(root.join(id).join("extension.json"), serde_json::json!({"id": id, "name": id, "exe": exe, "proto": 1}).to_string()).unwrap();
+    std::fs::write(root.join(id).join("data.txt"), "something the installer put here").unwrap();
+}
+
+#[test]
+fn remove_asks_twice_and_then_takes_the_extension_out() {
+    use settingswin::Hit;
+    let root = remove_root("two");
+    put_manifest(&root, "gone-ext");
+    put_manifest(&root, "stays-ext");
+    let mut a = sw_shot("settingswin-extensions-remove", |a| {
+        a.ext.test_root = Some(root.clone());
+        a.ext_rescan_in(&root);
+        a.cfg.ext_on = vec!["gone-ext".into(), "stays-ext".into()];
+        a.cfg.ext_mute = vec!["gone-ext".into()];
+        a.apply_slide_cfg();
+        a.sw_show_page(EXTENSIONS);
+    });
+    let i = a.ext.list.iter().position(|e| e.id() == "gone-ext").unwrap();
+    sw_press(&mut a, Hit::ExtRemove(i));
+    assert!(root.join("gone-ext").exists() && a.ext.list.len() == 2, "the first press only asks");
+    assert!(a.sw.remove_confirm.is_some_and(|(n, _)| n == i));
+    sw_press(&mut a, Hit::ExtRemove(i));
+    assert!(!root.join("gone-ext").exists(), "its folder is gone, with what was in it");
+    assert!(root.join("stays-ext").join("data.txt").exists(), "the other one is not touched");
+    assert_eq!(a.ext.list.iter().map(|e| e.id()).collect::<Vec<_>>(), vec!["stays-ext"]);
+    assert_eq!(a.cfg.ext_on, vec!["stays-ext".to_string()], "no longer switched on");
+    assert!(a.cfg.ext_mute.is_empty());
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_press_that_is_not_followed_up_is_forgotten() {
+    use settingswin::Hit;
+    let root = remove_root("late");
+    put_manifest(&root, "late-ext");
+    let mut a = sw_shot("settingswin-extensions-remove-late", |a| {
+        a.ext.test_root = Some(root.clone());
+        a.ext_rescan_in(&root);
+        a.sw_show_page(EXTENSIONS);
+    });
+    sw_press(&mut a, Hit::ExtRemove(0));
+    a.sw.remove_confirm = a.sw.remove_confirm.map(|(n, t)| (n, t - Duration::from_secs(0)));
+    // a different extension's press does not count for this one
+    a.ext.test_add("other-ext", "O", true);
+    a.sw.remove_confirm = Some((1, Instant::now()));
+    a.ext_remove_in(0, &root);
+    assert!(root.join("late-ext").exists(), "a press for another extension is not a confirmation");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_manifest_that_is_no_good_can_still_be_removed() {
+    use settingswin::Hit;
+    let root = remove_root("broken");
+    std::fs::create_dir_all(root.join("broken-one")).unwrap();
+    std::fs::write(root.join("broken-one").join("extension.json"), "{ nope").unwrap();
+    let mut a = sw_shot("settingswin-extensions-remove-broken", |a| {
+        a.ext.test_root = Some(root.clone());
+        a.ext_rescan_in(&root);
+        a.sw_show_page(EXTENSIONS);
+    });
+    assert!(a.ext.list[0].manifest.is_err());
+    sw_press(&mut a, Hit::ExtRemove(0));
+    sw_press(&mut a, Hit::ExtRemove(0));
+    assert!(!root.join("broken-one").exists() && a.ext.list.is_empty());
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn removing_never_goes_outside_the_extensions_folder() {
+    let base = remove_root("outside");
+    let root = base.join("extensions");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(base.join("precious.txt"), "do not delete").unwrap();
+    let host = ext::Host::new("t");
+    for name in ["..", ".", "", "a\\b", "a/b", "C:", "..\\..", "x:y"] {
+        let mut s = extapp::ExtState::default();
+        s.test_add_bad(name, "bad");
+        assert!(s.remove(0, &root, &host).is_err(), "{name:?} is refused");
+        assert_eq!(s.list.len(), 1, "and stays listed");
+    }
+    assert!(base.join("precious.txt").exists() && root.exists());
+    // a folder that is only a link to somewhere else
+    let target = base.join("target");
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("keep.txt"), "mine").unwrap();
+    let made = std::process::Command::new("cmd").args(["/C", "mklink", "/J", &root.join("link-ext").to_string_lossy(), &target.to_string_lossy()]).output().unwrap();
+    assert!(made.status.success(), "could not make a junction for the test");
+    let mut s = extapp::ExtState::default();
+    s.test_add_bad("link-ext", "bad");
+    assert_eq!(s.remove(0, &root, &host), Err("the folder is a link, not a folder"));
+    assert!(target.join("keep.txt").exists(), "what it points to is untouched");
+    // a folder that is not there
+    let mut s = extapp::ExtState::default();
+    s.test_add_bad("not-here", "bad");
+    assert_eq!(s.remove(0, &root, &host), Err("the folder is gone"));
+    let _ = std::process::Command::new("cmd").args(["/C", "rmdir", &root.join("link-ext").to_string_lossy()]).output();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn removing_the_extension_whose_panel_is_open_closes_the_panel() {
+    use settingswin::Hit;
+    let root = remove_root("panel");
+    put_manifest(&root, "panel-ext");
+    let mut a = sw_shot("settingswin-extensions-remove-panel", |a| {
+        a.ext.test_root = Some(root.clone());
+        a.ext_rescan_in(&root);
+        a.ext.list[0].manifest.as_mut().unwrap().panel = true;
+        a.ext.list[0].connected = true;
+        a.sw_show_page(EXTENSIONS);
+    });
+    a.sw.panel = Some(0);
+    a.ext_remove_in(0, &root);
+    a.ext_remove_in(0, &root);
+    assert_eq!(a.sw.panel, None);
+    assert!(a.ext.list.is_empty());
+    settingswin::render(&mut a);
+    assert!(settingswin::hit_center(&a, Hit::ExtScan).is_some(), "the list is showing");
+    let _ = std::fs::remove_dir_all(&root);
+}

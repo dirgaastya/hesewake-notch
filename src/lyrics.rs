@@ -124,11 +124,35 @@ pub(crate) fn skip(source: &str, title: &str, artist: &str, dur_secs: u32) -> bo
 /// Cari lirik untuk satu lagu: LRCLIB dulu, lalu lrc.red bila LRCLIB tidak punya lirik sinkron. Blocking: panggil dari
 /// thread terpisah.
 pub(crate) fn fetch(title: &str, artist: &str, dur_secs: u32) -> Lyrics {
+    let first = lookup(title, artist, dur_secs);
+    if matches!(first, Lyrics::Synced(..)) {
+        return first;
+    }
+    // some players join two names of a song ("ハッピーエンド - Happy End"); a database knows it by one of them
+    for part in title_parts(title) {
+        let l = lookup(&part, artist, dur_secs);
+        if matches!(l, Lyrics::Synced(..)) {
+            return l;
+        }
+    }
+    first
+}
+
+fn lookup(title: &str, artist: &str, dur_secs: u32) -> Lyrics {
     let first = lrclib(title, artist, dur_secs);
     if matches!(first, Lyrics::Synced(..)) {
         return first;
     }
     lrcred(title, artist, dur_secs).unwrap_or(first)
+}
+
+/// The parts of a title written as "A - B", for another try when the whole title finds nothing. Empty if it is not.
+fn title_parts(title: &str) -> Vec<String> {
+    let parts: Vec<String> = title.split(" - ").map(|p| p.trim().to_string()).filter(|p| p.chars().count() >= 2).collect();
+    if parts.len() < 2 {
+        return Vec::new();
+    }
+    parts
 }
 
 fn lrclib(title: &str, artist: &str, dur_secs: u32) -> Lyrics {
@@ -342,6 +366,14 @@ mod tests {
         // text that only looks like a tag stays
         assert_eq!(strip_word_tags("a <3 b > c <i>x</i>"), "a <3 b > c <i>x</i>");
         assert_eq!(strip_word_tags("<00:01.00>"), "");
+    }
+
+    #[test]
+    fn a_title_with_two_names_is_tried_by_each_name() {
+        assert_eq!(title_parts("ハッピーエンド - Happy End"), vec!["ハッピーエンド", "Happy End"]);
+        assert!(title_parts("Happy End").is_empty(), "one name: nothing more to try");
+        assert!(title_parts("Hati-Hati di Jalan").is_empty(), "a hyphen without spaces is part of the name");
+        assert!(title_parts("A - B").is_empty(), "one letter is not a name worth a search");
     }
 
     #[test]

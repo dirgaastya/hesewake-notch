@@ -40,6 +40,8 @@ An extension is registered by a **manifest** in the user's data folder:
   "exe": "C:\\Users\\me\\AppData\\Local\\Programs\\example-issues\\example-issues.exe",
   "args": ["--notch"],
   "slide": true,
+  "settings": "window",
+  "processes": "none",
   "proto": 1
 }
 ```
@@ -47,6 +49,8 @@ An extension is registered by a **manifest** in the user's data folder:
 - `id`: 1 to 32 characters, `a-z`, `0-9`, `-`. It must equal the folder name.
 - `slide`: `true` (default) gives the extension a slide. With `false` it has no slide: it runs in the background (a
   service, a bridge to something else) and can still send `toast`, `status` and take part in *Settings > Extensions*.
+- `processes`: `"none"` (default) or `"allow"`. By default the program cannot start other programs (see *Security*).
+- `settings`: where the extension's settings are, `"window"` (default) or `"panel"`. See *Managing extensions* below.
 - `exe`: absolute path. The notch starts it without a shell, with `args`, no window, when the notch starts and the
   extension is enabled. If it exits, the notch restarts it with a growing delay (5 s, 15 s, 60 s, then every 5 minutes).
 - Extensions are **off until the user turns them on** in *Settings > Extensions* (the page lists each manifest, its
@@ -64,14 +68,15 @@ Every manifest is listed with its name, version and a status line, and the user 
 |---|---|
 | On / off | Starts or stops the extension (`quit`, then the process is ended after 3 seconds if it is still there). Saved. |
 | Toasts | Mutes the extension's toasts without stopping it. |
-| **Settings** | Sends `config` so the extension opens its own settings window. Greyed out while it is not connected. |
+| **Settings** | With `"settings": "window"` it sends `config`, and the extension opens its own settings window. With `"settings": "panel"` the extension's pages open **inside the Settings window**, in place of the list: the same `slide` and `detail` pages as for the notch (including `actions`, `tabs`, `stepper`, buttons and `matrix`), drawn in the style of the Settings window, and clicks come back as the same messages. The extension is sent `visible` with `on: true` when the panel opens and `on: false` when it closes; **Back** goes to the list. Greyed out while the extension is not connected. An extension with no slide uses the panel for everything it has to show. |
 | **Restart** | Stops and starts it again (for an extension that is stuck). |
 | **Open folder** | Opens the manifest's folder in Explorer. |
+| **Remove** | Takes the extension out of the notch: it is stopped, switched off, and its manifest folder is deleted. Two presses (the first asks *Sure?*). Only a plain folder directly inside the extensions folder is deleted, never a link to somewhere else. A program installed somewhere else stays, for its own uninstaller. Also offered for a manifest that does not load. |
 
 The status line is the extension's last `status` text; otherwise the notch's own: *Off*, *Starting*, *Connected*,
 *Reconnecting in 60 s*, *Could not start* (with the reason: file missing, access denied), *Rejected: protocol* or *Stopped
-(crashed 3 times)*. Installing and removing an extension is the job of its own installer (it writes or deletes the
-manifest); the notch never deletes files of an extension.
+(crashed 3 times)*. Installing an extension is the job of its own installer (it writes the manifest); taking it out of the
+notch is **Remove**. See *Security* below for what an extension can and cannot do.
 
 ## 3. Connection and security
 
@@ -144,7 +149,8 @@ what it had; there is no patching). `rev` is a number that grows, counted across
   answers with a new `slide`.
 - `actions`: at most 3 buttons in the header. Like the buttons of a detail page, an action may carry `link` or `copy`
   (below); then the notch does it on the click and shows a short "Copied" mark for `copy`.
-- `rows`: at most 100. `mark` draws the "new" dot. The notch scrolls the list itself.
+- `rows`: at most 100. `mark` draws the "new" dot. `tone` (`good`, `warn` or `muted`) colours the row's `sub` text and puts a dot before it (green, amber, grey). The notch scrolls the list itself.
+- `hero`: a card at the top of the page, in the Settings panel: `{ "title": "Song", "sub": "Artist", "text": "Phone 1 - Playing", "image": { "mime": "image/jpeg", "data": "<standard base64>" } }`. The picture is PNG or JPEG of at most 48 KiB (decoded), drawn as a square from its middle; keep it small (about 150 px) so the whole page stays under the 64 KiB frame. Without a usable picture the card shows a plain tile. The carousel's slide does not draw a hero.
 - `sections`: instead of `rows`, at most 4 groups `{ "title": "Worked on", "rows": [...] }` (100 rows in all), each with
   its own heading. Use it for a page that has more than one list, such as a daily summary.
 - `stepper`: `{ "label": "2026-10-31", "prev": true, "next": false }` draws previous / next arrows around a label in the
@@ -174,6 +180,8 @@ it, or let the user click Back (the notch sends `back`).
   on the clipboard (at most 8,000 characters). Both happen **only as the direct result of the user's click on that button**,
   so the extension cannot open pages or write the clipboard on its own. A button with neither only sends `action`.
 - `state` works like in `slide` (`loading`, `error`, ...).
+- `input`: a line of text the user can edit (the Settings panel): `{ "id": "rename", "label": "Name", "value": "Phone 1", "max": 32, "button": "Save" }`. `max` is 1 to 40. The user types in the box and presses Enter or the button, and the extension gets `{"t":"input","id":"rename","value":"..."}` (one line, control characters removed, at most 40 characters). Esc puts the old text back. The extension answers with a new page; until then the box keeps what was typed.
+- `matrix`: a small black-and-white picture, such as a QR code: `{ "size": 3, "rows": ["101", "010", "111"] }`. `size` is 1 to 100, there are `size` rows, and each row is `size` characters of `0` (light) or `1` (dark). The notch draws it as squares on white, with a margin around it, on the right of the page. It is shown in the Settings panel, not on the carousel's slide. A matrix that is not exactly that is left out and the rest of the page stays. The notch never reads the picture, so an extension that shows a QR code encodes it itself.
 
 **`toast`**: show a message in the small notch (not while a full-screen app is in front, and only if the user has not
 muted the extension).
@@ -201,7 +209,8 @@ Extensions without a slide use it to tell the user what they are doing.
 | `{"t":"action","id":"refresh"}` | A header button, **Retry**, **setup**, or a detail button without `link`/`copy`. |
 | `{"t":"step","dir":-1}` | The user clicked an arrow of the `stepper` (`-1` previous, `1` next). |
 | `{"t":"back"}` | The user clicked Back (a detail page, or a `slide` with `back: true`). |
-| `{"t":"config"}` | The user pressed **Settings** for this extension in *Settings > Extensions*. |
+| `{"t":"config"}` | The user pressed **Settings** for an extension with `"settings": "window"` in *Settings > Extensions*. |
+| `{"t":"input","id":"rename","value":"Pixel 8"}` | The user confirmed the text of a page's `input`. |
 | `{"t":"lang","lang":"id"}` | The notch language changed. |
 | `{"t":"quit"}` | The notch is closing or the extension was turned off. Exit within 3 seconds. |
 
@@ -223,6 +232,9 @@ row sub: 40, button labels: 16).
 | Messages per second | 10 (the rest are dropped) |
 | Tabs / header actions / rows (all sections together) | 8 / 3 / 100 |
 | Detail meta / notes / buttons | 6 / 5 / 4 |
+| Matrix | 100 x 100 |
+| Hero picture | 48 KiB decoded; hero lines 80 characters |
+| Text box | 40 characters |
 | Text lengths | ids 64, titles, meta keys, authors, dates, section and stepper labels 24, messages, detail titles and footers 120, tab label 12, action and button label 16, row text 120, row sub 40, meta value 80, note text 400, body 4,000, toast title 80, toast sub 60 |
 | Copy text | 8,000 |
 | Sections | 4 |
@@ -252,3 +264,36 @@ Two things worth knowing:
   keep one thread that does both with `PeekNamedPipe`. The notch itself uses overlapped I/O.
 - The notch drops messages above 10 per second, silently. Send a whole page in one message, and do not send a `status`
   after every message.
+
+## 8. Security: what to expect from an extension
+
+**An extension is a program.** The notch starts its `exe` with your rights, the same as any program you install. It can
+read your files and use the network. Nothing in the notch can make that safe, so the first rule is about trust: **switch on
+only extensions from authors you trust**, the way you would run any program from them. Look at the path in
+*Settings > Extensions* and where it came from.
+
+### What the notch does to protect you
+
+| What | How |
+|---|---|
+| **Nothing runs by itself** | An extension is off until you switch it on in *Settings > Extensions*. Putting a manifest in the folder only makes it appear in the list. The notch never downloads or installs an extension. |
+| **No other programs** | Each extension runs in its own Windows Job Object with a limit of one process: it **cannot start other programs** (no `cmd`, no `powershell`, no scripts). It is put in the job before it runs a single instruction, so there is no moment in which it could start something first. A manifest can say `"processes": "allow"` for an extension that needs helper programs; then the list says so and you decide. |
+| **It ends with the notch** | The job also ends the program when the notch lets go of it, including when the notch is killed. |
+| **Only you can talk to the notch** | The pipe lets in your Windows user and nobody else, not other users and not the network. The program that connects must be the `exe` of an extension you switched on (its path is checked from the connection itself). |
+| **What it shows is only text** | Everything an extension sends is untrusted: text, clipped to length, without control or direction characters, never HTML or code. A picture (a `hero` image, a `matrix`) is decoded by the notch with size limits. Links open only as the result of your click on that button, and only `http` or `https` without credentials. Copying to the clipboard likewise. |
+| **You can take it out** | **Remove** in *Settings > Extensions* stops it and deletes its manifest folder. |
+
+### What the notch does not do
+
+- It does **not** sandbox the program: it can still read and write what you can and use the network. (An AppContainer sandbox
+  is a possible later step.)
+- It does **not** check who made it. There is no signature or hash check yet, and a program that changes after you switched it on
+  is run as it is. (Asking you to confirm a program, with its publisher and hash, and refusing one that changed, is a possible
+  later step.)
+- **Remove** does not uninstall the program itself. What an installer put outside the manifest folder stays until its own
+  uninstaller removes it.
+
+### For authors
+
+Do not ask for more than you need, send plain text, and keep your program free of helper programs; an extension that needs
+`"processes": "allow"` should say why in its description.

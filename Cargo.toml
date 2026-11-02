@@ -32,6 +32,7 @@ features = [
   "Win32_Media_Multimedia",
   "Win32_System_Com_StructuredStorage",
   "Win32_System_IO",
+  "Win32_System_JobObjects",
   "Win32_Storage_FileSystem",
   "Win32_System_ProcessStatus",
   "ApplicationModel",

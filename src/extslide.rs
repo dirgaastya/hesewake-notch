@@ -50,6 +50,8 @@ pub(crate) struct ExtView {
     /// The tab the user just clicked, until the extension answers with its own.
     pub(crate) tab_sel: Option<String>,
     pub(crate) copied: Option<Instant>,
+    /// The picture of the page's hero, decoded once: what it was made from (a hash of its bytes) and the square.
+    pub(crate) hero_pm: RefCell<Option<(u64, Pixmap)>>,
 }
 
 enum Item<'a> {
@@ -69,6 +71,11 @@ fn items(s: &SlideMsg) -> Vec<Item<'_>> {
 }
 
 /// How many list items fit under the header (one fewer line of them when there are tabs).
+/// The rows of a page in the order they are drawn, sections one after the other.
+pub(crate) fn rows_of(s: &SlideMsg) -> Vec<&Row> {
+    s.sections.iter().flat_map(|sec| sec.rows.iter()).collect()
+}
+
 fn visible_items(tabs: bool) -> usize {
     if tabs {
         3
@@ -430,7 +437,7 @@ impl App {
     }
 
     /// A button was pressed: open its link, copy its text, or tell the extension. Only ever as the result of this click.
-    fn ext_press(&mut self, i: usize, b: &Button) {
+    pub(crate) fn ext_press(&mut self, i: usize, b: &Button) {
         if let Some(url) = b.link.as_deref().and_then(proto::safe_link) {
             sys::open_url(&url);
         } else if let Some(text) = &b.copy {

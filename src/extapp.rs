@@ -8,6 +8,7 @@
 use super::*;
 use crate::ext::{self, Evt, Host};
 use crate::extproto::{self as proto, DetailMsg, FromExt, Manifest, SlideMsg};
+use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -34,6 +35,8 @@ pub(crate) struct Ext {
     pub(crate) folder: String,
     pub(crate) manifest: std::result::Result<Manifest, String>,
     child: Option<Child>,
+    /// The limits the program runs under; letting go of it ends the program.
+    job: Option<crate::extjob::Job>,
     fails: u32,
     retry_at: Option<Instant>,
     connected_at: Option<Instant>,
@@ -73,6 +76,7 @@ impl Ext {
             folder,
             manifest,
             child: None,
+            job: None,
             fails: 0,
             retry_at: None,
             connected_at: None,
@@ -130,6 +134,7 @@ impl Ext {
             let _ = c.kill();
             let _ = c.wait();
         }
+        self.job = None;
     }
 }
 
@@ -150,6 +155,9 @@ pub(crate) struct ExtState {
     pub(crate) sent: Vec<(String, Vec<u8>)>,
     #[cfg(test)]
     pub(crate) copied_text: Option<String>,
+    /// Tests: the folder everything is read from and removed in. Without one a test never touches the user's own folder.
+    #[cfg(test)]
+    pub(crate) test_root: Option<std::path::PathBuf>,
 }
 
 fn start_error(e: &std::io::Error) -> String {
@@ -163,9 +171,11 @@ fn start_error(e: &std::io::Error) -> String {
     }
 }
 
-fn spawn(m: &Manifest) -> std::result::Result<Child, String> {
+/// Start the program, suspended, put it under its limits (a Job Object: dies with the notch, no other programs unless the
+/// manifest allows them) and only then let it run. If the limits cannot be set the program is not started.
+fn spawn(m: &Manifest) -> std::result::Result<(Child, crate::extjob::Job), String> {
     let mut c = Command::new(&m.exe);
-    c.args(&m.args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).creation_flags(CREATE_NO_WINDOW);
+    c.args(&m.args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).creation_flags(CREATE_NO_WINDOW | crate::extjob::CREATE_SUSPENDED);
     if let Some(dir) = Path::new(&m.exe).parent() {
         c.current_dir(dir);
     }
@@ -173,14 +183,24 @@ fn spawn(m: &Manifest) -> std::result::Result<Child, String> {
     if let Some(pipe) = ext::pipe_name() {
         c.env("HESEWAKE_NOTCH_PIPE", pipe);
     }
-    c.spawn().map_err(|e| start_error(&e))
+    let mut child = c.spawn().map_err(|e| start_error(&e))?;
+    let handle = windows::Win32::Foundation::HANDLE(child.as_raw_handle());
+    let job = crate::extjob::Job::new(m.processes);
+    match job {
+        Some(job) if job.assign(handle) && crate::extjob::resume(handle) => Ok((child, job)),
+        _ => {
+            let _ = child.kill();
+            let _ = child.wait();
+            Err("could not limit the program".to_string())
+        }
+    }
 }
 
 impl ExtState {
     /// Tests: an extension that is already known and valid (with a slide if `slide`).
     #[cfg(test)]
     pub(crate) fn test_add(&mut self, id: &str, name: &str, slide: bool) {
-        let m = Manifest { id: id.into(), name: name.into(), version: "1".into(), exe: r"C:\x\x.exe".into(), args: vec![], slide };
+        let m = Manifest { id: id.into(), name: name.into(), version: "1".into(), exe: r"C:\x\x.exe".into(), args: vec![], slide, panel: false, processes: false };
         self.list.push(Ext::new(id.into(), Ok(m)));
     }
 
@@ -243,6 +263,7 @@ impl ExtState {
             if let Some(c) = e.child.as_mut() {
                 if let Ok(Some(code)) = c.try_wait() {
                     e.child = None;
+                    e.job = None;
                     if enabled && !e.parked && e.stop_at.is_none() {
                         e.fails += 1;
                         e.problem = Some(format!("ended (code {})", code.code().unwrap_or(-1)));
@@ -274,8 +295,9 @@ impl ExtState {
             }
             if e.child.is_none() && !e.parked && e.retry_at.map_or(true, |t| now >= t) {
                 match spawn(&m) {
-                    Ok(c) => {
+                    Ok((c, job)) => {
                         e.child = Some(c);
+                        e.job = Some(job);
                         e.problem = None;
                         e.retry_at = None;
                     }
@@ -287,6 +309,30 @@ impl ExtState {
                 }
             }
         }
+    }
+
+    /// Take extension `i` out of the notch: stop it and delete its manifest folder under `root` (what an installer put
+    /// there goes with it; a program installed somewhere else stays). The folder must be a plain directory directly under
+    /// `root`: a name with a separator or `..`, or a folder that is really a link to somewhere else, is refused and nothing
+    /// is deleted. Returns the extension's id.
+    pub(crate) fn remove(&mut self, i: usize, root: &Path, host: &Host) -> std::result::Result<String, &'static str> {
+        let e = self.list.get(i).ok_or("no such extension")?;
+        let folder = e.folder.clone();
+        if folder.is_empty() || folder == "." || folder == ".." || folder.contains(['/', '\\', ':']) {
+            return Err("not a plain folder name");
+        }
+        let dir = root.join(&folder);
+        let meta = std::fs::symlink_metadata(&dir).map_err(|_| "the folder is gone")?;
+        // 0x400: a reparse point, which is what a junction or a link is on Windows
+        if !meta.is_dir() || meta.file_type().is_symlink() || std::os::windows::fs::MetadataExt::file_attributes(&meta) & 0x400 != 0 {
+            return Err("the folder is a link, not a folder");
+        }
+        let id = e.id().to_string();
+        host.disconnect(&id);
+        self.list[i].end_child();
+        std::fs::remove_dir_all(&dir).map_err(|_| "the folder could not be deleted")?;
+        self.list.remove(i);
+        Ok(id)
     }
 
     /// Stop one extension and start it again on the next `tick` (if it is on).
@@ -425,7 +471,7 @@ impl App {
         v
     }
 
-    fn ext_id(&self, i: usize) -> Option<String> {
+    pub(crate) fn ext_id(&self, i: usize) -> Option<String> {
         self.ext.list.get(i).and_then(|e| e.manifest.as_ref().ok()).map(|m| m.id.clone())
     }
 
@@ -465,10 +511,82 @@ impl App {
         self.save_settings();
     }
 
-    /// Ask a connected extension to open its own settings window.
+    /// The Settings button of an extension: its pages in a panel of the Settings window if its manifest says `panel`, else
+    /// a message that makes it open its own window. Only while it is connected.
     pub(crate) fn ext_open_config(&mut self, i: usize) {
-        if let Some(id) = self.ext_id(i).filter(|_| self.ext.list[i].connected) {
+        let Some(id) = self.ext_id(i).filter(|_| self.ext.list[i].connected) else { return };
+        if self.ext.list[i].manifest.as_ref().is_ok_and(|m| m.panel) {
+            self.ext_panel_close();
+            self.sw.panel = Some(i);
+            self.sw.to_top();
+            // it is looked at now, like a slide that comes into view
+            self.ext_send_to(&id, proto::visible(true));
+        } else {
             self.ext_send_to(&id, proto::config());
+        }
+    }
+
+    /// Leave the panel (back to the list, another page of the window, or the window closed).
+    pub(crate) fn ext_panel_close(&mut self) {
+        if let Some(i) = self.sw.panel.take() {
+            self.sw.to_top();
+            if let Some(id) = self.ext_id(i) {
+                self.ext_send_to(&id, proto::visible(false));
+            }
+        }
+    }
+
+    /// Back out of a detail page: gone at once, and the extension is told.
+    pub(crate) fn ext_panel_detail_back(&mut self) {
+        let Some(i) = self.sw.panel else { return };
+        if let (Some(id), Some(e)) = (self.ext_id(i), self.ext.list.get_mut(i)) {
+            e.detail = None;
+            e.view.dscroll = 0;
+            self.ext_send_to(&id, proto::back());
+        }
+    }
+
+    pub(crate) fn ext_panel_row(&mut self, n: usize) {
+        let Some(i) = self.sw.panel else { return };
+        let row = self.ext.list.get(i).and_then(|e| e.slide.as_ref()).and_then(|s| crate::extslide::rows_of(s).get(n).map(|r| r.id.clone()));
+        if let (Some(ext), Some(row)) = (self.ext_id(i), row) {
+            self.ext_send_to(&ext, proto::row(&row));
+        }
+    }
+
+    pub(crate) fn ext_panel_act(&mut self, n: usize) {
+        let Some(i) = self.sw.panel else { return };
+        if let Some(b) = self.ext.list.get(i).and_then(|e| e.slide.as_ref()).and_then(|s| s.actions.get(n)).cloned() {
+            self.ext_press(i, &b);
+        }
+    }
+
+    pub(crate) fn ext_panel_button(&mut self, n: usize) {
+        let Some(i) = self.sw.panel else { return };
+        if let Some(b) = self.ext.list.get(i).and_then(|e| e.detail.as_ref()).and_then(|d| d.buttons.get(n)).cloned() {
+            self.ext_press(i, &b);
+        }
+    }
+
+    pub(crate) fn ext_panel_tab(&mut self, n: usize) {
+        let Some(i) = self.sw.panel else { return };
+        let tab = self.ext.list.get(i).and_then(|e| e.slide.as_ref()).and_then(|s| s.tabs.get(n)).map(|t| t.id.clone());
+        if let (Some(ext), Some(tab)) = (self.ext_id(i), tab) {
+            self.ext.list[i].view.tab_sel = Some(tab.clone());
+            self.ext_send_to(&ext, proto::tab(&tab));
+        }
+    }
+
+    pub(crate) fn ext_panel_step(&mut self, dir: i32) {
+        if let Some(id) = self.sw.panel.and_then(|i| self.ext_id(i)) {
+            self.ext_send_to(&id, proto::step(dir));
+        }
+    }
+
+    /// Retry or the setup button of a page: the extension is told which.
+    pub(crate) fn ext_panel_action(&mut self, id: &str) {
+        if let Some(ext) = self.sw.panel.and_then(|i| self.ext_id(i)) {
+            self.ext_send_to(&ext, proto::action(id));
         }
     }
 
@@ -492,9 +610,46 @@ impl App {
         sys::open_url(&path.to_string_lossy());
     }
 
+    /// The Remove button, in two steps: the first press asks "Sure?", a second one within three seconds does it.
+    pub(crate) fn ext_remove(&mut self, i: usize) {
+        let root = self.ext_root();
+        self.ext_remove_in(i, &root);
+    }
+
+    /// The folder the extensions' manifests are in. (A test has one of its own, never the user's.)
+    pub(crate) fn ext_root(&self) -> std::path::PathBuf {
+        #[cfg(test)]
+        return self.ext.test_root.clone().unwrap_or_else(|| std::env::temp_dir().join("hesewake-test-no-extensions"));
+        #[cfg(not(test))]
+        data_path("extensions")
+    }
+
+    pub(crate) fn ext_remove_in(&mut self, i: usize, root: &Path) {
+        let sure = self.sw.remove_confirm.is_some_and(|(n, t)| n == i && t.elapsed().as_secs_f32() < 3.0);
+        if !sure {
+            self.sw.remove_confirm = Some((i, Instant::now()));
+            return;
+        }
+        self.sw.remove_confirm = None;
+        self.ext_panel_close();
+        let id = match self.ext.remove(i, root, ext::host()) {
+            Ok(id) => id,
+            Err(why) => {
+                perf::note(&format!("extensions: not removed: {why}"));
+                return;
+            }
+        };
+        self.cfg.ext_on.retain(|x| *x != id);
+        self.cfg.ext_mute.retain(|x| *x != id);
+        self.save_settings();
+        self.ext_sync();
+        self.apply_slide_cfg();
+    }
+
     /// Look at the extensions folder again (a new extension was installed).
     pub(crate) fn ext_rescan(&mut self) {
-        self.ext_rescan_in(&data_path("extensions"));
+        let root = self.ext_root();
+        self.ext_rescan_in(&root);
     }
 
     pub(crate) fn ext_rescan_in(&mut self, dir: &Path) {
@@ -517,6 +672,10 @@ impl App {
         }
         let muted = self.cfg.ext_mute.clone();
         let out = self.ext.apply(events, &muted, Instant::now());
+        // the Settings window shows the pages of an extension in panel mode, and its status
+        if self.sw.hwnd != 0 {
+            self.sw_kick();
+        }
         self.ext_out(out)
     }
 
@@ -671,7 +830,7 @@ mod tests {
         let mut s = state_with("shower", &whoami());
         let now = Instant::now();
         let id = || "shower".to_string();
-        let slide = |rev| FromExt::Slide(crate::extproto::SlideMsg { rev, title: "T".into(), state: crate::extproto::State::Ready, message: String::new(), setup_label: String::new(), tabs: vec![], tab: String::new(), actions: vec![], sections: vec![], stepper: None, back: false, foot: String::new() });
+        let slide = |rev| FromExt::Slide(crate::extproto::SlideMsg { rev, title: "T".into(), state: crate::extproto::State::Ready, message: String::new(), setup_label: String::new(), tabs: vec![], tab: String::new(), actions: vec![], sections: vec![], stepper: None, back: false, hero: None, foot: String::new() });
         let out = s.apply(vec![Evt::Connected { id: id() }, Evt::Msg { id: id(), msg: slide(1) }, Evt::Msg { id: id(), msg: FromExt::Badge(true) }, Evt::Msg { id: id(), msg: FromExt::Status("Syncing".into()) }], &[], now);
         assert!(out.contains(&Out::Redraw));
         let e = s.find("shower").unwrap();
@@ -688,5 +847,97 @@ mod tests {
         s.apply(vec![Evt::Gone { id: id(), why: "bad data" }], &[], now);
         assert_eq!(s.find("shower").unwrap().problem.as_deref(), Some("sent broken data"));
         assert!(s.apply(vec![Evt::Msg { id: "stranger".into(), msg: FromExt::Bye }], &[], now).is_empty(), "an unknown id is ignored");
+    }
+}
+
+#[cfg(test)]
+mod job_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn system32(exe: &str) -> String {
+        format!(r"{}\System32\{exe}", std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()))
+    }
+
+    /// An extension whose program is `exe` with `args`, found by a scan of a folder of its own.
+    fn state(id: &str, exe: &str, args: &[&str], extra: serde_json::Value) -> ExtState {
+        let dir = std::env::temp_dir().join(format!("hesewake-job-{}-{id}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(id)).unwrap();
+        let mut m = json!({"id": id, "name": id, "exe": exe, "args": args, "proto": 1});
+        for (k, v) in extra.as_object().into_iter().flatten() {
+            m[k] = v.clone();
+        }
+        std::fs::write(dir.join(id).join("extension.json"), m.to_string()).unwrap();
+        let mut s = ExtState::default();
+        s.scan(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        s
+    }
+
+    /// Start it and wait until it has ended; what `tick` made of the end.
+    fn run_to_the_end(s: &mut ExtState, id: &str) -> String {
+        let (host, on) = (Host::new("t"), vec![id.to_string()]);
+        s.tick(Instant::now(), &on, &host);
+        for _ in 0..100 {
+            std::thread::sleep(Duration::from_millis(50));
+            s.tick(Instant::now(), &on, &host);
+            if s.list[0].child.is_none() {
+                break;
+            }
+        }
+        s.list[0].problem.clone().unwrap_or_default()
+    }
+
+    #[test]
+    fn a_program_cannot_start_other_programs_by_default() {
+        // cmd.exe starts whoami.exe: with the limit, that second program does not get to run
+        let mut s = state("limited", &system32("cmd.exe"), &["/c", "whoami"], json!({}));
+        assert!(s.list[0].manifest.as_ref().is_ok_and(|m| !m.processes), "none unless said otherwise");
+        let ended = run_to_the_end(&mut s, "limited");
+        assert!(ended.starts_with("ended") && !ended.contains("code 0)"), "the program it tried to start was stopped: {ended}");
+        // the same program with the permission: whoami runs, cmd ends well
+        let mut s = state("allowed", &system32("cmd.exe"), &["/c", "whoami"], json!({"processes": "allow"}));
+        assert!(s.list[0].manifest.as_ref().is_ok_and(|m| m.processes));
+        assert_eq!(run_to_the_end(&mut s, "allowed"), "ended (code 0)", "allowed: it works");
+    }
+
+    #[test]
+    fn a_program_ends_when_the_job_is_let_go() {
+        let mut s = state("mortal", &system32("PING.EXE"), &["-n", "30", "127.0.0.1"], json!({}));
+        let (host, on) = (Host::new("t"), vec!["mortal".to_string()]);
+        s.tick(Instant::now(), &on, &host);
+        let e = &mut s.list[0];
+        assert!(e.child.is_some() && e.job.is_some(), "it runs, under a job");
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(e.child.as_mut().unwrap().try_wait().unwrap().is_none(), "still going after a moment");
+        e.job = None; // the notch lets go (or ends)
+        let mut gone = false;
+        for _ in 0..60 {
+            if e.child.as_mut().unwrap().try_wait().unwrap().is_some() {
+                gone = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(gone, "the job took the program with it");
+    }
+
+    #[test]
+    fn ending_a_program_lets_go_of_its_job_too() {
+        let mut s = state("tidy", &system32("PING.EXE"), &["-n", "30", "127.0.0.1"], json!({}));
+        let (host, on) = (Host::new("t"), vec!["tidy".to_string()]);
+        s.tick(Instant::now(), &on, &host);
+        s.list[0].end_child();
+        assert!(s.list[0].child.is_none() && s.list[0].job.is_none());
+    }
+
+    #[test]
+    fn the_manifest_says_what_may_be_started() {
+        let m = |extra: &str| Manifest::parse("p", &format!(r#"{{"id":"p","name":"P","exe":"C:\\Tools\\p.exe","proto":1{extra}}}"#));
+        assert!(!m("").unwrap().processes);
+        assert!(!m(r#","processes":"none""#).unwrap().processes);
+        assert!(m(r#","processes":"allow""#).unwrap().processes);
+        assert!(m(r#","processes":"yes""#).is_err() && m(r#","processes":true"#).is_err(), "anything else is a mistake");
     }
 }

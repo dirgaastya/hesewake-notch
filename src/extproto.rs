@@ -19,6 +19,16 @@ pub(crate) const MAX_META: usize = 6;
 pub(crate) const MAX_NOTES: usize = 5;
 pub(crate) const MAX_BUTTONS: usize = 4;
 
+/// The biggest `matrix` (modules on a side): a QR code of version 20 is 97.
+pub(crate) const MAX_MATRIX: usize = 100;
+
+/// The biggest picture of a `hero`, decoded (the notch draws it as a small square).
+pub(crate) const MAX_HERO_IMAGE: usize = 48 * 1024;
+/// The longest line of a `hero`.
+pub(crate) const LEN_HERO: usize = 80;
+/// The longest text a page's `input` can hold.
+pub(crate) const MAX_INPUT: usize = 40;
+
 pub(crate) const LEN_ID: usize = 64;
 pub(crate) const LEN_TAB: usize = 12;
 pub(crate) const LEN_LABEL: usize = 16;
@@ -52,6 +62,11 @@ pub(crate) struct Manifest {
     pub(crate) args: Vec<String>,
     /// Has a slide in the carousel (default); false = runs in the background.
     pub(crate) slide: bool,
+    /// The Settings button of *Settings > Extensions* opens the extension's pages in a panel of the Settings window (true),
+    /// or asks the extension to open its own window with `config` (false, the default).
+    pub(crate) panel: bool,
+    /// May the program start other programs? No unless the manifest says `"processes": "allow"` (see extjob.rs).
+    pub(crate) processes: bool,
 }
 
 pub(crate) fn valid_id(id: &str) -> bool {
@@ -108,6 +123,18 @@ impl Manifest {
             }
             _ => return Err("bad args"),
         };
+        let panel = match v.get("settings") {
+            None | Some(Value::Null) => false,
+            Some(Value::String(s)) if s == "window" => false,
+            Some(Value::String(s)) if s == "panel" => true,
+            _ => return Err("settings must be \"window\" or \"panel\""),
+        };
+        let processes = match v.get("processes") {
+            None | Some(Value::Null) => false,
+            Some(Value::String(s)) if s == "none" => false,
+            Some(Value::String(s)) if s == "allow" => true,
+            _ => return Err("processes must be \"none\" or \"allow\""),
+        };
         Ok(Manifest {
             id: id.to_string(),
             name,
@@ -115,6 +142,8 @@ impl Manifest {
             exe: exe.to_string(),
             args,
             slide: v.get("slide").and_then(Value::as_bool).unwrap_or(true),
+            panel,
+            processes,
         })
     }
 }
@@ -206,6 +235,11 @@ pub(crate) fn config() -> Vec<u8> {
     msg(json!({"t": "config"}))
 }
 
+/// What the user typed in a page's `input`: its id and the text (one line, at most `MAX_INPUT` characters).
+pub(crate) fn input(id: &str, value: &str) -> Vec<u8> {
+    msg(json!({"t": "input", "id": id, "value": clip(Some(&json!(value)), MAX_INPUT, false)}))
+}
+
 pub(crate) fn lang(l: &str) -> Vec<u8> {
     msg(json!({"t": "lang", "lang": l}))
 }
@@ -290,6 +324,17 @@ pub(crate) struct Row {
     pub(crate) text: String,
     pub(crate) sub: String,
     pub(crate) mark: bool,
+    pub(crate) tone: Tone,
+}
+
+/// The colour of a row's `sub` text and the dot before it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum Tone {
+    #[default]
+    None,
+    Good,
+    Warn,
+    Muted,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -319,7 +364,19 @@ pub(crate) struct SlideMsg {
     pub(crate) sections: Vec<Section>,
     pub(crate) stepper: Option<Stepper>,
     pub(crate) back: bool,
+    /// A card at the top of the page with a picture (the Settings panel).
+    pub(crate) hero: Option<Hero>,
     pub(crate) foot: String,
+}
+
+/// `{ "title": "Song", "sub": "Artist", "text": "Phone 1 - Playing", "image": { "mime": "image/jpeg", "data": "<base64>" } }`
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Hero {
+    pub(crate) title: String,
+    pub(crate) sub: String,
+    pub(crate) text: String,
+    /// The picture's bytes (PNG or JPEG), decoded from base64; None if it was missing or not allowed.
+    pub(crate) image: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -340,7 +397,33 @@ pub(crate) struct DetailMsg {
     pub(crate) body: String,
     pub(crate) notes: Vec<Note>,
     pub(crate) buttons: Vec<Button>,
+    pub(crate) matrix: Option<Matrix>,
+    pub(crate) input: Option<InputSpec>,
     pub(crate) foot: String,
+}
+
+/// A line of text the user can edit on a page (the Settings panel): `{ "id": "rename", "label": "Name", "value": "Phone 1",
+/// "max": 32, "button": "Save" }`. What is typed goes back as an `input` message.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct InputSpec {
+    pub(crate) id: String,
+    pub(crate) label: String,
+    pub(crate) value: String,
+    pub(crate) max: usize,
+    pub(crate) button: String,
+}
+
+/// A small square picture of black and white modules (a QR code), `size` x `size`, row by row.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Matrix {
+    pub(crate) size: usize,
+    pub(crate) dark: Vec<bool>,
+}
+
+impl Matrix {
+    pub(crate) fn at(&self, x: usize, y: usize) -> bool {
+        self.dark.get(y * self.size + x).copied().unwrap_or(false)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -395,9 +478,47 @@ fn parse_rows(v: &Value, key: &str, room: usize) -> Vec<Row> {
                 text: clip(r.get("text"), LEN_ROW, false),
                 sub: clip(r.get("sub"), LEN_SUB, false),
                 mark: r.get("mark").and_then(Value::as_bool).unwrap_or(false),
+                tone: match r.get("tone").and_then(Value::as_str) {
+                    Some("good") => Tone::Good,
+                    Some("warn") => Tone::Warn,
+                    Some("muted") => Tone::Muted,
+                    _ => Tone::None,
+                },
             })
         })
         .collect()
+}
+
+/// Standard base64 (`+`, `/`, padding optional). None for anything else, and for stray bits.
+pub(crate) fn b64_decode_std(s: &str) -> Option<Vec<u8>> {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let s = s.trim_end_matches('=');
+    if s.len() % 4 == 1 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let (mut acc, mut bits) = (0u32, 0);
+    for c in s.bytes() {
+        acc = acc << 6 | A.iter().position(|&a| a == c)? as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    (acc == 0).then_some(out)
+}
+
+fn parse_hero(v: &Value) -> Option<Hero> {
+    let h = v.get("hero").filter(|h| h.is_object())?;
+    let image = h.get("image").filter(|i| i.is_object()).and_then(|i| {
+        let png_or_jpeg = matches!(i.get("mime").and_then(Value::as_str), Some("image/png" | "image/jpeg"));
+        let data = i.get("data").and_then(Value::as_str)?;
+        // base64 is a third bigger than what it holds: refuse before decoding something huge
+        (png_or_jpeg && data.len() <= MAX_HERO_IMAGE / 3 * 4 + 8).then(|| b64_decode_std(data)).flatten().filter(|b| !b.is_empty() && b.len() <= MAX_HERO_IMAGE)
+    });
+    Some(Hero { title: clip(h.get("title"), LEN_HERO, false), sub: clip(h.get("sub"), LEN_HERO, false), text: clip(h.get("text"), LEN_HERO, false), image })
 }
 
 fn parse_slide(v: &Value) -> Option<SlideMsg> {
@@ -435,8 +556,38 @@ fn parse_slide(v: &Value) -> Option<SlideMsg> {
         sections,
         stepper,
         back: v.get("back").and_then(Value::as_bool).unwrap_or(false),
+        hero: parse_hero(v),
         foot: clip(v.get("foot"), LEN_LINE, false),
     })
+}
+
+fn parse_input(v: &Value) -> Option<InputSpec> {
+    let i = v.get("input").filter(|i| i.is_object())?;
+    let id = id_of(i, "id");
+    if id.is_empty() {
+        return None;
+    }
+    let max = i.get("max").and_then(Value::as_u64).map_or(MAX_INPUT, |m| (m as usize).clamp(1, MAX_INPUT));
+    Some(InputSpec { id, label: clip(i.get("label"), LEN_LABEL, false), value: clip(i.get("value"), max, false), max, button: clip(i.get("button"), LEN_LABEL, false) })
+}
+
+/// `{"size": 3, "rows": ["101", "010", "101"]}`. Anything that is not exactly that is no matrix (the rest of the page stays).
+fn parse_matrix(v: &Value) -> Option<Matrix> {
+    let m = v.get("matrix")?;
+    let size = usize::try_from(m.get("size")?.as_u64()?).ok().filter(|s| (1..=MAX_MATRIX).contains(s))?;
+    let rows = m.get("rows")?.as_array().filter(|r| r.len() == size)?;
+    let mut dark = Vec::with_capacity(size * size);
+    for r in rows {
+        let r = r.as_str().filter(|r| r.len() == size)?;
+        for c in r.bytes() {
+            match c {
+                b'0' => dark.push(false),
+                b'1' => dark.push(true),
+                _ => return None,
+            }
+        }
+    }
+    Some(Matrix { size, dark })
 }
 
 fn parse_detail(v: &Value) -> Option<DetailMsg> {
@@ -457,6 +608,8 @@ fn parse_detail(v: &Value) -> Option<DetailMsg> {
             .map(|n| Note { who: clip(n.get("who"), LEN_SHORT, false), when: clip(n.get("when"), LEN_SHORT, false), text: clip(n.get("text"), LEN_NOTE, true) })
             .collect(),
         buttons: parse_buttons(v, "buttons", MAX_BUTTONS),
+        matrix: parse_matrix(v),
+        input: parse_input(v),
         foot: clip(v.get("foot"), LEN_LINE, false),
     })
 }
@@ -795,5 +948,199 @@ mod tests {
         assert!(!g.allow(t0 + Duration::from_secs(4)));
         assert!(g.allow(t0 + Duration::from_secs(5)));
         assert!(!g.allow(t0 + Duration::from_secs(6)), "the gap counts from the last one shown");
+    }
+}
+
+#[cfg(test)]
+mod panel_tests {
+    use super::*;
+
+    const BASE: &str = r#"{"id":"media-bridge","name":"Media Bridge","exe":"C:\\Tools\\mb.exe","proto":1"#;
+
+    fn manifest(extra: &str) -> Result<Manifest, &'static str> {
+        Manifest::parse("media-bridge", &format!("{BASE}{extra}}}"))
+    }
+
+    #[test]
+    fn the_settings_button_says_where_the_settings_are() {
+        assert!(!manifest("").unwrap().panel, "its own window unless said otherwise");
+        assert!(!manifest(r#","settings":"window""#).unwrap().panel);
+        assert!(manifest(r#","settings":"panel""#).unwrap().panel);
+        assert!(!manifest(r#","settings":null"#).unwrap().panel);
+        assert!(manifest(r#","settings":"tab""#).is_err(), "anything else is a mistake");
+        assert!(manifest(r#","settings":true"#).is_err());
+        let both = manifest(r#","slide":false,"settings":"panel""#).unwrap();
+        assert!(!both.slide && both.panel, "an extension without a slide has its settings in the panel");
+    }
+
+    fn detail(matrix: serde_json::Value) -> Option<Matrix> {
+        match parse(serde_json::json!({"t": "detail", "rev": 1, "matrix": matrix}).to_string().as_bytes()) {
+            Parsed::Msg(FromExt::Detail(d)) => d.matrix,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_matrix_is_squares_of_ones_and_zeros() {
+        let m = detail(serde_json::json!({"size": 3, "rows": ["101", "010", "111"]})).unwrap();
+        assert_eq!(m.size, 3);
+        assert_eq!([m.at(0, 0), m.at(1, 0), m.at(1, 1), m.at(0, 1), m.at(2, 2)], [true, false, true, false, true]);
+        assert!(!m.at(3, 0) && !m.at(0, 3), "outside is white");
+        let big = vec!["1".repeat(MAX_MATRIX); MAX_MATRIX];
+        assert!(detail(serde_json::json!({"size": MAX_MATRIX, "rows": big})).is_some(), "the biggest one");
+    }
+
+    #[test]
+    fn a_matrix_that_is_not_one_is_dropped_and_the_page_stays() {
+        for bad in [
+            serde_json::json!({"size": 0, "rows": []}),
+            serde_json::json!({"size": 101, "rows": vec!["1".repeat(101); 101]}),
+            serde_json::json!({"size": 3, "rows": ["101", "010"]}),
+            serde_json::json!({"size": 3, "rows": ["101", "010", "11"]}),
+            serde_json::json!({"size": 3, "rows": ["101", "0x0", "111"]}),
+            serde_json::json!({"size": 3, "rows": ["101", "010", 7]}),
+            serde_json::json!({"size": "3", "rows": ["101", "010", "111"]}),
+            serde_json::json!({"rows": ["1"]}),
+            serde_json::json!("101"),
+            serde_json::json!(null),
+        ] {
+            assert_eq!(detail(bad.clone()), None, "{bad}");
+        }
+        // the page around it is still read
+        match parse(serde_json::json!({"t": "detail", "rev": 1, "title": "Pair", "matrix": {"size": 2, "rows": ["1"]}}).to_string().as_bytes()) {
+            Parsed::Msg(FromExt::Detail(d)) => assert_eq!((d.title.as_str(), d.matrix), ("Pair", None)),
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+
+    fn input(i: serde_json::Value) -> Option<InputSpec> {
+        match parse(serde_json::json!({"t": "detail", "rev": 1, "input": i}).to_string().as_bytes()) {
+            Parsed::Msg(FromExt::Detail(d)) => d.input,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_text_box_is_read_with_its_limits() {
+        let i = input(serde_json::json!({"id": "rename", "label": "Name", "value": "Phone 1", "max": 32, "button": "Save"})).unwrap();
+        assert_eq!((i.id.as_str(), i.label.as_str(), i.value.as_str(), i.max, i.button.as_str()), ("rename", "Name", "Phone 1", 32, "Save"));
+        let d = input(serde_json::json!({"id": "x"})).unwrap();
+        assert_eq!((d.max, d.value.as_str(), d.button.as_str()), (MAX_INPUT, "", ""), "defaults");
+        assert_eq!(input(serde_json::json!({"id": "x", "max": 0})).unwrap().max, 1);
+        assert_eq!(input(serde_json::json!({"id": "x", "max": 999})).unwrap().max, MAX_INPUT, "never more than 40");
+        assert_eq!(input(serde_json::json!({"id": "x", "max": 5, "value": "abcdefgh"})).unwrap().value, "abcde", "the value is cut to the limit");
+        assert_eq!(input(serde_json::json!({"id": "x", "value": "a\u{7}b\nc"})).unwrap().value, "ab c", "one line, no control characters");
+    }
+
+    #[test]
+    fn a_text_box_without_an_id_is_no_text_box() {
+        assert_eq!(input(serde_json::json!({"label": "Name"})), None);
+        assert_eq!(input(serde_json::json!({"id": ""})), None);
+        assert_eq!(input(serde_json::json!("rename")), None);
+        assert_eq!(input(serde_json::json!(null)), None);
+    }
+
+    #[test]
+    fn what_is_typed_goes_back_clean_and_short() {
+        let read = |b: Vec<u8>| serde_json::from_slice::<serde_json::Value>(&b[4..]).unwrap();
+        assert_eq!(read(super::input("rename", "Pixel 8")), serde_json::json!({"t": "input", "id": "rename", "value": "Pixel 8"}));
+        let long = read(super::input("rename", &format!("{}\n\u{7}x", "a".repeat(60))));
+        assert_eq!(long["value"].as_str().unwrap().chars().count(), MAX_INPUT);
+        assert!(!long["value"].as_str().unwrap().contains('\n'));
+    }
+}
+
+#[cfg(test)]
+mod hero_tests {
+    use super::*;
+
+    fn b64(data: &[u8]) -> String {
+        const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::new();
+        for c in data.chunks(3) {
+            let n = c.iter().enumerate().fold(0u32, |acc, (i, &b)| acc | (b as u32) << (16 - 8 * i));
+            for i in 0..c.len() + 1 {
+                out.push(A[(n >> (18 - 6 * i) & 63) as usize] as char);
+            }
+            out.extend(std::iter::repeat('=').take(3 - c.len()));
+        }
+        out
+    }
+
+    fn slide(extra: serde_json::Value) -> SlideMsg {
+        match parse(serde_json::json!({"t": "slide", "rev": 1, "hero": extra}).to_string().as_bytes()) {
+            Parsed::Msg(FromExt::Slide(s)) => s,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn standard_base64_is_read_with_and_without_padding() {
+        let bytes = [0xfb, 0xff, 0xbe, 0xfb, 0xef];
+        assert_eq!(b64(&bytes), "+/++++8=");
+        assert_eq!(b64_decode_std("+/++++8="), Some(bytes.to_vec()));
+        assert_eq!(b64_decode_std("+/++++8"), Some(bytes.to_vec()));
+        assert_eq!(b64_decode_std("-_----8="), None, "base64url is not standard base64");
+        assert_eq!(b64_decode_std("A"), None);
+        assert_eq!(b64_decode_std("AB"), None, "stray bits");
+        for n in 0..30 {
+            let d: Vec<u8> = (0..n as u8).map(|i| i.wrapping_mul(53)).collect();
+            assert_eq!(b64_decode_std(&b64(&d)), Some(d));
+        }
+    }
+
+    #[test]
+    fn a_hero_with_a_picture() {
+        let img = vec![7u8; 5000];
+        let h = slide(serde_json::json!({"title": "Cupid", "sub": "FIFTY FIFTY", "text": "Phone 1 \u{b7} Playing", "image": {"mime": "image/jpeg", "data": b64(&img)}})).hero.unwrap();
+        assert_eq!((h.title.as_str(), h.sub.as_str(), h.text.as_str()), ("Cupid", "FIFTY FIFTY", "Phone 1 \u{b7} Playing"));
+        assert_eq!(h.image, Some(img));
+    }
+
+    #[test]
+    fn a_picture_that_is_not_allowed_is_left_out_and_the_words_stay() {
+        let ok = b64(&[1u8; 100]);
+        for (name, image) in [
+            ("a gif", serde_json::json!({"mime": "image/gif", "data": ok})),
+            ("no mime", serde_json::json!({"data": ok})),
+            ("no data", serde_json::json!({"mime": "image/png"})),
+            ("bad base64", serde_json::json!({"mime": "image/png", "data": "!!!"})),
+            ("empty", serde_json::json!({"mime": "image/png", "data": ""})),
+            ("too big", serde_json::json!({"mime": "image/png", "data": b64(&vec![1u8; MAX_HERO_IMAGE + 1])})),
+            ("huge", serde_json::json!({"mime": "image/png", "data": "A".repeat(MAX_HERO_IMAGE * 2)})),
+            ("not an object", serde_json::json!("image/png")),
+        ] {
+            let h = slide(serde_json::json!({"title": "Cupid", "image": image})).hero.unwrap();
+            assert_eq!((h.title.as_str(), h.image.is_none()), ("Cupid", true), "{name}");
+        }
+        assert!(slide(serde_json::json!({"title": "x", "image": {"mime": "image/png", "data": b64(&vec![1u8; MAX_HERO_IMAGE])}})).hero.unwrap().image.is_some(), "the biggest allowed");
+    }
+
+    #[test]
+    fn the_words_of_a_hero_are_clipped_and_a_hero_that_is_not_one_is_none() {
+        let h = slide(serde_json::json!({"title": "t".repeat(300), "sub": "a\u{7}b\nc"})).hero.unwrap();
+        assert_eq!(h.title.chars().count(), LEN_HERO);
+        assert_eq!(h.sub, "ab c");
+        for bad in [serde_json::json!("hero"), serde_json::json!(7), serde_json::json!(null)] {
+            assert!(slide(bad).hero.is_none());
+        }
+    }
+
+    #[test]
+    fn rows_have_a_tone() {
+        let rows = |tone: serde_json::Value| match parse(serde_json::json!({"t": "slide", "rev": 1, "rows": [{"id": "a", "text": "A", "tone": tone}]}).to_string().as_bytes()) {
+            Parsed::Msg(FromExt::Slide(s)) => s.sections[0].rows[0].tone,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(rows(serde_json::json!("good")), Tone::Good);
+        assert_eq!(rows(serde_json::json!("warn")), Tone::Warn);
+        assert_eq!(rows(serde_json::json!("muted")), Tone::Muted);
+        assert_eq!(rows(serde_json::json!("purple")), Tone::None, "an unknown tone is none");
+        assert_eq!(rows(serde_json::json!(5)), Tone::None);
     }
 }
