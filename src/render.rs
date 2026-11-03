@@ -148,7 +148,8 @@ pub(crate) fn draw(a: &mut App) {
     if p > 0.04 {
         let pos = a.sp - a.drag_dx / 160.0;
         let vis: Vec<(usize, f32, f32)> = visible_slides(pos, a.n_slides()).into_iter().map(|(i, ox, al)| (i, ox, al * p)).collect();
-        for &(i, _, al) in &vis {
+        let glow_on = a.cfg.glow;
+        for &(i, _, al) in vis.iter().filter(|_| glow_on) {
             match a.order[i] {
                 SlideId::Music => a.music_glow(&mut g, &shape, w, h, al),
                 // Other slides: one glow color (derived from the accent) so the slides feel consistent.

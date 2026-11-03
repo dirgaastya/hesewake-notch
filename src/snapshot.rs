@@ -2219,6 +2219,8 @@ fn settings_window_changes_apply_right_away() {
     assert_eq!(a.cfg.idle_display, 2);
     assert!(a.idle_phase() == IdlePhase::Eye, "eyes right away");
     assert!(settingswin::hit_center(&a, Hit::Pick(Rid::NotchSize, 5)).is_some(), "200%");
+    sw_press(&mut a, Hit::Press(Rid::Glow));
+    assert!(!a.cfg.glow, "the glow was on by default");
 
     let mut a = sw_shot("settingswin-test-screens", page(SCREENS));
     sw_press(&mut a, Hit::Press(Rid::ThinMaximized));
@@ -3351,4 +3353,21 @@ fn media_buttons_answer_a_click() {
     };
     shot("music-play-pressed", 1.5, |a| pressed(a, Play));
     shot("music-next-pressed", 1.5, |a| pressed(a, Next));
+}
+
+/// "Background glow" off: the open notch stays plain black at the bottom.
+#[test]
+fn glow_off_keeps_the_notch_black() {
+    let bottom = |on: bool| {
+        let mut a = test_app(1.0);
+        a.cfg.glow = on;
+        open_slide(&mut a, SlideId::Todo);
+        (a.w, a.h) = (EXP_W, EXP_H);
+        a.sp = a.slide as f32;
+        render::draw(&mut a);
+        let px = a.gfx.as_ref().unwrap().pm.pixel((CL + 8.0) as u32, (EXP_H - 40.0) as u32).unwrap();
+        px.red() as u32 + px.green() as u32 + px.blue() as u32
+    };
+    assert_eq!(bottom(false), 0);
+    assert!(bottom(true) > 0);
 }

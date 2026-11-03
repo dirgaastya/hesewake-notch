@@ -10,6 +10,8 @@ pub(crate) const CONFIRM_SECS: f32 = 3.0;
 /// One setting.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Rid {
+    /// Colour glow at the bottom of the open notch.
+    Glow,
     Minimal,
     ThinMaximized,
     Monitor,
@@ -54,8 +56,9 @@ pub(crate) enum Rid {
 impl Rid {
     /// Every setting (a test checks each one has a row in the Settings window).
     #[cfg(test)]
-    pub(crate) const ALL: [Rid; 32] = [
+    pub(crate) const ALL: [Rid; 33] = [
         Rid::Minimal,
+        Rid::Glow,
         Rid::ThinMaximized,
         Rid::Monitor,
         Rid::LyricTiming,
@@ -108,6 +111,7 @@ impl App {
             Rid::MicMute => self.cfg.mic_hotkey,
             Rid::Weather => self.cfg.weather_on,
             Rid::Prayer => self.cfg.prayer_on,
+            Rid::Glow => self.cfg.glow,
             Rid::Romaji => self.cfg.romaji_lyrics,
             Rid::Downloads => self.cfg.downloads,
             Rid::ImsakTerbit => self.cfg.imsak_terbit,
@@ -190,6 +194,7 @@ impl App {
                 self.cfg.weather_on = !self.cfg.weather_on;
                 self.weather_apply();
             }
+            Rid::Glow => self.cfg.glow = !self.cfg.glow,
             Rid::Prayer => {
                 self.cfg.prayer_on = !self.cfg.prayer_on;
                 self.prayer_refresh();
