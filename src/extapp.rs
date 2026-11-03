@@ -664,6 +664,12 @@ impl App {
         matches!(self.order.get(i), Some(SlideId::Ext(k)) if self.ext.list.get(*k as usize).is_some_and(|e| e.badge))
     }
 
+    /// Tell each extension whether anyone looks at its pages: its slide in the open notch, or its panel in the
+    /// Settings window (`visible`, once per change). Opening the slide also clears its marker. True if a redraw is needed.
+    pub(crate) fn ext_visible_sync(&mut self) -> bool {
+        false
+    }
+
     /// `WM_EXT`: the pipe host has something for us. True if a redraw is needed.
     pub(crate) fn ext_events(&mut self) -> bool {
         let events = ext::host().take_events();
