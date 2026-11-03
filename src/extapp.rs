@@ -51,6 +51,8 @@ pub(crate) struct Ext {
     pub(crate) slide: Option<SlideMsg>,
     pub(crate) detail: Option<DetailMsg>,
     pub(crate) badge: bool,
+    /// What it was last told by `visible`: someone looks at its slide or its panel.
+    seen: bool,
     /// What the notch remembers about the page it shows (scroll, tab, hit boxes).
     pub(crate) view: crate::extslide::ExtView,
 }
@@ -88,6 +90,7 @@ impl Ext {
             slide: None,
             detail: None,
             badge: false,
+            seen: false,
             view: Default::default(),
         }
     }
@@ -126,6 +129,7 @@ impl Ext {
         self.slide = None;
         self.detail = None;
         self.badge = false;
+        self.seen = false;
         self.status.clear();
     }
 
@@ -520,7 +524,7 @@ impl App {
             self.sw.panel = Some(i);
             self.sw.to_top();
             // it is looked at now, like a slide that comes into view
-            self.ext_send_to(&id, proto::visible(true));
+            self.ext_visible_sync();
         } else {
             self.ext_send_to(&id, proto::config());
         }
@@ -528,11 +532,10 @@ impl App {
 
     /// Leave the panel (back to the list, another page of the window, or the window closed).
     pub(crate) fn ext_panel_close(&mut self) {
-        if let Some(i) = self.sw.panel.take() {
+        if self.sw.panel.take().is_some() {
             self.sw.to_top();
-            if let Some(id) = self.ext_id(i) {
-                self.ext_send_to(&id, proto::visible(false));
-            }
+            // not looked at any more, unless its slide is open in the notch
+            self.ext_visible_sync();
         }
     }
 
@@ -667,7 +670,29 @@ impl App {
     /// Tell each extension whether anyone looks at its pages: its slide in the open notch, or its panel in the
     /// Settings window (`visible`, once per change). Opening the slide also clears its marker. True if a redraw is needed.
     pub(crate) fn ext_visible_sync(&mut self) -> bool {
-        false
+        let slide = if self.expanded() { self.cur_ext() } else { None };
+        let panel = self.sw.panel;
+        let mut redraw = false;
+        let mut tell = Vec::new();
+        for (i, e) in self.ext.list.iter_mut().enumerate() {
+            if !e.connected {
+                e.seen = false;
+                continue;
+            }
+            if slide == Some(i) && e.badge {
+                e.badge = false;
+                redraw = true;
+            }
+            let seen = slide == Some(i) || panel == Some(i);
+            if seen != e.seen {
+                e.seen = seen;
+                tell.push((e.id().to_string(), seen));
+            }
+        }
+        for (id, on) in tell {
+            self.ext_send_to(&id, proto::visible(on));
+        }
+        redraw
     }
 
     /// `WM_EXT`: the pipe host has something for us. True if a redraw is needed.

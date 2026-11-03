@@ -190,9 +190,8 @@ muted the extension).
 { "t": "toast", "title": "#128 Fix crash on startup", "sub": "New · To do", "count": 1 }
 ```
 
-**`badge`**: `{ "t": "badge", "on": true }` puts the "something new" dot on the slide's navigation dot. It stays until
-the extension sends `{ "t": "badge", "on": false }` (or disconnects): opening the slide does not clear it, so turn it off
-yourself once what was new has been dealt with.
+**`badge`**: `{ "t": "badge", "on": true }` puts the "something new" dot on the slide's navigation dot; the notch clears
+it when the user opens the slide (and sends `visible`).
 
 **`status`**: `{ "t": "status", "text": "Phone connected" }` (at most 60 characters) is shown next to the extension in
 *Settings > Extensions*. Send it whenever the state worth knowing changes ("Not signed in", "Syncing", "3 devices").
@@ -204,7 +203,7 @@ Extensions without a slide use it to tell the user what they are doing.
 
 | Message | When |
 |---|---|
-| `{"t":"visible","on":true}` | The extension's pages opened in the Settings panel (`on: true`) or closed (`on: false`); only for `"settings": "panel"`. The notch does **not** send it for the slide: keep the slide's page up to date whenever your data changes, and do not wait for `visible` before sending it. |
+| `{"t":"visible","on":true}` | The slide came into view (`on: true`: the notch opened on it, or the user moved to it) or left it (`on: false`); the same for its pages in the Settings panel. Sent once per change, and again after a reconnect while the slide is open. Refresh data when it opens; stop polling hard when nobody looks, if you like. |
 | `{"t":"tab","id":"todo"}` | The user picked a filter chip. |
 | `{"t":"row","id":"128"}` | The user clicked a row. Usually answered with `detail`. |
 | `{"t":"action","id":"refresh"}` | A header button, **Retry**, **setup**, or a detail button without `link`/`copy`. |
@@ -250,7 +249,7 @@ Characters are counted as Unicode scalar values. Anything over a limit is clippe
 1. Write extension.json (section 2) into %APPDATA%\hesewake-notch\extensions\<id>\ .
 2. Turn the extension on in Settings > Extensions. The notch starts the exe.
 3. Connect to \\.\pipe\hesewake-notch-ext-<SID>, send "hello", wait for "welcome".
-4. Send a "slide", and a new one whenever your data changes. React to "row", "tab" and "action".
+4. Send a "slide". React to "row", "tab", "action" and "visible".
 5. Send "bye" and exit when you get "quit".
 ```
 
@@ -265,8 +264,6 @@ Two things worth knowing:
   keep one thread that does both with `PeekNamedPipe`. The notch itself uses overlapped I/O.
 - The notch drops messages above 10 per second, silently. Send a whole page in one message, and do not send a `status`
   after every message. If your data can change in bursts, collect the changes and send one page at most once a second.
-- The slide gets no `visible` message (only the Settings panel does), so the notch cannot tell you when someone looks
-  at it. Send the page when your data changes, not when it is opened.
 
 ## 8. Security: what to expect from an extension
 
