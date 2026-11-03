@@ -132,6 +132,7 @@ unsafe fn poll(a: &mut App) {
                 a.notifs.insert(0, notif::NotifItem {
                     id: *id,
                     app: "Messages".into(),
+                    aumid: None,
                     title: demo_text.0,
                     body: demo_text.1,
                     at_unix: notif::now_unix(),
@@ -139,6 +140,7 @@ unsafe fn poll(a: &mut App) {
                     icon: None,
                     avatar: None,
                     dismiss: None,
+                    opening: false,
                 });
                 a.notif_access = notif::Access::Allowed;
                 a.bell_t = Instant::now();

@@ -90,6 +90,7 @@ mod nav;
 mod net;
 mod notif;
 mod notif_img;
+mod notifopen;
 mod notifview;
 mod note;
 mod opts;

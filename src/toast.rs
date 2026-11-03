@@ -63,6 +63,8 @@ pub(crate) enum ToastKind {
     Bluetooth { name: String, pct: Option<u8>, connected: bool },
     /// Notifikasi Windows; isinya dicari di `App.notifs` berdasarkan id.
     Notification { id: u32 },
+    /// Aplikasi asal notifikasi gagal dibuka (notifopen.rs).
+    NotifOpenFailed { app: String },
     /// HUD kecil: tombol kunci (On/Off).
     Hud { kind: HudKind, on: bool },
     /// Aplikasi mulai memakai mikrofon (`cam: false`) atau kamera (`cam: true`).
@@ -266,6 +268,7 @@ impl App {
             ToastKind::LowBattery { pct } => (ACCENT, tr("Battery low").to_string(), tr("Plug in your charger").to_string(), *pct as f32 / 100.0, Some(format!("{}%", pct))),
             ToastKind::Timer { title, label } => ([255, 170, 60], title.clone(), label.clone(), 1.0, None),
             ToastKind::Ext { title, sub, count, .. } => (g.acc.bright, title.clone(), sub.clone(), 1.0, (*count > 1).then(|| count.to_string())),
+            ToastKind::NotifOpenFailed { app } => (GREY, tr("Couldn't open app").to_string(), app.clone(), 1.0, None),
             ToastKind::Bluetooth { name, pct, connected } => {
                 let s = match (connected, pct) {
                     (true, Some(p)) => fill(tr("Connected \u{b7} {}%"), &[p]),
@@ -308,6 +311,7 @@ impl App {
             ToastKind::Prayer { .. } => g.icon_crescent(rcx, cy, 18.0 * sc, &ic),
             ToastKind::Timer { .. } => g.icon_bell(rcx, cy, 17.0 * sc, (t * 22.0).sin() * (1.0 - t / 1.5).max(0.0), &ic),
             ToastKind::Ext { .. } => g.slide_icon(SlideId::Ext(0), rcx, cy, 17.0 * sc, &ic),
+            ToastKind::NotifOpenFailed { .. } => g.icon_bell(rcx, cy, 17.0 * sc, 0.0, &ic),
             ToastKind::Notification { .. } | ToastKind::Hud { .. } | ToastKind::Privacy { .. } | ToastKind::Water | ToastKind::Meeting { .. } | ToastKind::Update(_) | ToastKind::Downloaded { .. } => {}
         }
 
@@ -476,13 +480,14 @@ fn water_btns(w: f32, h: f32) -> ((f32, f32, f32, f32), (f32, f32, f32, f32)) {
 }
 
 impl App {
-    /// Toast dengan tombol yang bisa diklik (Water: Snooze/Drank, rapat: Join, pembaruan: Download): hover di atasnya tidak
+    /// Toast yang bisa diklik (Water: Snooze/Drank, rapat: Join, pembaruan: Download, notifikasi: buka aplikasinya): hover di atasnya tidak
     /// boleh membuka notch, karena itu membatalkan toast sebelum tombolnya sempat dipencet.
     pub(crate) fn toast_has_button(&self) -> bool {
         matches!(
             self.toast.as_ref().map(|t| &t.kind),
             Some(
                 ToastKind::Water
+                    | ToastKind::Notification { .. }
                     | ToastKind::Meeting { .. }
                     | ToastKind::Update(update::Note::Available(_) | update::Note::Downloading(_) | update::Note::DownloadFailed(_))
                     | ToastKind::Downloaded { .. }
@@ -504,6 +509,15 @@ impl App {
         }
         if matches!(ts.kind, ToastKind::Downloaded { .. }) {
             return self.dl_toast_click(x, y);
+        }
+        if let ToastKind::Notification { id } = ts.kind {
+            let (w, h) = TOAST_BT;
+            if !in_rect(x, y, CX - w / 2.0, 0.0, w, h) {
+                return false;
+            }
+            self.end_toast();
+            self.notif_open(id);
+            return true;
         }
         if matches!(ts.kind, ToastKind::Prayer { .. }) && self.adhan_playing() {
             let (w, h) = TOAST_CHARGE;

@@ -12,6 +12,8 @@ const VIS: usize = 3;
 const CLEAR: (f32, f32, f32, f32) = (RX - 88.0, 8.0, 88.0, 24.0);
 const OPEN_BTN: (f32, f32, f32, f32) = (LX + CW / 2.0 - 84.0, 100.0, 168.0, 30.0);
 const DISMISS_SECS: f32 = 0.25;
+/// Lebar area tombol hapus di ujung kanan baris; sisa baris membuka aplikasinya.
+const DISMISS_W: f32 = 32.0;
 const GREY: [u8; 3] = TEXT_DIM;
 
 pub(crate) struct NotifUi {
@@ -133,7 +135,32 @@ impl App {
         }
         let rows = self.notif_rows();
         if let Some(r) = rows.iter().find(|r| r.alpha > 0.5 && in_rect(x, y, LX, r.y, CW, ROW_H)) {
-            self.notif_dismiss(&[r.idx], 0.0);
+            if in_rect(x, y, LX + CW - DISMISS_W, r.y, DISMISS_W, ROW_H) {
+                self.notif_dismiss(&[r.idx], 0.0);
+            } else {
+                let id = self.notifs[r.idx].id;
+                self.notif_open(id);
+            }
+        }
+    }
+
+    /// Buka aplikasi asal notifikasi; hasilnya datang lewat `notif_opened`.
+    pub(crate) fn notif_open(&mut self, id: u32) {
+        let Some(n) = self.notifs.iter_mut().find(|n| n.id == id && n.dismiss.is_none() && !n.opening) else { return };
+        n.opening = true;
+        let aumid = n.aumid.clone();
+        notifopen::open(self.hwnd, self.notif_slot.clone(), id, aumid);
+    }
+
+    /// Berhasil: notifikasi selesai, sama seperti klik di Windows. Gagal: notifikasi tetap ada dan pengguna diberi tahu.
+    pub(crate) fn notif_opened(&mut self, id: u32, ok: bool) {
+        let Some(idx) = self.notifs.iter().position(|n| n.id == id) else { return };
+        self.notifs[idx].opening = false;
+        if ok {
+            self.notif_dismiss(&[idx], 0.0);
+        } else {
+            let app = self.notifs[idx].app.clone();
+            self.push_toast(toast::ToastKind::NotifOpenFailed { app });
         }
     }
 

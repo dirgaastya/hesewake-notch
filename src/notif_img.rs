@@ -84,7 +84,7 @@ fn db_uri() -> Option<CString> {
 }
 
 /// Payload XML satu notifikasi (None bila tidak ada/gagal). Read-only; hanya baris dengan `Id` tersebut.
-fn payload_for(id: u32) -> Option<String> {
+pub(crate) fn payload_for(id: u32) -> Option<String> {
     let s = sq()?;
     let uri = db_uri()?;
     unsafe {
@@ -209,7 +209,7 @@ fn watch_dir(dir: std::path::PathBuf) {
 }
 
 // ---------------------------------------------------------------- parsing (murni, bisa dites)
-fn xml_unescape(s: &str) -> String {
+pub(crate) fn xml_unescape(s: &str) -> String {
     s.replace("&quot;", "\"").replace("&apos;", "'").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
 }
 

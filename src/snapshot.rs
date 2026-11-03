@@ -242,6 +242,7 @@ fn snap_timer_chip_idle() {
 #[test]
 fn snap_timer_toast() {
     shot("toast-timer", 1.0, |a| show_toast(a, ToastKind::Timer { title: "Time's up".into(), label: "5 min timer".into() }));
+    shot("toast-notif-open-failed", 1.0, |a| show_toast(a, ToastKind::NotifOpenFailed { app: "OpenVPN Connect".into() }));
 }
 
 /// A Pomodoro that has finished `done` focus sessions and is in phase `phase`, running for `secs` seconds.
@@ -1417,6 +1418,72 @@ fn lyric_mode_credits_the_source() {
             });
         }
     }
+}
+
+/// App with one notification (id 7) listed on the Notifications slide.
+fn notif_app() -> App {
+    let mut a = test_app(1.0);
+    a.notif_on = true;
+    a.notif_access = notif::Access::Allowed;
+    let mut items = notif::demo_items();
+    items.truncate(1);
+    items[0].id = 7;
+    items[0].aumid = Some("Chrome".into());
+    a.notifs = items;
+    a
+}
+
+/// The row opens the app; only the x at its right end dismisses it. Row y: first row of the list.
+#[test]
+fn notif_row_click_opens_and_the_x_dismisses() {
+    let mut a = notif_app();
+    let y = 40.0 + 17.0;
+    a.notif_click(LX + 60.0, y);
+    assert_eq!(notifopen::opened(), vec![7], "the row opens");
+    assert!(a.notifs[0].dismiss.is_none(), "not dismissed until it opened");
+
+    a.notif_click(LX + 60.0, y);
+    assert!(notifopen::opened().is_empty(), "a second click while opening does not open it twice");
+
+    a.notif_apply(vec![notif::NotifEvent::Opened { id: 7, ok: true }]);
+    assert!(a.notifs[0].dismiss.is_some(), "opened: done, like a click in Windows");
+
+    let mut a = notif_app();
+    a.notif_click(LX + CW - 16.0, y);
+    assert!(notifopen::opened().is_empty(), "the x does not open");
+    assert!(a.notifs[0].dismiss.is_some(), "the x dismisses");
+}
+
+/// A failed open keeps the notification, says so, and can be tried again.
+#[test]
+fn notif_open_failure_keeps_the_item() {
+    let mut a = notif_app();
+    a.notif_click(LX + 60.0, 40.0 + 17.0);
+    assert_eq!(notifopen::opened(), vec![7]);
+    let app = a.notifs[0].app.clone();
+    a.notif_apply(vec![notif::NotifEvent::Opened { id: 7, ok: false }]);
+    assert!(a.notifs[0].dismiss.is_none() && !a.notifs[0].opening);
+    assert_eq!(a.toast.as_ref().map(|t| t.kind.clone()), Some(ToastKind::NotifOpenFailed { app }));
+    assert!(!a.toast_has_button(), "nothing to press on the failure toast");
+    a.toast = None;
+    a.notif_click(LX + 60.0, 40.0 + 17.0);
+    assert_eq!(notifopen::opened(), vec![7], "can be tried again");
+    // the answer for a notification that is already gone is ignored
+    a.notif_apply(vec![notif::NotifEvent::Opened { id: 99, ok: false }]);
+    assert!(a.toast.is_none());
+}
+
+/// A click on the toast opens the app; hovering it must not cancel it first.
+#[test]
+fn notif_toast_click_opens() {
+    let mut a = notif_app();
+    show_toast(&mut a, ToastKind::Notification { id: 7 });
+    assert!(a.toast_has_button(), "hovering the toast does not cancel it");
+    assert!(!a.toast_click(5.0, 150.0), "outside the toast");
+    assert!(notifopen::opened().is_empty());
+    assert!(a.toast_click(CX, 20.0));
+    assert_eq!(notifopen::opened(), vec![7]);
+    assert!(a.toast.is_none(), "the toast ends");
 }
 
 /// Toasts with a button must not let the hover open the notch (that cancels the toast before the button is pressed).
