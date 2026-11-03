@@ -440,6 +440,8 @@ const ID_TEXT: &[(&str, &str)] = &[
     ("Checks GitHub for a newer release", "Memeriksa GitHub untuk rilis yang lebih baru"),
     ("Background glow", "Cahaya latar"),
     ("Off: plain black", "Mati: hitam polos"),
+    ("Song in the notch", "Lagu di notch"),
+    ("Off: idle, lyrics only from the lyrics button", "Mati: diam, lirik hanya lewat tombol lirik"),
 ];
 
 #[cfg(test)]

@@ -398,6 +398,7 @@ impl App {
             ],
             Sec::Music => {
                 let mut rows = vec![
+                    toggle(Rid::NotchSong, tr("Song in the notch"), tr("Off: idle, lyrics only from the lyrics button")),
                     row(Rid::LyricTiming, tr("Lyric timing"), tr("Show earlier by"), Ctl::Stepper(format!("{:+} ms", self.cfg.lyric_lead_ms))),
                     toggle(Rid::Romaji, tr("Romanize lyrics"), tr("Japanese and Korean")),
                 ];

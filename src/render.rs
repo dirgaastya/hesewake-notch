@@ -257,7 +257,7 @@ impl App {
     fn draw_collapsed(&self, g: &mut Gfx, w: f32, h: f32, ca: f32) {
         if self.toast.is_some() {
             self.draw_toast(g, w, h, ca);
-        } else if self.media.playing {
+        } else if self.now_playing_bar() {
             let x0 = CX - w / 2.0;
             self.collapsed_cover(g, x0 + 14.0, (h - 20.0) / 2.0, 20.0, 5.0, ca);
             for i in 0..4 {

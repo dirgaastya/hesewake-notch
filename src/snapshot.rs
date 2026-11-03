@@ -2235,6 +2235,8 @@ fn settings_window_changes_apply_right_away() {
     assert!(settingswin::hit_center(&a, Hit::Press(Rid::Autostart)).is_some());
 
     let mut a = sw_shot("settingswin-test-music", page(MUSIC));
+    sw_press(&mut a, Hit::Press(Rid::NotchSong));
+    assert!(!a.cfg.notch_song, "the song in the notch was on by default");
     sw_press(&mut a, Hit::Step(Rid::LyricTiming, true));
     assert_eq!(a.cfg.lyric_lead_ms, settings::Settings::default().lyric_lead_ms + settings::LEAD_STEP);
     sw_press(&mut a, Hit::Press(Rid::Romaji));
@@ -3370,4 +3372,25 @@ fn glow_off_keeps_the_notch_black() {
     };
     assert_eq!(bottom(false), 0);
     assert!(bottom(true) > 0);
+}
+
+#[test]
+fn notch_song_off_keeps_the_small_notch_idle() {
+    let mut a = test_app(1.0);
+    a.media.playing = true;
+    a.media.title = "Eiyu".into();
+    assert!(a.now_playing_bar(), "on (default): the song in the small notch");
+    assert!(anim::target(&a).0 >= PLAYING.0);
+    a.cfg.notch_song = false;
+    assert!(!a.now_playing_bar());
+    assert!(anim::target(&a).0 < PLAYING.0, "idle while music plays");
+    a.lyrics = lyrics::Lyrics::Synced(vec![lyrics::LyricLine { at_ms: 0, text: "daiji na koto wa".into(), roma: String::new() }], lyrics::Source::LrcRed);
+    assert!(!a.now_playing_bar(), "lyrics found, but the lyrics view is closed");
+    a.lyric_mode = true;
+    assert!(a.now_playing_bar(), "the lyrics view is open: the line shows in the small notch");
+    shot("playing-song-off", 1.0, |a| {
+        a.media.playing = true;
+        a.media.title = "Eiyu".into();
+        a.cfg.notch_song = false;
+    });
 }

@@ -369,7 +369,7 @@ impl App {
         if !self.notif_on || self.notif_access != Access::Allowed || self.expanded() || self.toast.is_some() {
             return None;
         }
-        if self.media.playing {
+        if self.now_playing_bar() {
             Some((CX + self.w / 2.0 - 58.0 - self.priv_extra(), self.h / 2.0))
         } else if self.unread_count() > 0 && !self.thin() {
             Some((CX + self.w / 2.0 - 20.0 - self.priv_extra(), self.h / 2.0))
@@ -380,7 +380,7 @@ impl App {
 
     /// Ruang tambahan (px) yang dibutuhkan notch kecil saat lonceng tampil bersama lagu.
     pub(crate) fn bell_extra(&self) -> f32 {
-        if self.notif_on && self.notif_access == Access::Allowed && self.media.playing { 24.0 } else { 0.0 }
+        if self.notif_on && self.notif_access == Access::Allowed && self.now_playing_bar() { 24.0 } else { 0.0 }
     }
 
     /// Goyang lonceng 0.9 dtk setelah notifikasi baru.

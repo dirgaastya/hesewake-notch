@@ -324,7 +324,7 @@ impl App {
     /// The slot left of the clock is showing: idle, clock phase, no music/toast, and it has content (weather / countdown).
     pub(crate) fn weather_shown(&self) -> bool {
         !self.expanded()
-            && !self.media.playing
+            && !self.now_playing_bar()
             && !self.thin()
             && self.toast.is_none()
             && self.splash_t().is_none()

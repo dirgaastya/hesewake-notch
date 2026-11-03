@@ -349,12 +349,22 @@ impl App {
     }
 
     fn idle(&self) -> bool {
-        !self.expanded() && !self.thin() && !self.media.playing
+        !self.expanded() && !self.thin() && !self.now_playing_bar()
+    }
+
+    /// The small notch shows the playing song (artwork, title / lyrics, equalizer). With "Song in the notch" off it
+    /// stays idle (clock / eyes) instead, except for the lyrics while the lyrics view is open.
+    fn now_playing_bar(&self) -> bool {
+        if self.cfg.notch_song {
+            self.media.playing
+        } else {
+            self.lyric_mode && self.lyric_synced()
+        }
     }
 
     /// Notch menyusut jadi garis tipis: app penuh layar/Adobe (busy) atau mode Minimal saat tidak ada musik.
     fn thin(&self) -> bool {
-        self.busy || self.dodging || (self.minimal && !self.media.playing)
+        self.busy || self.dodging || (self.minimal && !self.now_playing_bar())
     }
 
     fn ready(&self) -> bool {

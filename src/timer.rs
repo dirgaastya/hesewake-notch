@@ -377,7 +377,7 @@ impl App {
 
     /// Pil timer tampil di notch idle: timer berjalan dan notch kecil dalam keadaan diam.
     pub(crate) fn timer_chip_active(&self) -> bool {
-        self.tm.running() && !self.expanded() && self.toast.is_none() && !self.thin() && !self.media.playing && self.splash_t().is_none()
+        self.tm.running() && !self.expanded() && self.toast.is_none() && !self.thin() && !self.now_playing_bar() && self.splash_t().is_none()
     }
 
     /// Susunan notch idle saat timer berjalan; None bila pil tidak tampil.
