@@ -147,7 +147,9 @@ pub(crate) fn draw(a: &mut App) {
     }
     if p > 0.04 {
         let pos = a.sp - a.drag_dx / 160.0;
-        let vis: Vec<(usize, f32, f32)> = visible_slides(pos, a.n_slides()).into_iter().map(|(i, ox, al)| (i, ox, al * p)).collect();
+        let n = a.n_slides();
+        let to = (a.drag_dx == 0.0).then(|| a.slide.rem_euclid(n as i32) as usize);
+        let vis: Vec<(usize, f32, f32)> = visible_slides(pos, n, to).into_iter().map(|(i, ox, al)| (i, ox, al * p)).collect();
         for &(i, _, al) in &vis {
             match a.order[i] {
                 SlideId::Music => a.music_glow(&mut g, &shape, w, h, al),
