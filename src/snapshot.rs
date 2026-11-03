@@ -195,6 +195,50 @@ fn shot(name: &str, s: f32, setup: impl FnOnce(&mut App)) {
 const SCALES: [f32; 2] = [1.0, 1.5];
 
 #[test]
+fn a_slide_that_left_is_gone_before_the_spring_stops() {
+    let n = 12;
+    // at rest: only the slide shown, fully
+    assert_eq!(visible_slides(3.0, n), vec![(3, 0.0, 1.0)]);
+    // halfway: both, shifted to their sides, neither at full strength
+    let half = visible_slides(2.5, n);
+    assert_eq!(half.len(), 2);
+    assert!(half.iter().all(|&(_, ox, al)| ox.abs() == 24.0 && al > 0.3 && al < 0.6), "{half:?}");
+    // the spring's tail, 6% from the end and around the wrap (Music -> the last slide): the slide that left is not drawn
+    let tail = visible_slides(-0.94, n);
+    assert_eq!(tail.len(), 1, "{tail:?}");
+    assert_eq!(tail[0].0, n - 1);
+    assert!(tail[0].2 > 0.98);
+    // a single slide is always drawn
+    assert_eq!(visible_slides(0.0, 1), vec![(0, 0.0, 1.0)]);
+}
+
+/// The end of a slide change: from Music (a bright cover) one step left, around to the last slide, with the carousel's
+/// spring 6% from where it stops. The slide that left must be gone by then, not a faint cover over the new slide.
+#[test]
+fn snap_slide_change_end() {
+    for s in SCALES {
+        let mut a = test_app(s);
+        let mut art = Pixmap::new(88, 88).expect("cover");
+        art.fill(Color::from_rgba8(235, 225, 210, 255));
+        a.art = Some(art);
+        a.media.title = "Song".into();
+        let last = a.order[a.order.len() - 1];
+        open_slide(&mut a, last);
+        let (w, h) = anim::target(&a);
+        (a.w, a.h) = (w, h);
+        a.sp = a.slide as f32 + 0.06;
+        render::draw(&mut a);
+        let Some(dir) = std::env::var_os("SNAPSHOT_DIR") else { continue };
+        let g = a.gfx.as_ref().expect("gfx");
+        let mut out = Pixmap::new(g.pm.width(), g.pm.height()).expect("canvas size");
+        out.fill(Color::from_rgba8(118, 124, 134, 255));
+        out.draw_pixmap(0, 0, g.pm.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+        std::fs::create_dir_all(&dir).expect("create snapshot folder");
+        out.save_png(std::path::Path::new(&dir).join(format!("slide-change-end@{}.png", (s * 100.0).round() as u32))).expect("save png");
+    }
+}
+
+#[test]
 fn snap_idle_clock() {
     for s in SCALES {
         shot("idle-clock", s, |_| {});

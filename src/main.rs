@@ -133,7 +133,7 @@ use gfx::{Box4, Gfx, acc, dummy_path, ellipsize, in_rect, notch_path, paint, pix
 use icon::{load_icon};
 use input::{click, context_menu};
 use music::{ArtData, Cmd, MARQUEE_GAP, MARQUEE_PAUSE, MARQUEE_SPEED, MCX, MCY, MW, MX, Media, media_thread};
-use nav::{NAV_L, NAV_R, cyc, dot_x};
+use nav::{NAV_L, NAV_R, dot_x, visible_slides};
 use note::{NOTE_H, NOTE_Y, NoteView, load_note, save_note};
 use render::present;
 use shelf::{SH_GAP, SH_H, SH_W, SH_Y, ShelfItem, load_shelf, open_path, save_shelf};
