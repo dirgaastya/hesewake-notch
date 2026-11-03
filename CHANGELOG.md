@@ -4,6 +4,13 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/), versi mengikut
 
 ## [Unreleased]
 
+## [0.13.3] - 2026-11-03
+
+Rilis ini berisi kontribusi dari @MaulanaRhezaArdiansyah (PR #64).
+
+### Fixed
+- **Sisa slide lama saat pindah slide, tuntas** (PR #64, lanjutan PR #61): di 0.13.2 cover album masih terlihat samar sesaat saat pindah dari Now Playing ke slide yang kosong, karena slide yang ditinggalkan memudar bersamaan dengan slide yang datang. Kini slide yang ditinggalkan sudah hilang di tengah jalan (sekitar 80 ms), saat carousel masih bergerak cepat, sedangkan slide tujuan tetap memudar masuk sepanjang gerakan. Saat digeser dengan drag, kedua slide tetap memudar bersamaan seperti sebelumnya.
+
 ## [0.13.2] - 2026-11-03
 
 Rilis ini berisi kontribusi dari @MaulanaRhezaArdiansyah (PR #61).
