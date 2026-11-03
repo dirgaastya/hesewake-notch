@@ -12,14 +12,26 @@ pub(crate) fn cyc(d: f32, n: usize) -> f32 {
 /// screen for a moment after the move looked finished.
 const FADE_GONE: f32 = 0.08;
 
-/// The slides seen at carousel position `pos` of `n`: (index, horizontal shift, opacity). The one leaving fades out
-/// completely before the spring stops; the one arriving is fully there before it does.
-pub(crate) fn visible_slides(pos: f32, n: usize) -> Vec<(usize, f32, f32)> {
+/// How far a slide that is being left travels before it is gone. Halfway, so it is gone while the carousel still
+/// moves fast (about 80 ms into a move) instead of fading together with the slide that arrives.
+const LEAVE_GONE: f32 = 0.5;
+
+fn smoothstep01(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// The slides seen at carousel position `pos` of `n`: (index, horizontal shift, opacity). `to` is the slide the
+/// carousel is moving to (None while dragging): it fades in over the whole move, and every other slide is gone
+/// halfway. Without `to` both sides fade alike, so a drag reveals the next slide as the finger moves.
+pub(crate) fn visible_slides(pos: f32, n: usize, to: Option<usize>) -> Vec<(usize, f32, f32)> {
     (0..n)
         .filter_map(|i| {
             let d = cyc(i as f32 - pos, n);
-            let t = ((1.0 - d.abs() - FADE_GONE) / (1.0 - FADE_GONE)).clamp(0.0, 1.0);
-            let al = t * t * (3.0 - 2.0 * t);
+            let al = match to {
+                Some(t) if t != i => smoothstep01((LEAVE_GONE - d.abs()) / LEAVE_GONE),
+                _ => smoothstep01((1.0 - d.abs() - FADE_GONE) / (1.0 - FADE_GONE)),
+            };
             (al > 0.0).then_some((i, d * 48.0, al))
         })
         .collect()

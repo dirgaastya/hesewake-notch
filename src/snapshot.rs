@@ -199,25 +199,33 @@ const SCALES: [f32; 2] = [1.0, 1.5];
 fn a_slide_that_left_is_gone_before_the_spring_stops() {
     let n = 12;
     // at rest: only the slide shown, fully
-    assert_eq!(visible_slides(3.0, n), vec![(3, 0.0, 1.0)]);
-    // halfway: both, shifted to their sides, neither at full strength
-    let half = visible_slides(2.5, n);
-    assert_eq!(half.len(), 2);
-    assert!(half.iter().all(|&(_, ox, al)| ox.abs() == 24.0 && al > 0.3 && al < 0.6), "{half:?}");
-    // the spring's tail, 6% from the end and around the wrap (Music -> the last slide): the slide that left is not drawn
-    let tail = visible_slides(-0.94, n);
-    assert_eq!(tail.len(), 1, "{tail:?}");
-    assert_eq!(tail[0].0, n - 1);
-    assert!(tail[0].2 > 0.98);
+    assert_eq!(visible_slides(3.0, n, Some(3)), vec![(3, 0.0, 1.0)]);
+    // early in a move from 2 to 3: both, the one leaving still the stronger
+    let early = visible_slides(2.3, n, Some(3));
+    assert_eq!(early.iter().map(|v| v.0).collect::<Vec<_>>(), [2, 3], "{early:?}");
+    assert!(early[0].2 > early[1].2, "{early:?}");
+    // halfway: the slide that left is gone, the one arriving is fading in on its side
+    let half = visible_slides(2.5, n, Some(3));
+    assert_eq!(half.len(), 1, "{half:?}");
+    assert_eq!((half[0].0, half[0].1), (3, 24.0));
+    assert!(half[0].2 > 0.3 && half[0].2 < 0.6, "{half:?}");
+    // 30% from the end, around the wrap (Music -> the last slide): only the arriving slide
+    let late = visible_slides(-0.7, n, Some(n - 1));
+    assert_eq!(late.iter().map(|v| v.0).collect::<Vec<_>>(), [n - 1], "{late:?}");
+    // while dragging (no target) both sides fade alike, so the next slide shows as the finger moves
+    let drag = visible_slides(2.5, n, None);
+    assert_eq!(drag.len(), 2);
+    assert!(drag.iter().all(|&(_, ox, al)| ox.abs() == 24.0 && al > 0.3 && al < 0.6), "{drag:?}");
     // a single slide is always drawn
-    assert_eq!(visible_slides(0.0, 1), vec![(0, 0.0, 1.0)]);
+    assert_eq!(visible_slides(0.0, 1, Some(0)), vec![(0, 0.0, 1.0)]);
+    assert_eq!(visible_slides(0.0, 1, None), vec![(0, 0.0, 1.0)]);
 }
 
 /// The end of a slide change: from Music (a bright cover) one step left, around to the last slide, with the carousel's
-/// spring 6% from where it stops. The slide that left must be gone by then, not a faint cover over the new slide.
+/// spring 30% and 6% from where it stops. The slide that left must be gone by then, not a faint cover over the new slide.
 #[test]
 fn snap_slide_change_end() {
-    for s in SCALES {
+    for (s, left, name) in SCALES.iter().flat_map(|&s| [(s, 0.3, "slide-change-late"), (s, 0.06, "slide-change-end")]) {
         let mut a = test_app(s);
         let mut art = Pixmap::new(88, 88).expect("cover");
         art.fill(Color::from_rgba8(235, 225, 210, 255));
@@ -227,7 +235,7 @@ fn snap_slide_change_end() {
         open_slide(&mut a, last);
         let (w, h) = anim::target(&a);
         (a.w, a.h) = (w, h);
-        a.sp = a.slide as f32 + 0.06;
+        a.sp = a.slide as f32 + left;
         render::draw(&mut a);
         let Some(dir) = std::env::var_os("SNAPSHOT_DIR") else { continue };
         let g = a.gfx.as_ref().expect("gfx");
@@ -235,7 +243,7 @@ fn snap_slide_change_end() {
         out.fill(Color::from_rgba8(118, 124, 134, 255));
         out.draw_pixmap(0, 0, g.pm.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
         std::fs::create_dir_all(&dir).expect("create snapshot folder");
-        out.save_png(std::path::Path::new(&dir).join(format!("slide-change-end@{}.png", (s * 100.0).round() as u32))).expect("save png");
+        out.save_png(std::path::Path::new(&dir).join(format!("{name}@{}.png", (s * 100.0).round() as u32))).expect("save png");
     }
 }
 
