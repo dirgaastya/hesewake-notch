@@ -21,6 +21,17 @@ pub(crate) const MW: f32 = RX - MX; // kolom teks/kontrol sampai tepi kanan (blo
 pub(crate) const MCX: f32 = MX + MW / 2.0;
 pub(crate) const MCY: f32 = 128.0;
 
+/// How long a playback button's press animation runs.
+const PRESS_SECS: f32 = 0.45;
+
+/// The playback buttons, for their press animation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum MediaBtn {
+    Prev,
+    Play,
+    Next,
+}
+
 #[derive(Clone, Default, PartialEq)]
 pub(crate) struct Media {
     pub(crate) title: String,
@@ -797,6 +808,52 @@ impl App {
         g.txtb(&txt, x + w - 12.0 - tw, y + h / 2.0 - 7.0, 12.0, [255, 255, 255], a, 48.0);
     }
 
+    /// The playback button under (x, y) on the Music slide.
+    pub(crate) fn media_btn_at(x: f32, y: f32) -> Option<MediaBtn> {
+        let d = |px: f32| ((x - px).powi(2) + (y - MCY).powi(2)).sqrt();
+        if d(MCX - 56.0) < 17.0 {
+            Some(MediaBtn::Prev)
+        } else if d(MCX) < 19.0 {
+            Some(MediaBtn::Play)
+        } else if d(MCX + 56.0) < 17.0 {
+            Some(MediaBtn::Next)
+        } else {
+            None
+        }
+    }
+
+    /// A click on a playback button (Music slide or lyrics view): send the command and start its press animation.
+    pub(crate) fn media_press(&mut self, b: MediaBtn) {
+        let _ = self.tx.send(match b {
+            MediaBtn::Prev => Cmd::Prev,
+            MediaBtn::Play => Cmd::Toggle,
+            MediaBtn::Next => Cmd::Next,
+        });
+        self.btn_press = Some((b, Instant::now()));
+    }
+
+    fn press_t(&self, b: MediaBtn) -> Option<f32> {
+        self.btn_press.filter(|p| p.0 == b).map(|p| p.1.elapsed().as_secs_f32()).filter(|&t| t < PRESS_SECS)
+    }
+
+    /// Size factor of a playback button: dips to 80% when pressed and springs back with a small overshoot.
+    pub(crate) fn press_scale(&self, b: MediaBtn) -> f32 {
+        self.press_t(b).map_or(1.0, |t| 1.0 - 0.2 * (-t * 7.0).exp() * (t * 14.0).cos())
+    }
+
+    /// A soft halo around a pressed playback button, growing as it fades out (wider than the round play button).
+    pub(crate) fn press_halo(&self, g: &mut Gfx, b: MediaBtn, x: f32, y: f32, al: f32) {
+        if let Some(t) = self.press_t(b) {
+            let f = 1.0 - t / PRESS_SECS;
+            let r0 = if b == MediaBtn::Play { 20.0 } else { 15.0 };
+            g.circle(x, y, r0 + 7.0 * (1.0 - f), &paint(255, 255, 255, 0.18 * f * al));
+        }
+    }
+
+    pub(crate) fn press_animating(&self) -> bool {
+        self.btn_press.is_some_and(|p| p.1.elapsed().as_secs_f32() < PRESS_SECS)
+    }
+
     pub(crate) fn slide_music(&self, g: &mut Gfx, ox: f32, al: f32) {
         if self.lyric_mode {
             self.slide_music_lyrics(g, ox, al);
@@ -856,18 +913,24 @@ impl App {
         }
         let white = paint(255, 255, 255, al);
         let px = cx - 56.0;
-        g.poly(&[(px + 6.0, cy - 7.0), (px + 6.0, cy + 7.0), (px - 6.0, cy)], &white);
-        g.rect(px - 9.0, cy - 7.0, 2.5, 14.0, &white);
+        self.press_halo(g, MediaBtn::Prev, px, cy, al);
+        let k = self.press_scale(MediaBtn::Prev);
+        g.poly(&[(px + 6.0 * k, cy - 7.0 * k), (px + 6.0 * k, cy + 7.0 * k), (px - 6.0 * k, cy)], &white);
+        g.rect(px - 9.0 * k, cy - 7.0 * k, 2.5 * k, 14.0 * k, &white);
         let nx = cx + 56.0;
-        g.poly(&[(nx - 6.0, cy - 7.0), (nx - 6.0, cy + 7.0), (nx + 6.0, cy)], &white);
-        g.rect(nx + 6.5, cy - 7.0, 2.5, 14.0, &white);
-        g.circle(cx, cy, 17.0, &white);
+        self.press_halo(g, MediaBtn::Next, nx, cy, al);
+        let k = self.press_scale(MediaBtn::Next);
+        g.poly(&[(nx - 6.0 * k, cy - 7.0 * k), (nx - 6.0 * k, cy + 7.0 * k), (nx + 6.0 * k, cy)], &white);
+        g.rect(nx + 6.5 * k, cy - 7.0 * k, 2.5 * k, 14.0 * k, &white);
+        self.press_halo(g, MediaBtn::Play, cx, cy, al);
+        let k = self.press_scale(MediaBtn::Play);
+        g.circle(cx, cy, 17.0 * k, &white);
         let blk = paint(0, 0, 0, al);
         if self.media.playing {
-            g.rect(cx - 6.0, cy - 7.0, 4.0, 14.0, &blk);
-            g.rect(cx + 2.0, cy - 7.0, 4.0, 14.0, &blk);
+            g.rect(cx - 6.0 * k, cy - 7.0 * k, 4.0 * k, 14.0 * k, &blk);
+            g.rect(cx + 2.0 * k, cy - 7.0 * k, 4.0 * k, 14.0 * k, &blk);
         } else {
-            g.poly(&[(cx - 4.0, cy - 8.0), (cx - 4.0, cy + 8.0), (cx + 8.0, cy)], &blk);
+            g.poly(&[(cx - 4.0 * k, cy - 8.0 * k), (cx - 4.0 * k, cy + 8.0 * k), (cx + 8.0 * k, cy)], &blk);
         }
         self.draw_out_button(g, ox, al);
         // the newer of the two overlays (volume, or the output device after a switch)
