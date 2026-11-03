@@ -96,6 +96,10 @@ unsafe fn poll(a: &mut App) {
     if a.tick_n % 5 == 0 && a.ext_tick() {
         redraw = true;
     }
+    // an extension hears when its slide comes into view or leaves it
+    if a.ext_visible_sync() {
+        redraw = true;
+    }
     if a.tick_n % 5 == 0 && a.monitor_follow() {
         redraw = true;
     }
