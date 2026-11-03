@@ -194,6 +194,24 @@ fn shot(name: &str, s: f32, setup: impl FnOnce(&mut App)) {
 
 const SCALES: [f32; 2] = [1.0, 1.5];
 
+#[test]
+fn a_slide_that_left_is_gone_before_the_spring_stops() {
+    let n = 12;
+    // at rest: only the slide shown, fully
+    assert_eq!(visible_slides(3.0, n), vec![(3, 0.0, 1.0)]);
+    // halfway: both, shifted to their sides, neither at full strength
+    let half = visible_slides(2.5, n);
+    assert_eq!(half.len(), 2);
+    assert!(half.iter().all(|&(_, ox, al)| ox.abs() == 24.0 && al > 0.3 && al < 0.6), "{half:?}");
+    // the spring's tail, 6% from the end and around the wrap (Music -> the last slide): the slide that left is not drawn
+    let tail = visible_slides(-0.94, n);
+    assert_eq!(tail.len(), 1, "{tail:?}");
+    assert_eq!(tail[0].0, n - 1);
+    assert!(tail[0].2 > 0.98);
+    // a single slide is always drawn
+    assert_eq!(visible_slides(0.0, 1), vec![(0, 0.0, 1.0)]);
+}
+
 /// The end of a slide change: from Music (a bright cover) one step left, around to the last slide, with the carousel's
 /// spring 6% from where it stops. The slide that left must be gone by then, not a faint cover over the new slide.
 #[test]

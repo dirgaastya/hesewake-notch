@@ -7,6 +7,24 @@ pub(crate) fn cyc(d: f32, n: usize) -> f32 {
     d - n * (d / n).round()
 }
 
+/// A slide with less than this share of the carousel is not drawn. The carousel's spring comes to rest slowly, so a
+/// plain linear fade kept a faint copy of the slide that left (an album cover over an empty slide, for example) on
+/// screen for a moment after the move looked finished.
+const FADE_GONE: f32 = 0.08;
+
+/// The slides seen at carousel position `pos` of `n`: (index, horizontal shift, opacity). The one leaving fades out
+/// completely before the spring stops; the one arriving is fully there before it does.
+pub(crate) fn visible_slides(pos: f32, n: usize) -> Vec<(usize, f32, f32)> {
+    (0..n)
+        .filter_map(|i| {
+            let d = cyc(i as f32 - pos, n);
+            let t = ((1.0 - d.abs() - FADE_GONE) / (1.0 - FADE_GONE)).clamp(0.0, 1.0);
+            let al = t * t * (3.0 - 2.0 * t);
+            (al > 0.0).then_some((i, d * 48.0, al))
+        })
+        .collect()
+}
+
 pub(crate) fn dot_x(i: usize, n: usize) -> f32 {
     CX + (i as f32 - (n as f32 - 1.0) / 2.0) * 14.0
 }
