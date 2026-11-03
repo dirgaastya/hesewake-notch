@@ -4,6 +4,16 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/), versi mengikut
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-03
+
+Rilis ini berisi kontribusi dari @gewall (PR #59).
+
+### Added
+- **Klik notifikasi membuka aplikasinya** (PR #59, menutup #58): klik toast notifikasi atau baris di slide Notifications membuka aplikasi asalnya, langsung ke isinya bila aplikasi mengizinkan (mis. halaman dari notifikasi Chrome atau Edge). Langkahnya dibaca dari payload toast dan dicoba berurutan: tautan `protocol` (skema yang bisa menjalankan berkas atau perintah ditolak), activator COM aplikasi (hanya sebagai local server, tidak ada DLL aplikasi lain yang dimuat ke proses notch), lalu membuka aplikasinya lewat AppUserModelId. Hanya tombol x di ujung kanan baris yang menghapus notifikasi. Bila aplikasi gagal dibuka, notifikasi tetap di daftar dan muncul toast "Couldn't open app". Klik pertama pada aplikasi tertentu bisa terasa sedikit tertunda karena notch memindai shortcut Start Menu sekali untuk mencari activator-nya.
+
+### Changed
+- Mengarahkan kursor ke toast notifikasi tidak lagi membuka notch, supaya toast-nya bisa diklik.
+
 ## [0.13.0] - 2026-11-02
 
 ### Added
