@@ -362,6 +362,33 @@ pub(crate) enum OutlineIcon {
 }
 
 /// Outline icons in a unit box (-1..1 on both axes), drawn with round caps.
+/// Outline of a crescent, in the pen's -1..1 box: the moon's outer arc from tip to tip, then back along the edge of the
+/// shadow, a second circle that crosses the moon exactly at the two tips. The shadow sits up and to the right.
+fn crescent_outline() -> Vec<(f32, f32)> {
+    use std::f32::consts::TAU;
+    const R: f32 = 0.86; // the moon
+    const SHADOW_R: f32 = 0.7;
+    const SHADOW_D: f32 = 0.48; // from the moon's centre to the shadow's
+    const TILT: f32 = -0.5;
+    // where the two circles cross, measured along the line through their centres
+    let along = (SHADOW_D * SHADOW_D + R * R - SHADOW_R * SHADOW_R) / (2.0 * SHADOW_D);
+    let across = (R * R - along * along).sqrt();
+    let tip = across.atan2(along);
+    let shadow_tip = across.atan2(along - SHADOW_D);
+    let (sx, sy) = (TILT.cos() * SHADOW_D, TILT.sin() * SHADOW_D);
+    let mut pts = Vec::new();
+    for i in 0..=32 {
+        let a = TILT + tip + (TAU - 2.0 * tip) * i as f32 / 32.0;
+        pts.push((a.cos() * R, a.sin() * R));
+    }
+    // the first and last points of this arc are the tips, already in the list
+    for i in 1..24 {
+        let a = TILT + TAU - shadow_tip - (TAU - 2.0 * shadow_tip) * i as f32 / 24.0;
+        pts.push((sx + a.cos() * SHADOW_R, sy + a.sin() * SHADOW_R));
+    }
+    pts
+}
+
 struct Pen<'a, 'p> {
     g: &'a mut Gfx,
     cx: f32,
@@ -567,18 +594,25 @@ impl Gfx {
                 pen.polyline(&[(0.0, -0.38), (0.0, 0.38)], false);
             }
             SlideId::Prayer => {
-                // a crescent: the outer arc of the moon, back along the edge of the shadow
-                let mut pts = Vec::new();
-                for i in 0..=14 {
-                    let a = 0.95 + (std::f32::consts::TAU - 1.9) * i as f32 / 14.0;
-                    pts.push((a.cos() * 0.86, a.sin() * 0.86));
-                }
-                for i in 0..=10 {
-                    let a = std::f32::consts::PI + 0.55 - (1.1 + std::f32::consts::PI) * i as f32 / 10.0;
-                    pts.push((0.42 + a.cos() * 0.62, -0.22 + a.sin() * 0.62));
-                }
-                pen.polyline(&pts, true);
+                pen.polyline(&crescent_outline(), true);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::crescent_outline;
+
+    /// The outline runs in small even steps all the way round: no jump across the moon, also where the arcs meet.
+    #[test]
+    fn crescent_outline_is_one_unbroken_line() {
+        let pts = crescent_outline();
+        for (i, p) in pts.iter().enumerate() {
+            let q = pts[(i + 1) % pts.len()];
+            let step = ((p.0 - q.0).powi(2) + (p.1 - q.1).powi(2)).sqrt();
+            assert!(step < 0.2, "gap of {step} after point {i}");
+            assert!(p.0.abs() <= 0.87 && p.1.abs() <= 0.87, "outside the icon box: {p:?}");
         }
     }
 }
