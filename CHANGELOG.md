@@ -4,6 +4,18 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/), versi mengikut
 
 ## [Unreleased]
 
+## [0.13.5] - 2026-11-03
+
+Rilis ini berisi kontribusi dari @yourLogic01 (PR #65).
+
+### Added
+- **Umpan balik saat tombol musik diklik** (PR #65, menutup #63): tombol sebelumnya, putar/jeda, dan berikutnya mengecil sedikit lalu memantul kembali dengan halo putih yang memudar, di slide Music dan di tampilan lirik. Hanya tombol yang diklik yang beranimasi, dan perintahnya tetap dikirim seperti biasa.
+- **Background glow** (Settings > Appearance, menyala secara default): bila dimatikan, notch yang terbuka tetap hitam polos tanpa cahaya warna. Gambar Wibu mode tetap tampil.
+- **Song in the notch** (Settings > Music & lyrics, menyala secara default): bila dimatikan, notch kecil tetap diam (jam atau mata) saat lagu diputar, dan lirik hanya tampil bila dinyalakan lewat tombol lirik. Kedua pengaturan berlaku langsung dan tersimpan setelah restart.
+
+### Fixed
+- **Ikon Prayer** di Settings > Slides digambar ulang sebagai satu bulan sabit utuh; sebelumnya dua busurnya tidak bertemu di ujung.
+
 ## [0.13.4] - 2026-11-03
 
 ### Changed
