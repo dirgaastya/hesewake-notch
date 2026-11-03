@@ -1654,7 +1654,8 @@ impl Draw {
         }
         // text on the left, the matrix (a QR code) on the right when there is one
         let qr = d.matrix.as_ref().map(|m| {
-            let px = (176 / (m.size + 8)).max(2) as f32;
+            // large enough for a phone camera: about 250 px on a side, in whole modules (a version 9 code gets 4 px per module)
+            let px = (260 / (m.size + 8)).max(2) as f32;
             (m, px, (m.size + 8) as f32 * px)
         });
         let text_w = X1 - X0 - 40.0 - qr.map_or(0.0, |q| q.2 + 20.0);
