@@ -4,6 +4,11 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/), versi mengikut
 
 ## [Unreleased]
 
+## [0.13.4] - 2026-11-03
+
+### Changed
+- **Kode QR di halaman extension lebih besar**: kode pairing (mis. Media Bridge) kini sekitar 250 px di sisinya, bukan sekitar 120 px, supaya kamera ponsel mudah mendeteksinya.
+
 ## [0.13.3] - 2026-11-03
 
 Rilis ini berisi kontribusi dari @MaulanaRhezaArdiansyah (PR #64).
