@@ -377,6 +377,7 @@ impl App {
                             Ctl::Seg((0..settings::IDLE_DISPLAY_LABELS.len()).map(|i| settings::idle_display_label(i).to_string()).collect(), false),
                         ),
                         toggle(Rid::Minimal, tr("Minimal notch"), tr("Thin line while idle")),
+                        toggle(Rid::Glow, tr("Background glow"), tr("Off: plain black")),
                     ],
                 ),
                 ("Wibu", {
@@ -397,6 +398,7 @@ impl App {
             ],
             Sec::Music => {
                 let mut rows = vec![
+                    toggle(Rid::NotchSong, tr("Song in the notch"), tr("Off: idle, lyrics only from the lyrics button")),
                     row(Rid::LyricTiming, tr("Lyric timing"), tr("Show earlier by"), Ctl::Stepper(format!("{:+} ms", self.cfg.lyric_lead_ms))),
                     toggle(Rid::Romaji, tr("Romanize lyrics"), tr("Japanese and Korean")),
                 ];

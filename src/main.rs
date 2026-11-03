@@ -299,6 +299,8 @@ struct App {
     dl_seen: bool,
     /// Indikator volume di slide Music setelah scroll: waktu terakhir dan (persen, bisu).
     vol_t: Instant,
+    /// The last press on a playback button and when (press animation, music.rs).
+    btn_press: Option<(music::MediaBtn, Instant)>,
     /// Peristiwa kecerahan pertama (saat pendaftaran) hanya dicatat, tidak ditampilkan.
     bright_seen: bool,
     vol_state: (u8, bool),
@@ -347,12 +349,22 @@ impl App {
     }
 
     fn idle(&self) -> bool {
-        !self.expanded() && !self.thin() && !self.media.playing
+        !self.expanded() && !self.thin() && !self.now_playing_bar()
+    }
+
+    /// The small notch shows the playing song (artwork, title / lyrics, equalizer). With "Song in the notch" off it
+    /// stays idle (clock / eyes) instead, except for the lyrics while the lyrics view is open.
+    fn now_playing_bar(&self) -> bool {
+        if self.cfg.notch_song {
+            self.media.playing
+        } else {
+            self.lyric_mode && self.lyric_synced()
+        }
     }
 
     /// Notch menyusut jadi garis tipis: app penuh layar/Adobe (busy) atau mode Minimal saat tidak ada musik.
     fn thin(&self) -> bool {
-        self.busy || self.dodging || (self.minimal && !self.media.playing)
+        self.busy || self.dodging || (self.minimal && !self.now_playing_bar())
     }
 
     fn ready(&self) -> bool {
@@ -681,6 +693,7 @@ fn main() -> Result<()> {
             vol_t: Instant::now() - Duration::from_secs(10),
             bright_seen: false,
             vol_state: (0, false),
+            btn_press: None,
             outs: output::Outputs::default(),
             out_open: false,
             out_scroll: 0,

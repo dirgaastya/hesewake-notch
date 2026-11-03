@@ -4,6 +4,7 @@
 use super::*;
 use gfx::wrap_lines_ex;
 use lyrics::Lyrics;
+use music::MediaBtn;
 
 const ART_SZ: f32 = 64.0;
 pub(crate) const LM_CY: f32 = 132.0;
@@ -172,13 +173,17 @@ impl App {
         let white = paint(255, 255, 255, a);
         let dim = paint(255, 255, 255, 0.85 * a);
         g.icon_bubble(X_BUBBLE + ox, LM_CY, 17.0, &white, &paint(12, 20, 40, a));
-        g.icon_prev(X_PREV + ox, LM_CY, 9.0, &dim);
+        self.press_halo(g, MediaBtn::Prev, X_PREV + ox, LM_CY, a);
+        g.icon_prev(X_PREV + ox, LM_CY, 9.0 * self.press_scale(MediaBtn::Prev), &dim);
+        self.press_halo(g, MediaBtn::Play, X_PLAY + ox, LM_CY, a);
+        let k = self.press_scale(MediaBtn::Play);
         if self.media.playing {
-            g.icon_pause(X_PLAY + ox, LM_CY, 17.0, &white);
+            g.icon_pause(X_PLAY + ox, LM_CY, 17.0 * k, &white);
         } else {
-            g.icon_play(X_PLAY + ox, LM_CY, 17.0, &white);
+            g.icon_play(X_PLAY + ox, LM_CY, 17.0 * k, &white);
         }
-        g.icon_next(X_NEXT + ox, LM_CY, 9.0, &dim);
+        self.press_halo(g, MediaBtn::Next, X_NEXT + ox, LM_CY, a);
+        g.icon_next(X_NEXT + ox, LM_CY, 9.0 * self.press_scale(MediaBtn::Next), &dim);
 
         // ---- panel kanan
         g.rect(DIV_X + ox, 22.0, 1.0, 128.0, &paint(255, 255, 255, 0.12 * a));
@@ -227,11 +232,11 @@ impl App {
         } else if d(X_PIN, Y_PIN) < 12.0 {
             self.pinned = !self.pinned;
         } else if d(X_PREV, LM_CY) < 16.0 {
-            let _ = self.tx.send(Cmd::Prev);
+            self.media_press(MediaBtn::Prev);
         } else if d(X_PLAY, LM_CY) < 18.0 {
-            let _ = self.tx.send(Cmd::Toggle);
+            self.media_press(MediaBtn::Play);
         } else if d(X_NEXT, LM_CY) < 16.0 {
-            let _ = self.tx.send(Cmd::Next);
+            self.media_press(MediaBtn::Next);
         } else if let (Lyrics::Synced(_, src), true) = (&self.lyrics, in_rect(x, y, RX - CREDIT_W, CREDIT_Y - 3.0, CREDIT_W, 16.0)) {
             sys::open_url(src.url());
         } else if self.media.dur > 0 && in_rect(x, y, BAR.0, BAR.1 - 8.0, BAR.2, 20.0) {

@@ -147,6 +147,7 @@ fn test_app(s: f32) -> App {
         vol_t: past,
         bright_seen: false,
         vol_state: (0, false),
+        btn_press: None,
         outs: output::Outputs::default(),
         out_open: false,
         out_scroll: 0,
@@ -2226,6 +2227,8 @@ fn settings_window_changes_apply_right_away() {
     assert_eq!(a.cfg.idle_display, 2);
     assert!(a.idle_phase() == IdlePhase::Eye, "eyes right away");
     assert!(settingswin::hit_center(&a, Hit::Pick(Rid::NotchSize, 5)).is_some(), "200%");
+    sw_press(&mut a, Hit::Press(Rid::Glow));
+    assert!(!a.cfg.glow, "the glow was on by default");
 
     let mut a = sw_shot("settingswin-test-screens", page(SCREENS));
     sw_press(&mut a, Hit::Press(Rid::ThinMaximized));
@@ -2240,6 +2243,8 @@ fn settings_window_changes_apply_right_away() {
     assert!(settingswin::hit_center(&a, Hit::Press(Rid::Autostart)).is_some());
 
     let mut a = sw_shot("settingswin-test-music", page(MUSIC));
+    sw_press(&mut a, Hit::Press(Rid::NotchSong));
+    assert!(!a.cfg.notch_song, "the song in the notch was on by default");
     sw_press(&mut a, Hit::Step(Rid::LyricTiming, true));
     assert_eq!(a.cfg.lyric_lead_ms, settings::Settings::default().lyric_lead_ms + settings::LEAD_STEP);
     sw_press(&mut a, Hit::Press(Rid::Romaji));
@@ -3324,4 +3329,76 @@ fn removing_the_extension_whose_panel_is_open_closes_the_panel() {
     settingswin::render(&mut a);
     assert!(settingswin::hit_center(&a, Hit::ExtScan).is_some(), "the list is showing");
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A click on a playback button dips only that button and draws a halo, then everything is back to rest.
+#[test]
+fn media_buttons_answer_a_click() {
+    use music::MediaBtn::{Next, Play, Prev};
+    assert_eq!(App::media_btn_at(MCX - 56.0, MCY), Some(Prev));
+    assert_eq!(App::media_btn_at(MCX, MCY), Some(Play));
+    assert_eq!(App::media_btn_at(MCX + 56.0, MCY), Some(Next));
+    assert_eq!(App::media_btn_at(MCX + 28.0, MCY), None, "between two buttons");
+
+    let mut a = test_app(1.0);
+    assert_eq!(a.press_scale(Play), 1.0);
+    assert!(!a.press_animating());
+    a.media_press(Play);
+    assert!(a.press_animating());
+    assert!(a.press_scale(Play) < 0.9, "dips right after the press");
+    assert_eq!(a.press_scale(Next), 1.0, "only the pressed button");
+    a.btn_press = Some((Play, Instant::now() - Duration::from_secs(1)));
+    assert!(!a.press_animating());
+    assert_eq!(a.press_scale(Play), 1.0, "back to rest");
+
+    // 30 ms after the click: the dip and the halo
+    let pressed = |a: &mut App, b| {
+        a.media.playing = true;
+        a.media.title = "Eiyu".into();
+        a.media.artist = "Endoh Masaaki - Topic".into();
+        a.media.dur = 236;
+        a.media.pos = 35;
+        open_slide(a, SlideId::Music);
+        a.btn_press = Some((b, Instant::now() - Duration::from_millis(30)));
+    };
+    shot("music-play-pressed", 1.5, |a| pressed(a, Play));
+    shot("music-next-pressed", 1.5, |a| pressed(a, Next));
+}
+
+/// "Background glow" off: the open notch stays plain black at the bottom.
+#[test]
+fn glow_off_keeps_the_notch_black() {
+    let bottom = |on: bool| {
+        let mut a = test_app(1.0);
+        a.cfg.glow = on;
+        open_slide(&mut a, SlideId::Todo);
+        (a.w, a.h) = (EXP_W, EXP_H);
+        a.sp = a.slide as f32;
+        render::draw(&mut a);
+        let px = a.gfx.as_ref().unwrap().pm.pixel((CL + 8.0) as u32, (EXP_H - 40.0) as u32).unwrap();
+        px.red() as u32 + px.green() as u32 + px.blue() as u32
+    };
+    assert_eq!(bottom(false), 0);
+    assert!(bottom(true) > 0);
+}
+
+#[test]
+fn notch_song_off_keeps_the_small_notch_idle() {
+    let mut a = test_app(1.0);
+    a.media.playing = true;
+    a.media.title = "Eiyu".into();
+    assert!(a.now_playing_bar(), "on (default): the song in the small notch");
+    assert!(anim::target(&a).0 >= PLAYING.0);
+    a.cfg.notch_song = false;
+    assert!(!a.now_playing_bar());
+    assert!(anim::target(&a).0 < PLAYING.0, "idle while music plays");
+    a.lyrics = lyrics::Lyrics::Synced(vec![lyrics::LyricLine { at_ms: 0, text: "daiji na koto wa".into(), roma: String::new() }], lyrics::Source::LrcRed);
+    assert!(!a.now_playing_bar(), "lyrics found, but the lyrics view is closed");
+    a.lyric_mode = true;
+    assert!(a.now_playing_bar(), "the lyrics view is open: the line shows in the small notch");
+    shot("playing-song-off", 1.0, |a| {
+        a.media.playing = true;
+        a.media.title = "Eiyu".into();
+        a.cfg.notch_song = false;
+    });
 }

@@ -10,11 +10,11 @@ pub(crate) fn target(a: &App) -> (f32, f32) {
         a.toast_size()
     } else if a.thin() {
         THIN
-    } else if a.media.playing && a.lyric_w > 0.0 {
+    } else if a.now_playing_bar() && a.lyric_w > 0.0 {
         // Lebar menyesuaikan baris lirik (ruang teks = lebar - 88 px untuk ikon dan equalizer, + lonceng).
         let extra = a.bell_extra() + a.priv_extra() + a.prayer_play_extra();
         ((a.lyric_w + 88.0 + 16.0 + extra).clamp(PLAYING.0 + extra, EXP_W), PLAYING.1)
-    } else if a.media.playing {
+    } else if a.now_playing_bar() {
         (PLAYING.0 + a.bell_extra() + a.priv_extra() + a.prayer_play_extra(), PLAYING.1)
     } else {
         (IDLE.0 + a.priv_extra() + a.timer_extra() + a.prayer_idle_extra(), IDLE.1)
@@ -42,15 +42,15 @@ pub(crate) unsafe fn schedule(a: &mut App) {
         0
     } else if pulsing {
         16
-    } else if !settled(a) || a.lyric_fading() || a.art_fading() || a.toast.is_some() || a.water_animating() || a.lyric_scroll_animating() || a.bell_animating() || a.notif_ui_animating() || a.privacy_animating() || a.vol_overlay_active() || a.sys_animating() || a.timer_animating() || a.clip_animating() {
+    } else if !settled(a) || a.lyric_fading() || a.art_fading() || a.toast.is_some() || a.water_animating() || a.lyric_scroll_animating() || a.bell_animating() || a.notif_ui_animating() || a.privacy_animating() || a.vol_overlay_active() || a.press_animating() || a.sys_animating() || a.timer_animating() || a.clip_animating() {
         16
     } else if let Some(ms) = Some(a.weather_frame_ms(sys::input_idle_secs())).filter(|&ms| ms > 0) {
         ms // the weather slot: 16 ms while it changes, 20 fps while a moving icon shows
     } else if a.expanded() && a.is_slide(SlideId::Music) && a.tint.animating() {
         16 // artwork colour cross-fade on the Music slide
-    } else if a.media.playing && !a.expanded() && !a.busy {
+    } else if a.now_playing_bar() && !a.expanded() && !a.busy {
         33
-    } else if a.splash_t().is_some() && !a.media.playing {
+    } else if a.splash_t().is_some() && !a.now_playing_bar() {
         a.eye.frame_ms(0.0)
     } else if a.idle() && a.idle_phase() == IdlePhase::Eye {
         // 60 fps while blinking / glancing, ~12 fps at rest, nothing while nobody is at the computer
@@ -267,7 +267,7 @@ unsafe fn poll(a: &mut App) {
     if expanded && (cur == 0 || cur == 2) && st.wMinute != a.last_min {
         redraw = true;
     }
-    if !expanded && !a.thin() && !a.media.playing && cur_phase == IdlePhase::Clock && st.wMinute != a.last_min {
+    if !expanded && !a.thin() && !a.now_playing_bar() && cur_phase == IdlePhase::Clock && st.wMinute != a.last_min {
         redraw = true;
     }
     // Minute change: prayer schedule (toast when a prayer time starts, countdown ticks down).
@@ -330,7 +330,7 @@ pub(crate) unsafe fn tick(id: usize) {
         a.notif_ui_step();
 
         // Only advance the eye once the notch is back to its small size, so the pop-open is actually seen.
-        let eye_on = (a.splash_t().is_some() && !a.media.playing) || (a.idle() && a.idle_phase() == IdlePhase::Eye);
+        let eye_on = (a.splash_t().is_some() && !a.now_playing_bar()) || (a.idle() && a.idle_phase() == IdlePhase::Eye);
         if eye_on && a.h < IDLE.1 + 10.0 {
             a.eye.update(clock_dt);
         }

@@ -56,12 +56,11 @@ pub(crate) unsafe fn click(x: f32, y: f32) {
                     a.last = Instant::now();
                     present(a);
                     schedule(a);
-                } else if d(MCX - 56.0, MCY) < 17.0 {
-                    let _ = a.tx.send(Cmd::Prev);
-                } else if d(MCX, MCY) < 19.0 {
-                    let _ = a.tx.send(Cmd::Toggle);
-                } else if d(MCX + 56.0, MCY) < 17.0 {
-                    let _ = a.tx.send(Cmd::Next);
+                } else if let Some(b) = App::media_btn_at(x, y) {
+                    a.media_press(b);
+                    a.last = Instant::now();
+                    present(a);
+                    schedule(a);
                 } else if a.media.dur > 0 && in_rect(x, y, MX, 88.0, MW, 16.0) {
                     let _ = a.tx.send(Cmd::Seek(((x - MX) / MW).clamp(0.0, 1.0)));
                 }

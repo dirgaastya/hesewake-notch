@@ -45,6 +45,11 @@ pub(crate) struct Settings {
     pub(crate) monitor: usize,
     /// Indeks di `weather::CITIES`.
     pub(crate) weather_city: usize,
+    /// Colour glow at the bottom of the open notch (artwork colours on Music, the accent elsewhere). Off: plain black.
+    pub(crate) glow: bool,
+    /// The small notch shows the playing song (artwork, title or lyrics). Off: it stays idle (clock / eyes) while music
+    /// plays, and shows lyrics only while the lyrics view is open.
+    pub(crate) notch_song: bool,
     /// Prayer times: 15-minute countdown + a toast when the prayer starts (city = weather city).
     pub(crate) prayer_on: bool,
     /// Imsak and Terbit in the prayer list.
@@ -110,6 +115,8 @@ impl Default for Settings {
             weather_on: true,
             monitor: 0,
             weather_city: 0,
+            glow: true,
+            notch_song: true,
             prayer_on: true,
             imsak_terbit: true,
             ramadan: false,
@@ -153,6 +160,8 @@ impl Settings {
                 "hud_volume" => s.hud_volume = flag,
                 "hud_brightness" => s.hud_brightness = flag,
                 "weather" => s.weather_on = flag,
+                "glow" => s.glow = flag,
+                "notch_song" => s.notch_song = flag,
                 "prayer" => s.prayer_on = flag,
                 "imsak_terbit" => s.imsak_terbit = flag,
                 "ramadan" => s.ramadan = flag,
@@ -216,7 +225,7 @@ impl Settings {
 
     pub(crate) fn serialize(&self) -> String {
         format!(
-            "minimal={}\nnotifications={}\nbusy_on_maximized={}\nlyric_lead_ms={}\nromaji_lyrics={}\nnotif_avatar={}\nlock_toast={}\nprivacy_dot={}\nslide_hotkeys={}\nmic_hotkey={}\ndownloads={}\nhud_volume={}\nhud_brightness={}\nweather={}\nweather_city={}\nprayer={}\nimsak_terbit={}\nramadan={}\nadhan={}\nadhan_file={}\nwibu={}\nwibu_file={}\nwibu_dim={}\next_on={}\next_mute={}\nmonitor={}\nnotch_size={}\nidle_display={}\naccent={}\nlang={}\nupdate_check={}\nupdate_seen={}\nslides={}\n",
+            "minimal={}\nnotifications={}\nbusy_on_maximized={}\nlyric_lead_ms={}\nromaji_lyrics={}\nnotif_avatar={}\nlock_toast={}\nprivacy_dot={}\nslide_hotkeys={}\nmic_hotkey={}\ndownloads={}\nhud_volume={}\nhud_brightness={}\nweather={}\nweather_city={}\nglow={}\nnotch_song={}\nprayer={}\nimsak_terbit={}\nramadan={}\nadhan={}\nadhan_file={}\nwibu={}\nwibu_file={}\nwibu_dim={}\next_on={}\next_mute={}\nmonitor={}\nnotch_size={}\nidle_display={}\naccent={}\nlang={}\nupdate_check={}\nupdate_seen={}\nslides={}\n",
             self.minimal as u8,
             self.notifications as u8,
             self.busy_on_maximized as u8,
@@ -232,6 +241,8 @@ impl Settings {
             self.hud_brightness as u8,
             self.weather_on as u8,
             self.weather_city,
+            self.glow as u8,
+            self.notch_song as u8,
             self.prayer_on as u8,
             self.imsak_terbit as u8,
             self.ramadan as u8,
@@ -355,6 +366,17 @@ mod tests {
         let mut s = Settings::default();
         s.downloads = false;
         assert!(!Settings::parse(&s.serialize()).downloads);
+    }
+
+    #[test]
+    fn glow_and_notch_song_roundtrip_and_default_on() {
+        let s = Settings::parse("minimal=0\n");
+        assert!(s.glow && s.notch_song, "old file = as before");
+        let mut s = Settings::default();
+        s.glow = false;
+        s.notch_song = false;
+        let back = Settings::parse(&s.serialize());
+        assert!(!back.glow && !back.notch_song);
     }
 
     #[test]

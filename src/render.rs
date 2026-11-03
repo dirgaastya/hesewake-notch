@@ -150,7 +150,8 @@ pub(crate) fn draw(a: &mut App) {
         let n = a.n_slides();
         let to = (a.drag_dx == 0.0).then(|| a.slide.rem_euclid(n as i32) as usize);
         let vis: Vec<(usize, f32, f32)> = visible_slides(pos, n, to).into_iter().map(|(i, ox, al)| (i, ox, al * p)).collect();
-        for &(i, _, al) in &vis {
+        let glow_on = a.cfg.glow;
+        for &(i, _, al) in vis.iter().filter(|_| glow_on) {
             match a.order[i] {
                 SlideId::Music => a.music_glow(&mut g, &shape, w, h, al),
                 // Other slides: one glow color (derived from the accent) so the slides feel consistent.
@@ -258,7 +259,7 @@ impl App {
     fn draw_collapsed(&self, g: &mut Gfx, w: f32, h: f32, ca: f32) {
         if self.toast.is_some() {
             self.draw_toast(g, w, h, ca);
-        } else if self.media.playing {
+        } else if self.now_playing_bar() {
             let x0 = CX - w / 2.0;
             self.collapsed_cover(g, x0 + 14.0, (h - 20.0) / 2.0, 20.0, 5.0, ca);
             for i in 0..4 {
