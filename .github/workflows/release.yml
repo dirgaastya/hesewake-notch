@@ -1,16 +1,20 @@
 name: Release
 
 # A release PR bumps the version in Cargo.toml and adds its "## [X.Y.Z]" entry to CHANGELOG.md. When it is merged, the
-# push to main finds that version untagged, and this workflow tests, builds the exe + installer, creates the release
-# (which also makes the tag), checks the uploaded installer against SHA256SUMS and publishes it as Latest.
-# Every other push to main stops in the first job, after a few seconds.
-# Pushing a version tag by hand still works as before: it builds and leaves a draft to review and publish.
+# push to main finds that version unreleased, and this workflow tests, builds the exe + installer, creates a draft
+# release and checks the uploaded installer against SHA256SUMS. Publishing the draft stays a manual click; that is
+# also when the tag is made, on the merge commit. Every other push to main stops in the first job, after a few seconds.
+# Pushing a version tag by hand still works: it builds the same checked draft for that tag.
 on:
   push:
     branches: [main]
     tags: ["v*"]
 
-# Two quick merges must not release the same version twice.
+# Read-only unless a job asks for more.
+permissions:
+  contents: read
+
+# Two quick merges must not draft the same version twice.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -25,12 +29,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Is there a version to release?
         id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           ver=$(sed -n 's/^version = "\(.*\)"\r\?$/\1/p' Cargo.toml | head -1)
           [ -n "$ver" ] || { echo "::error::No version in Cargo.toml"; exit 1; }
           echo "version=$ver" >> "$GITHUB_OUTPUT"
           if [ "$GITHUB_REF_TYPE" = tag ]; then
             [ "$GITHUB_REF_NAME" = "v$ver" ] || { echo "::error::Tag $GITHUB_REF_NAME does not match the Cargo.toml version ($ver)"; exit 1; }
+            # Publishing a draft makes its tag, and that tag push lands here too: the release is already out.
+            if [ "$(gh release view "v$ver" --json isDraft --jq .isDraft 2> /dev/null)" = false ]; then
+              echo "v$ver is already published: nothing to do."
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             echo "release=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -48,38 +60,58 @@ jobs:
     if: needs.check.outputs.release == 'true'
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: write # create the draft release (and, when it is published, its tag)
     env:
       VERSION: ${{ needs.check.outputs.version }}
       TAG: v${{ needs.check.outputs.version }}
       GH_TOKEN: ${{ github.token }}
-      # A merged release PR publishes; a tag pushed by hand leaves a draft, as before.
-      PUBLISH: ${{ github.ref_type == 'branch' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A draft for this version that waits to be published was built from an earlier merge: a later merge to main must
+      # not rebuild it with changes its notes don't mention. A tag pushed by hand asks for a new draft, so it replaces it.
+      - name: Is a draft already waiting?
+        id: state
+        shell: pwsh
+        run: |
+          $draft = gh release view $env:TAG --json isDraft --jq .isDraft 2>$null
+          if ($draft -ne 'true') { exit 0 }
+          if ($env:GITHUB_REF_TYPE -eq 'branch') {
+            "The draft for $env:TAG is waiting to be published: nothing to do." | Tee-Object -Append $env:GITHUB_STEP_SUMMARY
+            "skip=true" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          gh release delete $env:TAG --yes
+          if ($LASTEXITCODE -ne 0) { throw "Could not replace the existing draft" }
+
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        if: steps.state.outputs.skip != 'true'
         with:
           toolchain: stable
       # No cache: release builds always start from a clean state.
 
-      # The release PR passed CI, but main may have moved since; this build goes straight to users.
+      # The release PR passed CI, but main may have moved since; this build goes to users.
       - name: Test
+        if: steps.state.outputs.skip != 'true'
         shell: pwsh
         env:
           RUSTFLAGS: -C target-feature=+crt-static -D warnings
         run: cargo test --release
 
       - name: Install Inno Setup if missing
+        if: steps.state.outputs.skip != 'true'
         shell: pwsh
         run: |
           $found = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ }
           if (-not $found) { choco install innosetup -y --no-progress }
 
       - name: Build exe + installer
+        if: steps.state.outputs.skip != 'true'
         shell: pwsh
         run: ./scripts/build-installer.ps1
 
       - name: Release notes from CHANGELOG.md
+        if: steps.state.outputs.skip != 'true'
         shell: pwsh
         run: |
           $lines = Get-Content CHANGELOG.md
@@ -91,18 +123,19 @@ jobs:
           $body | Set-Content notes.md
 
       - name: Draft release
+        id: draft
+        if: steps.state.outputs.skip != 'true'
         shell: pwsh
         run: |
           $setup = "installer_output\HesewakeNotch-Setup-$env:VERSION.exe"
           # The app checks the installer against this file before running it (update.rs).
           $hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLower()
           "$hash  HesewakeNotch-Setup-$env:VERSION.exe" | Set-Content -Encoding ascii SHA256SUMS
-          # A draft left by an earlier run of this version that failed after creating it.
-          $draft = gh release view $env:TAG --json isDraft --jq .isDraft 2>$null
-          if ($draft -eq 'true') { gh release delete $env:TAG --yes }
+          # --target: publishing makes the tag on this commit (ignored when the tag already exists).
           gh release create $env:TAG $setup SHA256SUMS --draft --target $env:GITHUB_SHA --title "Hesewake Notch $env:VERSION" --notes-file notes.md
 
       - name: Check the uploaded installer
+        if: steps.state.outputs.skip != 'true'
         shell: pwsh
         run: |
           New-Item -ItemType Directory uploaded | Out-Null
@@ -111,17 +144,11 @@ jobs:
           $want = ((Get-Content uploaded\SHA256SUMS -Raw).Trim() -split '\s+')[0]
           $got = (Get-FileHash -Algorithm SHA256 "uploaded\HesewakeNotch-Setup-$env:VERSION.exe").Hash.ToLower()
           if ($want -ne $got) { throw "The uploaded installer ($got) does not match SHA256SUMS ($want)" }
-          "Installer matches SHA256SUMS: $got"
+          $url = gh release view $env:TAG --json url --jq .url
+          "Draft **$env:TAG** is ready and its installer matches SHA256SUMS (``$got``). Review and publish it as Latest: $url" | Tee-Object -Append $env:GITHUB_STEP_SUMMARY
 
-      - name: Publish as Latest
-        if: env.PUBLISH == 'true'
+      # A draft that failed its check must not wait to be published, and must not stop the next merge from retrying.
+      - name: Remove a draft that failed
+        if: failure() && steps.draft.outcome == 'success'
         shell: pwsh
-        run: |
-          gh release edit $env:TAG --draft=false --latest
-          if ($LASTEXITCODE -ne 0) { throw "Publishing failed" }
-          # The app's update check reads releases/latest and needs both files there.
-          $names = gh api "repos/${{ github.repository }}/releases/latest" --jq '.tag_name + " " + ([.assets[].name] | join(" "))'
-          if ($names -notmatch "^$([regex]::Escape($env:TAG)) " -or $names -notmatch 'SHA256SUMS' -or $names -notmatch "HesewakeNotch-Setup-$([regex]::Escape($env:VERSION))\.exe") {
-            throw "releases/latest does not show $env:TAG with both files: $names"
-          }
-          "Published: $names"
+        run: gh release delete $env:TAG --yes
