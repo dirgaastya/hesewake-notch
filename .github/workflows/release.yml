@@ -1,16 +1,60 @@
 name: Release
 
-# Pushing a version tag (e.g. v0.3.3) builds the exe + installer, then creates a draft GitHub Release.
-# Review the draft and publish it by hand.
+# A release PR bumps the version in Cargo.toml and adds its "## [X.Y.Z]" entry to CHANGELOG.md. When it is merged, the
+# push to main finds that version untagged, and this workflow tests, builds the exe + installer, creates the release
+# (which also makes the tag), checks the uploaded installer against SHA256SUMS and publishes it as Latest.
+# Every other push to main stops in the first job, after a few seconds.
+# Pushing a version tag by hand still works as before: it builds and leaves a draft to review and publish.
 on:
   push:
+    branches: [main]
     tags: ["v*"]
 
+# Two quick merges must not release the same version twice.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      release: ${{ steps.v.outputs.release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Is there a version to release?
+        id: v
+        run: |
+          ver=$(sed -n 's/^version = "\(.*\)"\r\?$/\1/p' Cargo.toml | head -1)
+          [ -n "$ver" ] || { echo "::error::No version in Cargo.toml"; exit 1; }
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            [ "$GITHUB_REF_NAME" = "v$ver" ] || { echo "::error::Tag $GITHUB_REF_NAME does not match the Cargo.toml version ($ver)"; exit 1; }
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$ver" > /dev/null; then
+            echo "v$ver is already released: nothing to do."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          grep -q "^## \[$ver\]" CHANGELOG.md || { echo "::error::Cargo.toml says $ver but CHANGELOG.md has no '## [$ver]' entry"; exit 1; }
+          echo "Releasing $ver."
+          echo "release=true" >> "$GITHUB_OUTPUT"
+
   release:
+    needs: check
+    if: needs.check.outputs.release == 'true'
     runs-on: windows-latest
     permissions:
       contents: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      TAG: v${{ needs.check.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      # A merged release PR publishes; a tag pushed by hand leaves a draft, as before.
+      PUBLISH: ${{ github.ref_type == 'branch' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -18,12 +62,12 @@ jobs:
           toolchain: stable
       # No cache: release builds always start from a clean state.
 
-      - name: Tag must match the version in Cargo.toml
+      # The release PR passed CI, but main may have moved since; this build goes straight to users.
+      - name: Test
         shell: pwsh
-        run: |
-          $ver = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
-          if ("v$ver" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} does not match the Cargo.toml version ($ver)" }
-          "VERSION=$ver" >> $env:GITHUB_ENV
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static -D warnings
+        run: cargo test --release
 
       - name: Install Inno Setup if missing
         shell: pwsh
@@ -48,11 +92,36 @@ jobs:
 
       - name: Draft release
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           $setup = "installer_output\HesewakeNotch-Setup-$env:VERSION.exe"
           # The app checks the installer against this file before running it (update.rs).
           $hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLower()
           "$hash  HesewakeNotch-Setup-$env:VERSION.exe" | Set-Content -Encoding ascii SHA256SUMS
-          gh release create "${{ github.ref_name }}" $setup SHA256SUMS --draft --title "Hesewake Notch $env:VERSION" --notes-file notes.md
+          # A draft left by an earlier run of this version that failed after creating it.
+          $draft = gh release view $env:TAG --json isDraft --jq .isDraft 2>$null
+          if ($draft -eq 'true') { gh release delete $env:TAG --yes }
+          gh release create $env:TAG $setup SHA256SUMS --draft --target $env:GITHUB_SHA --title "Hesewake Notch $env:VERSION" --notes-file notes.md
+
+      - name: Check the uploaded installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory uploaded | Out-Null
+          gh release download $env:TAG -D uploaded -p "HesewakeNotch-Setup-$env:VERSION.exe" -p SHA256SUMS
+          if ($LASTEXITCODE -ne 0) { throw "Could not download the draft's files" }
+          $want = ((Get-Content uploaded\SHA256SUMS -Raw).Trim() -split '\s+')[0]
+          $got = (Get-FileHash -Algorithm SHA256 "uploaded\HesewakeNotch-Setup-$env:VERSION.exe").Hash.ToLower()
+          if ($want -ne $got) { throw "The uploaded installer ($got) does not match SHA256SUMS ($want)" }
+          "Installer matches SHA256SUMS: $got"
+
+      - name: Publish as Latest
+        if: env.PUBLISH == 'true'
+        shell: pwsh
+        run: |
+          gh release edit $env:TAG --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw "Publishing failed" }
+          # The app's update check reads releases/latest and needs both files there.
+          $names = gh api "repos/${{ github.repository }}/releases/latest" --jq '.tag_name + " " + ([.assets[].name] | join(" "))'
+          if ($names -notmatch "^$([regex]::Escape($env:TAG)) " -or $names -notmatch 'SHA256SUMS' -or $names -notmatch "HesewakeNotch-Setup-$([regex]::Escape($env:VERSION))\.exe") {
+            throw "releases/latest does not show $env:TAG with both files: $names"
+          }
+          "Published: $names"
