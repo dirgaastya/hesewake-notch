@@ -80,7 +80,9 @@ sampai habis sebelum mengerjakan apa pun. Hal-hal khusus edisi Office (kantor) a
 
 ## 4. Alur rilis (urutan tetap)
 
-Versi: `0.MINOR.PATCH`. Satu rilis = satu cabang rilis → satu PR → merge commit → tag → draf rilis → verifikasi → publikasi.
+Versi: `0.MINOR.PATCH`. Satu rilis = satu cabang rilis → satu PR → merge commit → workflow **Release** membuat draf (otomatis: tes, build,
+draf, cek hash) → pemilik mempublikasikan (manual). PR fitur/perbaikan biasa tidak memicu rilis: workflow hanya membuat draf bila versi di
+`Cargo.toml` belum punya tag.
 
 1. `git fetch origin`, buat cabang dari `origin/main` (`release/X.Y.Z` untuk gabungan PR kontributor, atau cabang fitur/perbaikan).
 2. Gabungkan PR kontributor dengan `git merge --no-ff --no-edit pr/N` (setelah `git fetch origin '+refs/pull/N/head:pr/N'`).
@@ -93,10 +95,13 @@ Versi: `0.MINOR.PATCH`. Satu rilis = satu cabang rilis → satu PR → merge com
 5. Untuk perubahan yang terlihat pengguna: bangun exe, jalankan sebagai **trial** untuk dicoba pemilik (lihat §6), lalu **tanya dulu**.
 6. Setelah pemilik menulis **"merge #N"**: `gh pr merge N -R dirgaastya/hesewake-notch --merge` (merge commit, **bukan squash**, supaya commit kontributor tetap atas
    nama mereka dan PR mereka berstatus Merged). Pastikan PR kontributor berstatus MERGED; beri komentar terima kasih singkat (Inggris) di tiap PR.
-7. `git fetch origin main && git tag -a vX.Y.Z -m "X.Y.Z" origin/main && git push origin vX.Y.Z` → workflow **Release** membangun installer dan membuat draf
-   rilis berisi `HesewakeNotch-Setup-X.Y.Z.exe` dan `SHA256SUMS`.
-8. **Verifikasi sebelum publikasi**: unduh kedua berkas draf (`gh release download vX.Y.Z -p ...`), bandingkan `sha256sum` installer dengan `SHA256SUMS`.
-   Lalu `gh release edit vX.Y.Z --draft=false --latest`. Setelah itu `curl https://api.github.com/repos/dirgaastya/hesewake-notch/releases/latest`
+7. Merge PR rilis ke `main` memicu workflow **Release** (tanpa push tag): ia melihat versi `X.Y.Z` belum ditag dan `CHANGELOG.md` punya
+   `## [X.Y.Z]` (tanpa entri itu workflow gagal merah), lalu menjalankan tes lengkap, membangun installer dan `SHA256SUMS`, membuat **draf** rilis
+   (target commit merge), mengunduh ulang installer, dan mencocokkan hash-nya. Draf yang gagal cek dihapus otomatis; merge berikutnya mencoba lagi.
+   Selama draf menunggu dipublikasikan, merge lain ke `main` tidak membangun ulang draf itu. Pantau dengan Monitor sampai selesai, lalu laporkan.
+   Push tag manual (`git tag -a vX.Y.Z -m "X.Y.Z" origin/main && git push origin vX.Y.Z`) tetap bisa dan membuat draf yang sama (draf lama diganti).
+8. **Publikasi tetap manual dan perlu persetujuan pemilik**: tombol Publish di halaman rilis, atau `gh release edit vX.Y.Z --draft=false --latest`
+   setelah pemilik menulis "publish". Saat itu tag `vX.Y.Z` dibuat. Setelah itu `curl https://api.github.com/repos/dirgaastya/hesewake-notch/releases/latest`
    harus menampilkan kedua aset (fitur Install bergantung padanya).
 9. Sinkron ke Office (lihat `CLAUDE.local.md`), bangun installer Office (lokal, tidak dipublikasikan).
 
