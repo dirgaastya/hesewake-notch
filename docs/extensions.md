@@ -203,7 +203,7 @@ Extensions without a slide use it to tell the user what they are doing.
 
 | Message | When |
 |---|---|
-| `{"t":"visible","on":true}` | The slide came into view (`on: true`) or left it. Refresh data when it opens; stop polling hard when nobody looks, if you like. |
+| `{"t":"visible","on":true}` | The slide came into view (`on: true`: the notch opened on it, or the user moved to it) or left it (`on: false`); the same for its pages in the Settings panel. Sent once per change, and again after a reconnect while the slide is open. Refresh data when it opens; stop polling hard when nobody looks, if you like. |
 | `{"t":"tab","id":"todo"}` | The user picked a filter chip. |
 | `{"t":"row","id":"128"}` | The user clicked a row. Usually answered with `detail`. |
 | `{"t":"action","id":"refresh"}` | A header button, **Retry**, **setup**, or a detail button without `link`/`copy`. |
@@ -263,7 +263,7 @@ Two things worth knowing:
   example after polling a server, should open the pipe with `FILE_FLAG_OVERLAPPED` and use overlapped reads and writes, or
   keep one thread that does both with `PeekNamedPipe`. The notch itself uses overlapped I/O.
 - The notch drops messages above 10 per second, silently. Send a whole page in one message, and do not send a `status`
-  after every message.
+  after every message. If your data can change in bursts, collect the changes and send one page at most once a second.
 
 ## 8. Security: what to expect from an extension
 

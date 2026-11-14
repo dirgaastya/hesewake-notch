@@ -2636,6 +2636,67 @@ fn the_dot_of_an_extension_slide_shows_a_marker() {
     ext_draw(&mut a);
 }
 
+#[test]
+fn an_extension_is_told_when_its_slide_is_looked_at() {
+    use serde_json::json;
+    let mut a = test_app(1.0);
+    ext_setup(&mut a, ext_issues());
+    a.ext.list[0].badge = true;
+    assert!(a.ext_visible_sync(), "the marker goes");
+    assert_eq!(ext_sent(&a), vec![json!({"t": "visible", "on": true})], "the notch opened on its slide");
+    assert!(!a.ext.list[0].badge, "opening the slide clears its marker");
+    a.ext_visible_sync();
+    assert_eq!(ext_sent(&a).len(), 1, "told once");
+    // the notch closes
+    a.hover = false;
+    a.ext_visible_sync();
+    assert_eq!(ext_sent(&a).last(), Some(&json!({"t": "visible", "on": false})));
+    // a marker that comes while nobody looks stays
+    a.ext.list[0].badge = true;
+    a.ext_visible_sync();
+    assert!(a.ext.list[0].badge);
+    assert_eq!(ext_sent(&a).len(), 2);
+    // open again, then move to another slide
+    a.hover = true;
+    a.ext_visible_sync();
+    assert_eq!(ext_sent(&a).last(), Some(&json!({"t": "visible", "on": true})));
+    a.step(1);
+    assert_ne!(a.cur_id(), SlideId::Ext(0));
+    a.ext_visible_sync();
+    assert_eq!(ext_sent(&a).last(), Some(&json!({"t": "visible", "on": false})));
+    assert_eq!(ext_sent(&a).len(), 4);
+}
+
+#[test]
+fn a_reconnected_extension_hears_that_its_slide_is_open() {
+    use serde_json::json;
+    let mut a = test_app(1.0);
+    ext_setup(&mut a, ext_issues());
+    a.ext_visible_sync();
+    a.ext.apply(vec![ext::Evt::Gone { id: "example-issues".into(), why: "closed" }], &[], Instant::now());
+    a.ext_visible_sync();
+    assert_eq!(ext_sent(&a).len(), 1, "nothing goes to an extension that is gone");
+    a.ext.apply(vec![ext::Evt::Connected { id: "example-issues".into() }], &[], Instant::now());
+    a.ext_visible_sync();
+    assert_eq!(ext_sent(&a), vec![json!({"t": "visible", "on": true}), json!({"t": "visible", "on": true})]);
+}
+
+#[test]
+fn the_panel_and_the_slide_are_one_look() {
+    use serde_json::json;
+    let mut a = test_app(1.0);
+    ext_setup(&mut a, ext_issues());
+    a.ext.list[0].manifest.as_mut().unwrap().panel = true;
+    a.ext_visible_sync();
+    a.ext_open_config(0);
+    assert_eq!(a.sw.panel, Some(0));
+    a.ext_panel_close();
+    assert_eq!(ext_sent(&a), vec![json!({"t": "visible", "on": true})], "the slide was open the whole time");
+    a.hover = false;
+    a.ext_visible_sync();
+    assert_eq!(ext_sent(&a).last(), Some(&json!({"t": "visible", "on": false})));
+}
+
 /// The extension slide in the snapshot folder, for a look by eye.
 #[test]
 fn snap_extension_slide() {
