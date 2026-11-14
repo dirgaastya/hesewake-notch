@@ -4,6 +4,16 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/), versi mengikut
 
 ## [Unreleased]
 
+## [0.13.6] - 2026-11-14
+
+Rilis ini berisi kontribusi dari @MaulanaRhezaArdiansyah (PR #72).
+
+### Fixed
+- **Extension kini diberi tahu saat slide-nya dilihat, dan penandanya hilang saat dibuka** (PR #72): panduan extension sudah menyebut notch mengirim `visible` saat slide masuk atau keluar dari pandangan dan menghapus penanda slide saat dibuka, tetapi notch hanya mengirim `visible` untuk panel di Settings. Akibatnya extension yang menunggu `visible` sebelum mengirim halaman menampilkan slide kosong, dan penanda tidak pernah hilang. Kini `visible` dikirim sekali per perubahan (juga setelah extension tersambung ulang selama slide-nya terbuka), slide dan panel dihitung sebagai satu pandangan, dan membuka slide menghapus penandanya.
+
+### Changed
+- **Panduan extension** (`docs/extensions.md`): baris `visible` menjelaskan kapan pesan itu dikirim, dan ada saran menggabungkan perubahan beruntun menjadi satu halaman per detik supaya tetap di bawah batas 10 pesan per detik.
+
 ## [0.13.5] - 2026-11-03
 
 Rilis ini berisi kontribusi dari @yourLogic01 (PR #65).
