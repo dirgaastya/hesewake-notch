@@ -105,20 +105,108 @@ fn char_w(g: &mut Gfx, ch: char) -> f32 {
     g.width(ch.encode_utf8(&mut b), NOTE_SIZE)
 }
 
-fn span_w(g: &mut Gfx, chars: &[char]) -> f32 {
-    chars.iter().map(|&c| char_w(g, c)).sum()
+/// Tokens "http(s)://..." (up to whitespace) as char ranges; with link titles on they are shown as chips.
+fn url_spans(chars: &[char]) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_whitespace() {
+            i += 1;
+            continue;
+        }
+        let a = i;
+        while i < chars.len() && !chars[i].is_whitespace() {
+            i += 1;
+        }
+        let tok: String = chars[a..i].iter().collect();
+        if (tok.starts_with("http://") || tok.starts_with("https://")) && tok.len() > 8 {
+            out.push((a, i));
+        }
+    }
+    out
+}
+
+/// The address of a chip, without trailing punctuation (same rule as the read view).
+fn url_text(chars: &[char], a: usize, b: usize) -> String {
+    let w: String = chars[a..b].iter().collect();
+    w.trim_end_matches(|c: char| ".,;:!?)]}'\"".contains(c)).to_string()
+}
+
+/// Width of every char. A chip counts as one unit: the first char has the chip's width, the rest none, so wrapping,
+/// the caret and hit-testing never land inside a link.
+fn widths(g: &mut Gfx, chars: &[char], chips: bool) -> Vec<f32> {
+    let mut ws: Vec<f32> = chars.iter().map(|&c| char_w(g, c)).collect();
+    if chips {
+        for (a, b) in url_spans(chars) {
+            let (_, w) = chip_item(g, &url_text(chars, a, b));
+            ws[a] = w;
+            for x in ws.iter_mut().take(b).skip(a + 1) {
+                *x = 0.0;
+            }
+        }
+    }
+    ws
+}
+
+fn prefix(ws: &[f32]) -> Vec<f32> {
+    let mut p = Vec::with_capacity(ws.len() + 1);
+    let mut acc = 0.0f32;
+    p.push(0.0);
+    for w in ws {
+        acc += w;
+        p.push(acc);
+    }
+    p
+}
+
+/// A caret index that falls inside a link moves to its end (`fwd`) or its start.
+fn snap(spans: &[(usize, usize)], i: usize, fwd: bool) -> usize {
+    match spans.iter().find(|&&(a, b)| i > a && i < b) {
+        Some(&(a, b)) => {
+            if fwd {
+                b
+            } else {
+                a
+            }
+        }
+        None => i,
+    }
+}
+
+/// Chip for a link: what it shows, and its width. Shared by the read view and the editor.
+fn chip_item(g: &mut Gfx, url: &str) -> (ReadItem, f32) {
+    let loading = matches!(linktitle::state(url), Some(linktitle::LinkState::Loading));
+    let domain = linktitle::domain(url);
+    let label = match linktitle::state(url) {
+        Some(linktitle::LinkState::Title(t)) => t,
+        _ => domain.clone(),
+    };
+    let label = if g.width_ex(&label, 11.0, true) > 150.0 { ellipsize(g, &label, 11.0, 150.0) } else { label };
+    // judul baru datang: lebar chip melebar bertahap dan label berganti dengan fade (0,3 dtk)
+    let titled = matches!(linktitle::state(url), Some(linktitle::LinkState::Title(_)));
+    let k = if titled {
+        let e = (linktitle::age(url).unwrap_or(1.0) / 0.3).clamp(0.0, 1.0);
+        e * e * (3.0 - 2.0 * e)
+    } else {
+        0.0
+    };
+    let wd = 6.0 + 10.0 + 4.0 + g.width_ex(&domain, 11.0, true) + 7.0;
+    let wt = 6.0 + 10.0 + 4.0 + g.width_ex(&label, 11.0, true) + 7.0;
+    let w = if titled { wd + (wt - wd) * k } else { wd };
+    (ReadItem::Chip { label, domain, k, loading, url: url.to_string() }, w)
 }
 
 /// Wrapped lines as char ranges `[start, end)`. Unlike `wrap_lines` no character is dropped
 /// (spaces stay at the end of the line they wrap on, '\n' sits between two ranges), so
 /// caret / selection / hit-testing map exactly onto the text.
-fn layout(g: &mut Gfx, s: &str) -> Vec<(usize, usize)> {
+fn layout(g: &mut Gfx, s: &str, chips: bool) -> Vec<(usize, usize)> {
     let chars: Vec<char> = s.chars().collect();
+    let allw = widths(g, &chars, chips);
     let mut out: Vec<(usize, usize)> = Vec::new();
     let mut base = 0usize;
     for para in chars.split(|&c| c == '\n') {
         let n = para.len();
-        let ws: Vec<f32> = para.iter().map(|&c| char_w(g, c)).collect();
+        let ws: &[f32] = &allw[base..base + n];
         let mut start = 0usize;
         let mut w = 0.0f32;
         let mut brk: Option<usize> = None; // index just after the last space
@@ -164,20 +252,20 @@ fn line_end(lines: &[(usize, usize)], li: usize) -> usize {
 }
 
 /// Char index on line `li` closest to pixel offset `px` (relative to the text origin).
-fn index_at(g: &mut Gfx, chars: &[char], lines: &[(usize, usize)], li: usize, px: f32) -> usize {
+fn index_at(ws: &[f32], spans: &[(usize, usize)], lines: &[(usize, usize)], li: usize, px: f32) -> usize {
     let s = lines[li].0;
     let e = line_end(lines, li);
     let mut acc = 0.0f32;
     let mut idx = s;
     while idx < e {
-        let w = char_w(g, chars[idx]);
+        let w = ws[idx];
         if acc + w / 2.0 > px {
             break;
         }
         acc += w;
         idx += 1;
     }
-    idx
+    snap(spans, idx, true)
 }
 
 fn word_left(v: &[char], mut i: usize) -> usize {
@@ -319,8 +407,9 @@ impl App {
     /// Scroll so the caret line is inside the visible window.
     pub(crate) fn note_ensure_visible(&mut self) {
         let cur = self.nv.cur.min(self.note.chars().count());
+        let chips = self.cfg.link_titles;
         let Some(g) = self.gfx.as_mut() else { return; };
-        let lines = layout(g, &self.note);
+        let lines = layout(g, &self.note, chips);
         let li = line_of(&lines, cur);
         let max = lines.len().saturating_sub(NOTE_LINES);
         let mut s = self.nv.scroll.min(max);
@@ -370,6 +459,27 @@ impl App {
         self.clamp_nv();
         let (lo, hi) = self.sel_range();
         let mut v: Vec<char> = self.note.chars().collect();
+        if self.cfg.link_titles {
+            // a link stays its own word: a space goes between it and text typed or pasted against it
+            let spans = url_spans(&v);
+            let starts_url = {
+                let t: String = ins.iter().take(8).collect();
+                t.starts_with("http://") || t.starts_with("https://")
+            };
+            let at_link_end = lo > 0 && spans.iter().any(|&(_, b)| b == lo);
+            if lo > 0 && !v[lo - 1].is_whitespace() && (starts_url || (at_link_end && ins.len() > 1)) && !ins[0].is_whitespace() {
+                ins.insert(0, ' ');
+            }
+            let before_link = hi < v.len() && spans.iter().any(|&(a, _)| a == hi);
+            let ends_url = ins.split(|c| c.is_whitespace()).next_back().is_some_and(|t| {
+                let t: String = t.iter().collect();
+                t.starts_with("http://") || t.starts_with("https://")
+            });
+            let last_ws = ins.last().is_some_and(|c| c.is_whitespace());
+            if hi < v.len() && !v[hi].is_whitespace() && !last_ws && (ends_url || before_link) {
+                ins.push(' ');
+            }
+        }
         let room = NOTE_MAX_CHARS.saturating_sub(v.len() - (hi - lo));
         if room == 0 {
             return false;
@@ -392,18 +502,19 @@ impl App {
         self.clamp_nv();
         let (lo, hi) = self.sel_range();
         let mut v: Vec<char> = self.note.chars().collect();
+        let spans = if self.cfg.link_titles { url_spans(&v) } else { Vec::new() };
         let (a, b) = if hi > lo {
             (lo, hi)
         } else if forward {
             if hi >= v.len() {
                 return false;
             }
-            (hi, hi + 1)
+            (hi, snap(&spans, hi + 1, true))
         } else {
             if lo == 0 {
                 return false;
             }
-            (if word { word_back(&v, lo) } else { lo - 1 }, lo)
+            (if word { word_back(&v, lo) } else { snap(&spans, lo - 1, false) }, lo)
         };
         v.drain(a..b);
         self.note = v.into_iter().collect();
@@ -465,8 +576,12 @@ impl App {
     fn note_nav(&mut self, vk: u32, ctrl: bool, v: &[char]) -> usize {
         let n = v.len();
         let cur = self.nv.cur.min(n);
+        let chips = self.cfg.link_titles;
         let Some(g) = self.gfx.as_mut() else { return cur; };
-        let lines = layout(g, &self.note);
+        let lines = layout(g, &self.note, chips);
+        let ws = widths(g, v, chips);
+        let pre = prefix(&ws);
+        let spans = if chips { url_spans(v) } else { Vec::new() };
         let li = line_of(&lines, cur);
         match vk {
             K_HOME => {
@@ -493,8 +608,8 @@ impl App {
                     return n;
                 }
                 let tl = if up { li.saturating_sub(step) } else { (li + step).min(lines.len() - 1) };
-                let px = span_w(g, &v[lines[li].0..cur]);
-                index_at(g, v, &lines, tl, px)
+                let px = pre[cur] - pre[lines[li].0];
+                index_at(&ws, &spans, &lines, tl, px)
             }
         }
     }
@@ -511,6 +626,7 @@ impl App {
         let n = v.len();
         let (lo, hi) = self.sel_range();
         let cur = self.nv.cur;
+        let spans = if self.cfg.link_titles { url_spans(&v) } else { Vec::new() };
         let target = match vk {
             K_LEFT => {
                 if !shift && hi > lo {
@@ -518,7 +634,7 @@ impl App {
                 } else if ctrl {
                     word_left(&v, cur)
                 } else {
-                    cur.saturating_sub(1)
+                    snap(&spans, cur.saturating_sub(1), false)
                 }
             }
             K_RIGHT => {
@@ -527,7 +643,7 @@ impl App {
                 } else if ctrl {
                     word_right(&v, cur)
                 } else {
-                    (cur + 1).min(n)
+                    snap(&spans, (cur + 1).min(n), true)
                 }
             }
             K_UP | K_DOWN | K_PGUP | K_PGDN | K_HOME | K_END => self.note_nav(vk, ctrl, &v),
@@ -546,13 +662,16 @@ impl App {
     fn note_hit(&mut self, x: f32, y: f32) -> usize {
         let cur = self.nv.cur;
         let chars: Vec<char> = self.note.chars().collect();
+        let chips = self.cfg.link_titles;
         let Some(g) = self.gfx.as_mut() else { return cur; };
-        let lines = layout(g, &self.note);
+        let lines = layout(g, &self.note, chips);
+        let ws = widths(g, &chars, chips);
+        let spans = if chips { url_spans(&chars) } else { Vec::new() };
         let max = lines.len().saturating_sub(NOTE_LINES);
         let scroll = self.nv.scroll.min(max) as i32;
         let rel = ((y - (NOTE_Y + NOTE_TOP)) / NOTE_LINE).floor() as i32;
         let li = (scroll + rel).clamp(0, lines.len() as i32 - 1) as usize;
-        index_at(g, &chars, &lines, li, x - (LX + 14.0))
+        index_at(&ws, &spans, &lines, li, x - (LX + 14.0))
     }
 
     /// Mouse press inside the note card while editing: place caret, start drag-selection.
@@ -581,8 +700,9 @@ impl App {
 
     /// Mouse wheel / trackpad over the Scrap slide. Returns false when the text fits (no scrolling needed).
     pub(crate) fn note_wheel(&mut self, d: i32) -> bool {
+        let chips = self.cfg.link_titles;
         let Some(g) = self.gfx.as_mut() else { return false; };
-        let total = layout(g, &self.note).len();
+        let total = layout(g, &self.note, chips).len();
         if total <= NOTE_LINES {
             self.nv.wheel = 0;
             return false;
@@ -610,25 +730,7 @@ impl App {
                 let is_url = word.starts_with("http://") || word.starts_with("https://");
                 let (item, w) = if is_url {
                     let url = word.trim_end_matches(|c: char| ".,;:!?)]}'\"".contains(c)).to_string();
-                    let loading = matches!(linktitle::state(&url), Some(linktitle::LinkState::Loading));
-                    let domain = linktitle::domain(&url);
-                    let label = match linktitle::state(&url) {
-                        Some(linktitle::LinkState::Title(t)) => t,
-                        _ => domain.clone(),
-                    };
-                    let label = if g.width_ex(&label, 11.0, true) > 150.0 { ellipsize(g, &label, 11.0, 150.0) } else { label };
-                    // judul baru datang: lebar chip melebar bertahap dan label berganti dengan fade (0,3 dtk)
-                    let titled = matches!(linktitle::state(&url), Some(linktitle::LinkState::Title(_)));
-                    let k = if titled {
-                        let e = (linktitle::age(&url).unwrap_or(1.0) / 0.3).clamp(0.0, 1.0);
-                        e * e * (3.0 - 2.0 * e)
-                    } else {
-                        0.0
-                    };
-                    let wd = 6.0 + 10.0 + 4.0 + g.width_ex(&domain, 11.0, true) + 7.0;
-                    let wt = 6.0 + 10.0 + 4.0 + g.width_ex(&label, 11.0, true) + 7.0;
-                    let w = if titled { wd + (wt - wd) * k } else { wd };
-                    (ReadItem::Chip { label, domain, k, loading, url: url.clone() }, w)
+                    chip_item(g, &url)
                 } else {
                     let w = g.width(word, NOTE_SIZE);
                     (ReadItem::Word(word.to_string()), w)
@@ -689,6 +791,36 @@ impl App {
         None
     }
 
+    /// Tautan sebagai chip: bola dunia kecil dan judul halaman (atau domainnya selagi memuat).
+    #[allow(clippy::too_many_arguments)]
+    fn draw_chip(&self, g: &mut Gfx, cx0: f32, cy0: f32, w: f32, label: &str, domain: &str, k: f32, loading: bool, al: f32) {
+        let (m, b) = (g.acc.main, g.acc.bright);
+        g.fill(&rrect(cx0, cy0, w, 16.0, 8.0), &paint(m[0], m[1], m[2], 0.30 * al));
+        g.stroke(&rrect(cx0 + 0.5, cy0 + 0.5, w - 1.0, 15.0, 7.5), &paint(b[0], b[1], b[2], 0.5 * al), 1.0);
+        // ikon tautan: bola dunia kecil
+        let (ix, iy) = (cx0 + 11.0, cy0 + 8.0);
+        let p = paint(255, 255, 255, 0.9 * al);
+        g.ring(ix, iy, 3.8, 1.0, 1.1, &p, &p);
+        g.line(ix - 3.8, iy, ix + 3.8, iy, 1.0, &p);
+        g.line(ix, iy - 3.8, ix, iy + 3.8, 1.0, &p);
+        let a = if loading { 0.7 } else { 1.0 };
+        let ly = cy0 + ty(16.0, 11.0);
+        if k < 1.0 && k > 0.0 {
+            g.txtb(domain, cx0 + 20.0, ly - k * 3.0, 11.0, [255, 255, 255], al * (1.0 - k), w - 24.0);
+            g.txtb(label, cx0 + 20.0, ly + (1.0 - k) * 3.0, 11.0, [255, 255, 255], al * k, w - 24.0);
+        } else {
+            g.txtb(label, cx0 + 20.0, ly, 11.0, [255, 255, 255], al * a, w - 24.0);
+        }
+        if loading {
+            // kilau yang menyapu chip selagi judul dimuat
+            let sx = cx0 + (((self.t * 0.9) % 1.4) - 0.2) * w;
+            let (l, r) = (sx.max(cx0 + 2.0), (sx + w * 0.4).min(cx0 + w - 2.0));
+            if r > l {
+                g.fill(&rrect(l, cy0 + 2.0, r - l, 12.0, 6.0), &paint(255, 255, 255, 0.16 * al));
+            }
+        }
+    }
+
     fn note_read_view(&self, g: &mut Gfx, ox: f32, al: f32) {
         let tx = LX + ox + 14.0;
         let lines = Self::note_read_layout(g, &self.note);
@@ -706,33 +838,7 @@ impl App {
                     ReadItem::Word(t) => g.txt(t, tx + lx, y, NOTE_SIZE, [255, 228, 225], al, *w + 4.0),
                     ReadItem::Chip { label, domain, k, loading, .. } => {
                         // chip muncul dengan naik dan memudar masuk setelah catatan disimpan
-                        let (cx0, cy0) = (tx + lx, y + 0.5 + (1.0 - pr) * 3.0);
-                        let al = al * pr;
-                        let (m, b) = (g.acc.main, g.acc.bright);
-                        g.fill(&rrect(cx0, cy0, *w, 16.0, 8.0), &paint(m[0], m[1], m[2], 0.30 * al));
-                        g.stroke(&rrect(cx0 + 0.5, cy0 + 0.5, *w - 1.0, 15.0, 7.5), &paint(b[0], b[1], b[2], 0.5 * al), 1.0);
-                        // ikon tautan: bola dunia kecil
-                        let (ix, iy) = (cx0 + 11.0, cy0 + 8.0);
-                        let p = paint(255, 255, 255, 0.9 * al);
-                        g.ring(ix, iy, 3.8, 1.0, 1.1, &p, &p);
-                        g.line(ix - 3.8, iy, ix + 3.8, iy, 1.0, &p);
-                        g.line(ix, iy - 3.8, ix, iy + 3.8, 1.0, &p);
-                        let a = if *loading { 0.7 } else { 1.0 };
-                        let ly = cy0 + ty(16.0, 11.0);
-                        if *k < 1.0 && *k > 0.0 {
-                            g.txtb(domain, cx0 + 20.0, ly - *k * 3.0, 11.0, [255, 255, 255], al * (1.0 - *k), *w - 24.0);
-                            g.txtb(label, cx0 + 20.0, ly + (1.0 - *k) * 3.0, 11.0, [255, 255, 255], al * *k, *w - 24.0);
-                        } else {
-                            g.txtb(label, cx0 + 20.0, ly, 11.0, [255, 255, 255], al * a, *w - 24.0);
-                        }
-                        if *loading {
-                            // kilau yang menyapu chip selagi judul dimuat
-                            let sx = cx0 + (((self.t * 0.9) % 1.4) - 0.2) * *w;
-                            let (l, r) = (sx.max(cx0 + 2.0), (sx + *w * 0.4).min(cx0 + *w - 2.0));
-                            if r > l {
-                                g.fill(&rrect(l, cy0 + 2.0, r - l, 12.0, 6.0), &paint(255, 255, 255, 0.16 * al));
-                            }
-                        }
+                        self.draw_chip(g, tx + lx, y + 0.5 + (1.0 - pr) * 3.0, *w, label, domain, *k, *loading, al * pr);
                     }
                 }
             }
@@ -851,7 +957,12 @@ impl App {
             self.note_read_view(g, ox, al);
             return;
         }
-        let lines = layout(g, &self.note);
+        // with link titles on, links stay chips while editing and behave as one character
+        let chips = self.cfg.link_titles;
+        let all_spans = if chips { url_spans(&chars) } else { Vec::new() };
+        let ws = widths(g, &chars, chips);
+        let pre = prefix(&ws);
+        let lines = layout(g, &self.note, chips);
         let total = lines.len();
         let max_scroll = total.saturating_sub(NOTE_LINES);
         let scroll = self.nv.scroll.min(max_scroll);
@@ -869,8 +980,8 @@ impl App {
                 let b = shi.min(e);
                 let past_end = shi > e && slo <= e; // selection continues past this line's end
                 if b > a || past_end {
-                    let xa = span_w(g, &chars[s..a.min(e)]);
-                    let mut xb = span_w(g, &chars[s..b.max(a).min(e)]);
+                    let xa = pre[a.min(e)] - pre[s];
+                    let mut xb = pre[b.max(a).min(e)] - pre[s];
                     if past_end {
                         xb += 5.0;
                     }
@@ -884,6 +995,12 @@ impl App {
             let line = &chars[s..e];
             let mut spans: Vec<(usize, usize)> = Vec::new();
             let mut i = 0;
+            if chips {
+                for &(a, b) in all_spans.iter().filter(|&&(a, b)| a >= s && b <= e + 1 && a < e) {
+                    spans.push((a - s, (b - s).min(line.len())));
+                }
+                i = line.len();
+            }
             while i < line.len() {
                 let rest: String = line[i..line.len().min(i + 8)].iter().collect();
                 if rest.starts_with("http://") || rest.starts_with("https://") {
@@ -908,12 +1025,12 @@ impl App {
                 if b <= a {
                     return;
                 }
-                let sx = tx + span_w(g, &line[..a]);
+                let sx = tx + pre[s + a] - pre[s];
                 let seg: String = line[a..b].iter().collect();
                 if url {
                     let c = g.acc.pale;
                     g.txt(&seg, sx, y + dy, NOTE_SIZE, c, al * am, NOTE_W + 4.0);
-                    let w = span_w(g, &line[a..b]);
+                    let w = pre[s + b] - pre[s + a];
                     g.rect(sx, y + dy + NOTE_SIZE * 1.12, w.min(NOTE_W), 1.0, &paint(c[0], c[1], c[2], 0.7 * al * am));
                 } else {
                     g.txt(&seg, sx, y + dy, NOTE_SIZE, [255, 228, 225], al * am, NOTE_W + 4.0);
@@ -939,7 +1056,14 @@ impl App {
             };
             for &(a, b) in &spans {
                 draw_seg(g, c0, a, false);
-                draw_seg(g, a, b, true);
+                if chips {
+                    let url = url_text(&chars, s + a, s + b);
+                    if let (ReadItem::Chip { label, domain, k, loading, .. }, w) = chip_item(g, &url) {
+                        self.draw_chip(g, tx + pre[s + a] - pre[s], y + 0.5, w, &label, &domain, k, loading, al);
+                    }
+                } else {
+                    draw_seg(g, a, b, true);
+                }
                 c0 = b;
             }
             draw_seg(g, c0, line.len(), false);
@@ -949,7 +1073,7 @@ impl App {
         if editing && slo == shi {
             let li = line_of(&lines, cur);
             if li >= scroll && li < scroll + NOTE_LINES {
-                let cx = span_w(g, &chars[lines[li].0..cur]);
+                let cx = pre[cur] - pre[lines[li].0];
                 let y = NOTE_Y + NOTE_TOP + 1.0 + (li - scroll) as f32 * NOTE_LINE;
                 let target = (tx + cx + 0.5, y);
                 // caret meluncur halus ke posisi barunya, berkedip lembut (tetap terang sebentar setelah mengetik)
