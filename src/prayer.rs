@@ -481,7 +481,7 @@ fn prayer_stars(g: &mut Gfx, ox: f32, al: f32, t: f32) {
     };
     for i in 0..44 {
         let (x, y, r, a) = (rnd() * 520.0 + 10.0, rnd() * 150.0 + 2.0, 0.4 + rnd() * 0.6, 0.10 + rnd() * 0.30);
-        let (sp, ph) = (0.5 + rnd() * 1.5, rnd() * 6.28);
+        let (sp, ph) = (0.5 + rnd() * 1.5, rnd() * std::f32::consts::TAU);
         let a = a * (0.55 + 0.45 * (t * sp + ph).sin());
         if i % 7 == 0 {
             g.circle(x + ox, y, r, &paint(120, 175, 255, a * al));
