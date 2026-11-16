@@ -206,10 +206,13 @@ fn shot(name: &str, s: f32, setup: impl FnOnce(&mut App)) {
 
     let Some(dir) = std::env::var_os("SNAPSHOT_DIR") else { return };
     let mut out = Pixmap::new(g.pm.width(), g.pm.height()).expect("canvas size");
-    out.fill(Color::from_rgba8(118, 124, 134, 255));
+    // SNAPSHOT_TRANSPARENT keeps the notch on a transparent background (for the project site's pictures)
+    if std::env::var_os("SNAPSHOT_TRANSPARENT").is_none() {
+        out.fill(Color::from_rgba8(118, 124, 134, 255));
+    }
     out.draw_pixmap(0, 0, g.pm.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
     std::fs::create_dir_all(&dir).expect("create snapshot folder");
-    let file = std::path::Path::new(&dir).join(format!("{name}@{}.png", (s * 100.0).round() as u32));
+    let file =std::path::Path::new(&dir).join(format!("{name}@{}.png", (s * 100.0).round() as u32));
     out.save_png(&file).expect("save png");
 }
 
@@ -362,6 +365,75 @@ fn snap_slide_todo() {
 #[test]
 fn snap_slide_water() {
     shot("slide-water", 1.0, |a| open_slide(a, SlideId::Water));
+}
+
+/// Pictures of the real slides for the project site (`site/img`): made-up sample data, English, twice the size, on a
+/// transparent background. Regenerate them with
+/// `SNAPSHOT_DIR=site/img SNAPSHOT_TRANSPARENT=1 cargo test --release snap_site_slides`.
+#[test]
+fn snap_site_slides() {
+    let _lang = i18n::restore_on_drop();
+    i18n::set(i18n::EN);
+    let _now = prayer::fake_now(860); // 14:20: Ashar (14:52) is next
+    let s = 2.0;
+
+    // Music: a song with a made-up cover (a pink-to-violet gradient with a pale sun)
+    shot("site-music", s, |a| {
+        let mut art = Pixmap::new(88, 88).expect("cover");
+        for (i, px) in art.data_mut().chunks_exact_mut(4).enumerate() {
+            let (x, y) = ((i % 88) as f32, (i / 88) as f32);
+            let t = y / 87.0;
+            let lerp = |a: f32, b: f32| (a + (b - a) * t) as u8;
+            let sun = ((x - 62.0).powi(2) + (y - 26.0).powi(2)).sqrt() < 15.0;
+            let c = if sun { [243, 201, 155] } else { [lerp(232.0, 126.0), lerp(92.0, 72.0), lerp(140.0, 214.0)] };
+            px.copy_from_slice(&[c[0], c[1], c[2], 255]);
+        }
+        a.art = Some(art);
+        a.media = Media { title: "Midnight Drive".into(), artist: "Lunar Echoes".into(), playing: true, pos: 84, dur: 221, pos_ms: 84_000, source: "Demo".into(), sources: 1 };
+        open_slide(a, SlideId::Music);
+    });
+
+    shot("site-prayer", s, |a| {
+        a.cfg.lang = i18n::EN;
+        prayer_day(a);
+        open_slide(a, SlideId::Prayer);
+    });
+    shot("site-agenda", s, |a| {
+        with_meetings(a);
+        open_slide(a, SlideId::Agenda);
+    });
+    shot("site-timer", s, |a| {
+        pomo(a, 2, timer::Phase::Focus, 9 * 60 + 12);
+        open_slide(a, SlideId::Timer);
+    });
+
+    // Scrap: a note with two links that show their page titles (put in the cache, so no request goes out)
+    let (docs, repo) = ("https://docs.rs/tiny-skia", "https://github.com/dirgaastya/hesewake-notch");
+    linktitle::seed(docs, linktitle::LinkState::Title("tiny_skia - Rust".into()));
+    linktitle::seed(repo, linktitle::LinkState::Title("dirgaastya/hesewake-notch".into()));
+    shot("site-scrap", s, |a| {
+        a.cfg.link_titles = true;
+        a.note = format!("Friday demo\nRead {docs} and compare with {repo}\nAsk Rina about the slides");
+        open_slide(a, SlideId::Scrap);
+    });
+
+    // Notifications: three made-up ones
+    shot("site-notifs", s, |a| {
+        a.notif_on = true;
+        a.notif_access = notif::Access::Allowed;
+        let mut items = notif::demo_items();
+        for (it, (app, title, body)) in items.iter_mut().zip([
+            ("Calendar", "Design review", "Starts in 10 minutes"),
+            ("Team Chat", "Rina", "The release notes are ready for a look"),
+            ("Mail", "Weekly summary", "Three tasks moved to Done"),
+        ]) {
+            it.app = app.into();
+            it.title = title.into();
+            it.body = body.into();
+        }
+        a.notifs = items;
+        open_slide(a, SlideId::Notifications);
+    });
 }
 
 #[test]
