@@ -135,7 +135,7 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 if a.ready() && !a.editing && a.is_slide(SlideId::Ledge) {
                     for i in 0..a.shelf.len() {
                         let tx = LX + i as f32 * (SH_W + SH_GAP);
-                        if in_rect(x, y, tx, SH_Y, SH_W, SH_H) {
+                        if a.shelf[i].gone.is_none() && in_rect(x, y, tx, SH_Y, SH_W, SH_H) {
                             let (bx, by) = (tx + SH_W - 10.0, SH_Y + 10.0);
                             let d2 = (x - bx).powi(2) + (y - by).powi(2);
                             if d2.sqrt() >= 11.0 {

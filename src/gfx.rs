@@ -160,9 +160,16 @@ impl Text {
             if !skip {
                 for row in 0..m.height {
                     for colx in 0..m.width {
-                        let cov = bm[row * m.width + colx];
+                        let mut cov = bm[row * m.width + colx];
                         if cov == 0 {
                             continue;
+                        }
+                        if small {
+                            // ~0.3 px of extra weight (Medium instead of Regular): edge pixels borrow from their neighbours
+                            let l = if colx > 0 { bm[row * m.width + colx - 1] } else { 0 };
+                            let r = if colx + 1 < m.width { bm[row * m.width + colx + 1] } else { 0 };
+                            let add = 0.3 * l.max(r) as f32 * (1.0 - cov as f32 / 255.0);
+                            cov = (cov as f32 + add).min(255.0) as u8;
                         }
                         let cov = lut.map_or(cov, |l| l[cov as usize]);
                         let (px, py) = (gx + colx as i32, gy + row as i32);
@@ -660,7 +667,7 @@ mod tests {
         let mut g = gfx_100();
         scene(&mut g);
         // Hash diperbarui sekali saat tepi teks terang diperkuat (boost_lut); sebelum itu 6528788650261307270 (= sebelum skala DPI).
-        assert_eq!(fnv(g.pm.data()), 14813722633327843799, "hash adegan 100% berubah: pastikan perubahan gambar memang disengaja");
+        assert_eq!(fnv(g.pm.data()), 12120791878748570162, "hash adegan 100% berubah: pastikan perubahan gambar memang disengaja");
     }
 
     /// Implementasi lama (kuadratik) sebagai acuan kebenaran.

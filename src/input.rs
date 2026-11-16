@@ -134,7 +134,7 @@ pub(crate) unsafe fn click(x: f32, y: f32) {
                 let mut hit: Option<(usize, bool)> = None;
                 for i in 0..a.shelf.len() {
                     let tx = LX + i as f32 * (SH_W + SH_GAP);
-                    if in_rect(x, y, tx, SH_Y, SH_W, SH_H) {
+                    if a.shelf[i].gone.is_none() && in_rect(x, y, tx, SH_Y, SH_W, SH_H) {
                         let (bx, by) = (tx + SH_W - 10.0, SH_Y + 10.0);
                         hit = Some((i, ((x - bx).powi(2) + (y - by).powi(2)).sqrt() < 11.0));
                         break;
@@ -143,8 +143,8 @@ pub(crate) unsafe fn click(x: f32, y: f32) {
                 if let Some((i, close)) = hit {
                     // Remove on "x", or when the file/folder no longer exists; otherwise open it.
                     if close || !std::path::Path::new(&a.shelf[i].path).exists() {
-                        a.shelf.remove(i);
-                        save_shelf(&a.shelf);
+                        a.shelf_remove(i);
+                        schedule(a);
                     } else {
                         a.shelf[i].bump = Some(Instant::now());
                         open_path(&a.shelf[i].path);

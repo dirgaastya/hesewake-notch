@@ -48,7 +48,7 @@ pub(crate) unsafe fn schedule(a: &mut App) {
         0
     } else if pulsing {
         16
-    } else if !settled(a) || a.lyric_fading() || a.art_fading() || a.toast.is_some() || a.water_animating() || a.lyric_scroll_animating() || a.bell_animating() || a.notif_ui_animating() || a.privacy_animating() || a.vol_overlay_active() || a.press_animating() || a.sys_animating() || a.timer_animating() || a.clip_animating() || a.todo_animating() || a.ext_page_animating() || a.title_animating() || a.ripple_animating() || a.prayer_animating() || a.music_eq_animating() || a.agenda_animating() || a.shelf_animating() || a.note_animating() {
+    } else if !settled(a) || a.lyric_fading() || a.art_fading() || a.toast.is_some() || a.water_animating() || a.lyric_scroll_animating() || a.bell_animating() || a.notif_ui_animating() || a.privacy_animating() || a.vol_overlay_active() || a.press_animating() || a.sys_animating() || a.timer_animating() || a.clip_animating() || a.todo_animating() || a.ext_page_animating() || a.title_animating() || a.ripple_animating() || a.prayer_animating() || a.music_eq_animating() || a.agenda_animating() || a.shelf_animating() || a.note_animating() {
         16
     } else if let Some(ms) = Some(a.weather_frame_ms(sys::input_idle_secs())).filter(|&ms| ms > 0) {
         ms // the weather slot: 16 ms while it changes, 20 fps while a moving icon shows
@@ -144,6 +144,9 @@ unsafe fn poll(a: &mut App) {
         if a.expanded() && a.is_slide(SlideId::Scrap) {
             redraw = true;
         }
+    }
+    if a.shelf_gc() {
+        redraw = true;
     }
     a.notif_ui_step();
     if a.tick_n % 5 == 0 && a.ext_tick() {

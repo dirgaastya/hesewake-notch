@@ -35,6 +35,8 @@ pub(crate) struct ShelfItem {
     pub(crate) born: Instant,
     /// Kapan item dibuka (membal sebentar).
     pub(crate) bump: Option<Instant>,
+    /// Kapan item ini dihapus: memudar dan menyusut 0,3 dtk, lalu dibuang dari daftar (`shelf_gc`).
+    pub(crate) gone: Option<Instant>,
 }
 
 impl ShelfItem {
@@ -43,7 +45,7 @@ impl ShelfItem {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.to_string());
-        ShelfItem { path: path.to_string(), name, icon: load_file_icon(path), born: Instant::now(), bump: None }
+        ShelfItem { path: path.to_string(), name, icon: load_file_icon(path), born: Instant::now(), bump: None, gone: None }
     }
 }
 
@@ -184,7 +186,28 @@ impl App {
     }
 
     pub(crate) fn shelf_animating(&self) -> bool {
-        self.expanded() && self.is_slide(SlideId::Ledge) && (self.shelf_drag_hover() || self.shelf.iter().any(|i| i.born.elapsed().as_secs_f32() < 0.85 || i.bump.is_some_and(|b| b.elapsed().as_secs_f32() < 0.5)))
+        self.expanded() && self.is_slide(SlideId::Ledge) && (self.shelf_drag_hover() || self.shelf.iter().any(|i| i.born.elapsed().as_secs_f32() < 0.85 || i.bump.is_some_and(|b| b.elapsed().as_secs_f32() < 0.5) || i.gone.is_some()))
+    }
+
+    /// Mulai animasi hapus untuk item `i` (abaikan bila sudah berjalan).
+    pub(crate) fn shelf_remove(&mut self, i: usize) {
+        if let Some(it) = self.shelf.get_mut(i) {
+            if it.gone.is_none() {
+                it.gone = Some(Instant::now());
+            }
+        }
+    }
+
+    /// Buang item yang animasi hapusnya selesai. True bila ada yang dibuang (perlu gambar ulang).
+    pub(crate) fn shelf_gc(&mut self) -> bool {
+        let n = self.shelf.len();
+        self.shelf.retain(|i| i.gone.map_or(true, |g| g.elapsed().as_secs_f32() < 0.3));
+        if self.shelf.len() != n {
+            save_shelf(&self.shelf);
+            true
+        } else {
+            false
+        }
     }
 
     pub(crate) fn slide_shelf(&self, g: &mut Gfx, ox: f32, al: f32) {
@@ -201,7 +224,7 @@ impl App {
         } else if full {
             fill(tr("{} is full"), &[&SHELF_NAME])
         } else {
-            format!("{}/{}", self.shelf.len(), SHELF_MAX)
+            format!("{}/{}", self.shelf.iter().filter(|i| i.gone.is_none()).count(), SHELF_MAX)
         };
         let lw = g.width_ex(&label, 13.0, true);
         g.txtb(&label, RX + ox - lw, 14.0, 13.0, if drag { acc.bright } else { acc.main }, al, 160.0);
@@ -257,11 +280,17 @@ impl App {
             // masuk dengan pop (memantul dari bawah) saat baru di-drop; hover mengangkat tampilan dan memberi garis aksen
             let age = it.born.elapsed().as_secs_f32();
             let pop = if age < 0.8 { (1.0 - (-9.0 * age).exp() * (18.0 * age).cos()).clamp(0.0, 1.2) } else { 1.0 };
-            let ial = al * (age / 0.2).clamp(0.0, 1.0);
+            // dihapus: memudar, turun sedikit, dan menyusut ke tengahnya
+            let gp = it.gone.map_or(0.0, |g| {
+                let e = (g.elapsed().as_secs_f32() / 0.3).clamp(0.0, 1.0);
+                e * e * (3.0 - 2.0 * e)
+            });
+            let ial = al * (age / 0.2).clamp(0.0, 1.0) * (1.0 - gp);
+            let sh = gp * 9.0;
             let bmp = it.bump.map_or(0.0, |b| { let e = b.elapsed().as_secs_f32(); if e < 0.5 { -6.0 * (-8.0 * e).exp() * (e * 20.0).sin().abs() } else { 0.0 } });
-            let dy = (1.0 - pop) * 14.0 + bmp;
-            let hov = cur.is_some_and(|(hx, hy)| in_rect(hx, hy, tx, SH_Y, SH_W, SH_H));
-            g.fill(&rrect(tx, SH_Y + 4.0 + dy, SH_W, SH_H - 8.0, 12.0), &paint(255, 255, 255, (0.08 + if hov { 0.06 } else { 0.0 }) * ial));
+            let dy = (1.0 - pop) * 14.0 + bmp + gp * 8.0;
+            let hov = it.gone.is_none() && cur.is_some_and(|(hx, hy)| in_rect(hx, hy, tx, SH_Y, SH_W, SH_H));
+            g.fill(&rrect(tx + sh, SH_Y + 4.0 + dy + sh, SH_W - 2.0 * sh, SH_H - 8.0 - 2.0 * sh, 12.0), &paint(255, 255, 255, (0.08 + if hov { 0.06 } else { 0.0 }) * ial));
             if hov {
                 g.stroke(&rrect(tx + 0.5, SH_Y + 4.5 + dy, SH_W - 1.0, SH_H - 9.0, 11.5), &paint(acc.main[0], acc.main[1], acc.main[2], 0.6 * ial), 1.2);
             }

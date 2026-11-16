@@ -1101,3 +1101,31 @@ impl App {
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chars(s: &str) -> Vec<char> {
+        s.chars().collect()
+    }
+
+    #[test]
+    fn links_are_whole_tokens() {
+        let v = chars("see https://a.example/x?y=1 and http://b.example done");
+        assert_eq!(url_spans(&v), vec![(4, 27), (32, 48)]);
+        assert!(url_spans(&chars("http:// abchttps://x.example")).is_empty());
+    }
+
+    #[test]
+    fn the_caret_never_stops_inside_a_link() {
+        let v = chars("a https://x.example b");
+        let spans = url_spans(&v);
+        assert_eq!(spans, vec![(2, 19)]);
+        assert_eq!(snap(&spans, 10, true), 19);
+        assert_eq!(snap(&spans, 10, false), 2);
+        assert_eq!(snap(&spans, 19, true), 19);
+        assert_eq!(snap(&spans, 2, false), 2);
+        assert_eq!(snap(&spans, 19 - 1, false), 2);
+        assert_eq!(snap(&spans, 2 + 1, true), 19);
+    }
+}
