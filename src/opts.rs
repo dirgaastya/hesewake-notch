@@ -41,6 +41,7 @@ pub(crate) enum Rid {
     /// Button: get the Japanese dictionary, or delete the downloaded one (press twice).
     Dictionary,
     Downloads,
+    LinkTitles,
     ImsakTerbit,
     Ramadan,
     /// Choice: adhan::OFF / SYSTEM / FILE.
@@ -58,7 +59,7 @@ pub(crate) enum Rid {
 impl Rid {
     /// Every setting (a test checks each one has a row in the Settings window).
     #[cfg(test)]
-    pub(crate) const ALL: [Rid; 34] = [
+    pub(crate) const ALL: [Rid; 35] = [
         Rid::Minimal,
         Rid::Glow,
         Rid::NotchSong,
@@ -86,6 +87,7 @@ impl Rid {
         Rid::Romaji,
         Rid::Dictionary,
         Rid::Downloads,
+        Rid::LinkTitles,
         Rid::ImsakTerbit,
         Rid::Ramadan,
         Rid::Adhan,
@@ -118,6 +120,7 @@ impl App {
             Rid::NotchSong => self.cfg.notch_song,
             Rid::Romaji => self.cfg.romaji_lyrics,
             Rid::Downloads => self.cfg.downloads,
+            Rid::LinkTitles => self.cfg.link_titles,
             Rid::ImsakTerbit => self.cfg.imsak_terbit,
             Rid::Ramadan => self.cfg.ramadan,
             Rid::Wibu => self.cfg.wibu,
@@ -208,6 +211,7 @@ impl App {
                     self.adhan_stop();
                 }
             }
+            Rid::LinkTitles => self.cfg.link_titles = !self.cfg.link_titles,
             Rid::ImsakTerbit => self.cfg.imsak_terbit = !self.cfg.imsak_terbit,
             Rid::Ramadan => self.cfg.ramadan = !self.cfg.ramadan,
             Rid::Downloads => {

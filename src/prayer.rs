@@ -272,6 +272,10 @@ fn now_min() -> u16 {
 }
 
 impl App {
+    pub(crate) fn prayer_animating(&self) -> bool {
+        self.expanded() && self.is_slide(SlideId::Prayer)
+    }
+
     /// Today's schedule for the selected city; recomputed when the date or city changes.
     pub(crate) fn prayer_refresh(&mut self) {
         let st = now_tm();
@@ -350,6 +354,7 @@ impl App {
     /// badge (or the Stop button while the adhan plays) at the top right.
     pub(crate) fn slide_prayer(&self, g: &mut Gfx, ox: f32, al: f32) {
         let x = LX + ox;
+        prayer_stars(g, ox, al, self.t);
         let city = weather::CITIES[self.cfg.weather_city.min(weather::CITIES.len() - 1)].0;
         g.txtb(&format!("{} \u{b7} {}", tr("Prayer"), city), x, 12.0, 15.0, [255, 255, 255], al, 260.0);
         if self.adhan_playing() {
@@ -360,32 +365,297 @@ impl App {
             let lw = g.width_ex("Ramadan", 13.0, true);
             g.txtb("Ramadan", RX + ox - lw, 14.0, 13.0, GOLD, al, lw + 2.0);
             g.icon_crescent(RX + ox - lw - 12.0, 21.5, 14.0, &paint(GOLD[0], GOLD[1], GOLD[2], al));
+            // bintang kecil di sebelahnya berkedip
+            let tw2 = 0.5 + 0.5 * (self.t * 2.2).sin();
+            let (sx2, sy2) = (RX + ox - lw - 26.0, 13.0);
+            let sp = paint(GOLD[0], GOLD[1], GOLD[2], (0.35 + 0.65 * tw2) * al);
+            g.line(sx2 - 3.0, sy2, sx2 + 3.0, sy2, 1.2, &sp);
+            g.line(sx2, sy2 - 3.0, sx2, sy2 + 3.0, 1.2, &sp);
         }
         let Some((_, t)) = self.prayer else { return };
         let list = day_list(&t, self.prayer_sun, self.cfg.imsak_terbit);
         let now = now_min();
+        #[cfg(test)]
+        let sec = if TEST_NOW.with(|n| n.get()).is_some() { 0.0 } else { now_tm().wSecond as f32 };
+        #[cfg(not(test))]
+        let sec = now_tm().wSecond as f32;
+        let now_f = now as f32 + sec / 60.0;
         let next = next_in(&list, now);
+        let night = now_f < self.prayer_sun as f32 || now_f >= t[3] as f32;
+        prayer_arc(g, ox, al, &list, next, now_f, night, self.t, self.cursor_canvas());
+
+        // Daftar waktu: ikon, nama, jam; baris berikutnya disorot emas dengan isian yang melebar.
         let rows = list.len().div_ceil(2);
-        let colw = CW / 2.0 - 8.0;
+        let (lx0, colw) = (LX + 150.0 + ox, 123.0);
+        // sorotan emas meluncur dengan pegas ke baris berikutnya; warna baris yang sudah lewat memudar halus
+        let pos = |k: usize| (lx0 + (k / rows) as f32 * (colw + 8.0), ROW_Y0 + (k % rows) as f32 * ROW_STEP);
+        let (mut hx, mut hy, mut ha) = self.pr_hl.get();
+        let first = ha < 0.02;
+        match next {
+            Some(n) => {
+                let (tx, tyy) = pos(n);
+                if first {
+                    (hx, hy, ha) = (tx, tyy, 1.0);
+                } else {
+                    hx += (tx - hx) * 0.18;
+                    hy += (tyy - hy) * 0.18;
+                    ha += (1.0 - ha) * 0.15;
+                }
+            }
+            None => ha -= ha * 0.15,
+        }
+        self.pr_hl.set((hx, hy, ha));
+        if let (Some(n), true) = (next, ha > 0.01) {
+            let at = list[n].1;
+            let prev = if n > 0 { list[n - 1].1 } else { 0 };
+            let frac = ((now_f - prev as f32) / (at as f32 - prev as f32).max(1.0)).clamp(0.0, 1.0);
+            let a2 = al * ha;
+            g.fill(&rrect(hx, hy, colw, ROW_H, 9.0), &paint(GOLD[0], GOLD[1], GOLD[2], 0.16 * a2));
+            if frac > 0.02 {
+                g.fill(&rrect(hx, hy, (colw * frac).max(18.0), ROW_H, 9.0), &paint(GOLD[0], GOLD[1], GOLD[2], 0.14 * a2));
+            }
+            g.stroke(&rrect(hx + 0.5, hy + 0.5, colw - 1.0, ROW_H - 1.0, 9.0), &paint(GOLD[0], GOLD[1], GOLD[2], 0.25 * a2), 1.0);
+            let bl = 0.2 + 0.8 * (0.5 + 0.5 * (self.t * std::f32::consts::TAU / 1.6).cos());
+            g.circle(hx + colw - 6.0, hy + 6.0, 1.8, &paint(GOLD[0], GOLD[1], GOLD[2], bl * a2));
+        }
+        let mut pk_all = self.pr_past.get();
         for (k, &(kind, at)) in list.iter().enumerate() {
-            let (rx, ry) = (x + (k / rows) as f32 * (colw + 16.0), ROW_Y0 + (k % rows) as f32 * ROW_STEP);
+            let (rx, ry) = pos(k);
             let cy = ry + ROW_H / 2.0;
             let is_next = next == Some(k);
             let past = next.map_or(true, |n| k < n);
-            if is_next {
-                g.fill(&rrect(rx, ry, colw, ROW_H, 9.0), &paint(GOLD[0], GOLD[1], GOLD[2], 0.16 * al));
+            let tgt = if past { 1.0 } else { 0.0 };
+            if k < 8 {
+                pk_all[k] = if first { tgt } else { pk_all[k] + (tgt - pk_all[k]) * 0.15 };
             }
-            let col = if is_next { GOLD } else if past { TEXT_FAINT } else { [255, 255, 255] };
+            let pk = if k < 8 { pk_all[k] } else { tgt };
+            let mix = |p: u8, q: u8| (p as f32 + (q as f32 - p as f32) * pk) as u8;
+            let col = if is_next { GOLD } else { [mix(255, TEXT_FAINT[0]), mix(255, TEXT_FAINT[1]), mix(255, TEXT_FAINT[2])] };
+            prayer_icon(g, kind, rx + 13.0, cy, col, if is_next { al } else { (0.55 - 0.25 * pk) * al });
             let name = kind.label();
-            g.txtb(name, rx + 10.0, cy - 8.0, 13.0, col, al, 100.0);
+            g.txtb(name, rx + 25.0, cy - 8.0, 13.0, col, al, colw - 25.0 - 44.0);
             let time = hhmm(at);
             let tw = g.width_ex(&time, 13.0, true);
-            g.txtb(&time, rx + colw - 10.0 - tw, cy - 8.0, 13.0, col, al, tw + 2.0);
-            if is_next {
-                let left = fill(tr("in {}"), &[&fmt_left(at - now)]);
-                let nx = rx + 10.0 + g.width_ex(name, 13.0, true) + 8.0;
-                g.txt(&left, nx, cy - 6.5, 11.0, GOLD, 0.85 * al, rx + colw - 16.0 - tw - nx);
+            g.txtb(&time, rx + colw - 9.0 - tw, cy - 8.0, 13.0, col, al, tw + 2.0);
+        }
+        self.pr_past.set(pk_all);
+    }
+}
+
+// ---------------------------------------------------------------- tampilan Prayer: busur lintasan hari
+const ARC_CX: f32 = LX + 70.0;
+const ARC_BASE: f32 = 84.0;
+const ARC_RX: f32 = 60.0;
+const ARC_RY: f32 = 36.0;
+const MUTE: [u8; 3] = [154, 163, 184];
+
+/// Titik pada busur: f = 0 di ujung kiri (waktu pertama), 1 di ujung kanan (Isya).
+fn arc_pt(ox: f32, f: f32) -> (f32, f32) {
+    let a = std::f32::consts::PI * f.clamp(0.0, 1.0);
+    (ARC_CX + ox - ARC_RX * a.cos(), ARC_BASE - ARC_RY * a.sin())
+}
+
+fn stroke_arc(g: &mut Gfx, ox: f32, f0: f32, f1: f32, wd: f32, p: &Paint) {
+    let steps = (((f1 - f0).abs() * 48.0).ceil() as i32).max(2);
+    let mut pb = PathBuilder::new();
+    for s in 0..=steps {
+        let (px, py) = arc_pt(ox, f0 + (f1 - f0) * s as f32 / steps as f32);
+        if s == 0 {
+            pb.move_to(px, py);
+        } else {
+            pb.line_to(px, py);
+        }
+    }
+    if let Some(path) = pb.finish() {
+        let st = Stroke { width: wd, line_cap: LineCap::Round, ..Default::default() };
+        g.pm.stroke_path(&path, p, &st, g.ts, None);
+    }
+}
+
+/// Bintang-bintang statis (posisi tetap, tanpa animasi supaya slide ini tidak menahan frame terus-menerus).
+fn prayer_stars(g: &mut Gfx, ox: f32, al: f32, t: f32) {
+    let mut s: u32 = 7;
+    let mut rnd = move || {
+        s = s.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (s >> 8) as f32 / 16_777_216.0
+    };
+    for i in 0..44 {
+        let (x, y, r, a) = (rnd() * 520.0 + 10.0, rnd() * 150.0 + 2.0, 0.4 + rnd() * 0.6, 0.10 + rnd() * 0.30);
+        let (sp, ph) = (0.5 + rnd() * 1.5, rnd() * std::f32::consts::TAU);
+        let a = a * (0.55 + 0.45 * (t * sp + ph).sin());
+        if i % 7 == 0 {
+            g.circle(x + ox, y, r, &paint(120, 175, 255, a * al));
+        } else {
+            g.circle(x + ox, y, r, &paint(255, 255, 255, a * al));
+        }
+    }
+    // bintang jatuh tiap 9 detik
+    let ph = if t > 2.0 { ((t - 2.0) % 9.0) / 9.0 } else { 1.0 };
+    if ph < 0.09 {
+        let q = ph / 0.09;
+        let (hx, hy) = (-30.0 + 570.0 * q + ox, 26.0 + 164.0 * q);
+        let fade = (std::f32::consts::PI * q).sin();
+        for i in 0..12 {
+            let (a0, a1) = (90.0 * i as f32 / 12.0, 90.0 * (i + 1) as f32 / 12.0);
+            let al2 = (1.0 - i as f32 / 12.0) * 0.9 * fade * al;
+            g.line(hx - 0.95 * a0, hy - 0.31 * a0, hx - 0.95 * a1, hy - 0.31 * a1, 1.4, &paint(255, 255, 255, al2));
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prayer_arc(g: &mut Gfx, ox: f32, al: f32, list: &[(Kind, u16)], next: Option<usize>, now_f: f32, night: bool, t: f32, cur: Option<(f32, f32)>) {
+    let acc = g.acc;
+    let (start, end) = (list[0].1 as f32, list[list.len() - 1].1 as f32);
+    let span = (end - start).max(1.0);
+    let f_of = |m: f32| ((m - start) / span).clamp(0.0, 1.0);
+    let p = f_of(now_f);
+    // cakrawala + jalur
+    g.line(ARC_CX + ox - ARC_RX - 16.0, ARC_BASE, ARC_CX + ox + ARC_RX + 16.0, ARC_BASE, 1.0, &paint(255, 255, 255, 0.12 * al));
+    stroke_arc(g, ox, 0.0, 1.0, 2.0, &paint(255, 255, 255, 0.14 * al));
+    // jejak yang sudah dilewati: gradasi aksen -> pucat, dengan glow berlapis
+    if p > 0.01 {
+        for &(wd, la) in &[(10.0f32, 0.08f32), (6.0, 0.16), (3.4, 1.0)] {
+            let n = ((p * 40.0).ceil() as i32).max(1);
+            for i in 0..n {
+                let (a0, a1) = (p * i as f32 / n as f32, p * (i + 1) as f32 / n as f32);
+                let k = (a0 + a1) / 2.0 / p;
+                let c = |m: u8, q: u8| (m as f32 + (q as f32 - m as f32) * k) as u8;
+                let alpha = (0.2 + 0.8 * k) * la * al;
+                stroke_arc(g, ox, a0, a1, wd, &paint(c(acc.main[0], acc.pale[0]), c(acc.main[1], acc.pale[1]), c(acc.main[2], acc.pale[2]), alpha));
             }
+        }
+    }
+    // simpul awal (kosong) dan akhir (emas)
+    let (sx, sy) = arc_pt(ox, 0.0);
+    let (ex, ey) = arc_pt(ox, 1.0);
+    g.circle(sx, sy, 4.0, &paint(42, 45, 54, al));
+    g.ring(sx, sy, 4.0, 1.0, 1.4, &paint(MUTE[0], MUTE[1], MUTE[2], al), &paint(MUTE[0], MUTE[1], MUTE[2], al));
+    g.circle(ex, ey, 8.0, &paint(GOLD[0], GOLD[1], GOLD[2], 0.18 * al));
+    g.circle(ex, ey, 4.5, &paint(GOLD[0], GOLD[1], GOLD[2], al));
+    // jam di kedua ujung (dibuat oleh pemanggil lewat hhmm di bawah)
+    // titik tiap waktu pada busur
+    let mut tip: Option<(usize, f32, f32)> = None;
+    for (k, &(_, at)) in list.iter().enumerate() {
+        let f = f_of(at as f32);
+        if !(0.02..=0.98).contains(&f) {
+            continue;
+        }
+        let (qx, qy) = arc_pt(ox, f);
+        if cur.is_some_and(|(cx, cy)| (cx - qx).hypot(cy - qy) <= 9.0) {
+            tip = Some((k, qx, qy));
+        }
+        let is_next = next == Some(k);
+        let past = (at as f32) <= now_f;
+        g.circle(qx, qy, if is_next { 3.4 } else { 2.8 }, &paint(11, 14, 24, al));
+        let c = if is_next { GOLD } else { [255, 255, 255] };
+        g.circle(qx, qy, if is_next { 2.2 } else { 1.7 }, &paint(c[0], c[1], c[2], if is_next || past { 0.95 * al } else { 0.5 * al }));
+    }
+    // penanda: matahari atau bulan
+    let (mx, my) = arc_pt(ox, p);
+    // halo berdenyut dan satelit kecil yang mengorbit cincin luar (14 dtk per putaran)
+    let hp = 0.5 - 0.5 * (t * std::f32::consts::TAU / 3.0).cos();
+    g.circle(mx, my, 13.0 * (1.0 + 0.35 * hp), &paint(140, 170, 255, (0.22 - 0.12 * hp) * al));
+    let sa = std::f32::consts::PI + std::f32::consts::TAU * ((t / 14.0) % 1.0);
+    g.circle(ARC_CX + ox + (ARC_RX + 10.0) * sa.cos(), ARC_BASE + (ARC_RY + 14.0) * sa.sin(), 1.5, &paint(acc.main[0], acc.main[1], acc.main[2], al));
+    g.circle(mx, my, 10.0, &paint(17, 23, 43, al));
+    g.ring(mx, my, 10.0, 1.0, 1.3, &paint(255, 255, 255, 0.5 * al), &paint(255, 255, 255, 0.5 * al));
+    if night {
+        g.circle(mx, my, 6.2, &paint(225, 232, 250, al));
+        g.circle(mx + 2.8, my - 2.0, 5.3, &paint(17, 23, 43, al));
+        g.circle(mx - 2.5, my + 2.1, 0.8, &paint(159, 176, 222, al));
+    } else {
+        g.circle(mx, my, 5.6, &paint(245, 192, 74, al));
+        g.circle(mx - 1.2, my - 1.2, 3.0, &paint(255, 243, 196, 0.8 * al));
+    }
+    // tooltip nama dan jam saat kursor di atas sebuah titik
+    if let Some((k, qx, qy)) = tip {
+        let txt = format!("{} \u{b7} {}", list[k].0.label(), hhmm(list[k].1));
+        let w = g.width_ex(&txt, 11.0, true) + 14.0;
+        let (tx, ty0) = ((qx - w / 2.0).clamp(LX + ox - 4.0, LX + ox + 150.0 - w), (qy - 28.0).max(33.0));
+        g.fill(&rrect(tx, ty0, w, 19.0, 9.5), &paint(14, 20, 40, 0.96 * al));
+        g.stroke(&rrect(tx + 0.5, ty0 + 0.5, w - 1.0, 18.0, 9.0), &paint(GOLD[0], GOLD[1], GOLD[2], 0.5 * al), 1.0);
+        g.txt_c(&txt, tx + w / 2.0, ty0 + ty(19.0, 11.0), 11.0, [255, 255, 255], al, w, true);
+    }
+    // jam di ujung busur
+    let (a, b) = (hhmm(list[0].1), hhmm(list[list.len() - 1].1));
+    g.txt_c(&a, sx, ARC_BASE + 8.0, 10.0, MUTE, al, 40.0, true);
+    g.txt_c(&b, ex, ARC_BASE + 8.0, 10.0, MUTE, al, 40.0, true);
+    // nama + hitung mundur dengan detik
+    let (target, name, tomorrow) = match next {
+        Some(n) => (list[n].1 as f32, list[n].0.label(), false),
+        None => (1440.0 + list[0].1 as f32, list[0].0.label(), true),
+    };
+    let rem = ((target - now_f) * 60.0).round().max(0.0) as u32;
+    let (h, m, s) = (rem / 3600, rem % 3600 / 60, rem % 60);
+    let ly = ARC_BASE + 20.0;
+    if tomorrow {
+        let nw = g.width_ex(name, 13.0, true);
+        let tm = g.width(tr("tomorrow"), 10.0);
+        let x0 = ARC_CX + ox - (nw + 5.0 + tm) / 2.0;
+        g.txtb(name, x0, ly, 13.0, GOLD, al, 90.0);
+        g.txt(tr("tomorrow"), x0 + nw + 5.0, ly + 2.5, 10.0, MUTE, al, 60.0);
+    } else {
+        g.txt_c(name, ARC_CX + ox, ly, 13.0, GOLD, al, 110.0, true);
+    }
+    let _ = (h, m);
+    let big = fmt_left((rem / 60) as u16);
+    let sec = format!("{s:02}s");
+    let (bw, sw) = (g.width_ex(&big, 22.0, true), g.width_ex(&sec, 11.0, true));
+    let bx = ARC_CX + ox - (bw + 4.0 + sw) / 2.0;
+    g.txtb(&big, bx, ly + 13.0, 22.0, [255, 255, 255], al, 100.0);
+    g.txtb(&sec, bx + bw + 4.0, ly + 25.0, 11.0, MUTE, al, 40.0);
+}
+
+/// Ikon kecil per waktu: fajar, siang, sore, terbenam, malam.
+fn prayer_icon(g: &mut Gfx, kind: Kind, cx: f32, cy: f32, col: [u8; 3], al: f32) {
+    let p = paint(col[0], col[1], col[2], al);
+    let ray = |g: &mut Gfx, a: f32, r0: f32, r1: f32| g.line(cx + a.cos() * r0, cy + a.sin() * r0, cx + a.cos() * r1, cy + a.sin() * r1, 1.4, &p);
+    let pi = std::f32::consts::PI;
+    match kind {
+        Kind::Prayer(1) => {
+            g.ring(cx, cy, 2.6, 1.0, 1.4, &paint(0, 0, 0, 0.0), &p);
+            for i in 0..8 {
+                ray(g, i as f32 * pi / 4.0, 4.2, 5.8);
+            }
+        }
+        Kind::Prayer(2) => {
+            g.ring(cx, cy + 1.0, 2.6, 1.0, 1.4, &paint(0, 0, 0, 0.0), &p);
+            for a in [-pi / 2.0, -pi * 0.8, -pi * 0.2] {
+                g.line(cx + a.cos() * 4.4, cy + 1.0 + a.sin() * 4.4, cx + a.cos() * 5.8, cy + 1.0 + a.sin() * 5.8, 1.4, &p);
+            }
+            g.line(cx - 6.0, cy + 5.6, cx + 6.0, cy + 5.6, 1.4, &p);
+        }
+        Kind::Prayer(3) => {
+            g.line(cx - 6.0, cy + 2.0, cx + 6.0, cy + 2.0, 1.4, &p);
+            let mut pb = PathBuilder::new();
+            for s in 0..=12 {
+                let a = pi + pi * s as f32 / 12.0;
+                let (px, py) = (cx + 3.6 * a.cos(), cy + 2.0 + 3.6 * a.sin());
+                if s == 0 { pb.move_to(px, py) } else { pb.line_to(px, py) }
+            }
+            if let Some(path) = pb.finish() {
+                g.pm.stroke_path(&path, &p, &Stroke { width: 1.4, ..Default::default() }, g.ts, None);
+            }
+            g.line(cx - 5.0, cy + 5.6, cx + 5.0, cy + 5.6, 1.4, &p);
+        }
+        Kind::Prayer(4) => {
+            g.circle(cx, cy, 5.0, &p);
+            g.circle(cx + 2.6, cy - 1.8, 4.2, &paint(8, 11, 22, al));
+        }
+        _ => {
+            // Subuh, Imsak, Terbit: setengah matahari di cakrawala
+            g.line(cx - 6.0, cy + 3.0, cx + 6.0, cy + 3.0, 1.4, &p);
+            let mut pb = PathBuilder::new();
+            for s in 0..=12 {
+                let a = pi + pi * s as f32 / 12.0;
+                let (px, py) = (cx + 3.6 * a.cos(), cy + 3.0 + 3.6 * a.sin());
+                if s == 0 { pb.move_to(px, py) } else { pb.line_to(px, py) }
+            }
+            if let Some(path) = pb.finish() {
+                g.pm.stroke_path(&path, &p, &Stroke { width: 1.4, ..Default::default() }, g.ts, None);
+            }
+            ray(g, -pi / 2.0, 5.0 + 0.0, 6.4);
         }
     }
 }

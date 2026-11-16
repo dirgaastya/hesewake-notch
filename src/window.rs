@@ -20,6 +20,25 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
             tick(wp.0);
             LRESULT(0)
         }
+        WM_SETCURSOR => {
+            // tangan di tombol/baris yang bisa diklik, I-beam di kolom ketik
+            if (lp.0 & 0xffff) as u32 == HTCLIENT {
+                let mut kind = 0u8;
+                with_app(|a| {
+                    let mut p = POINT::default();
+                    if GetCursorPos(&mut p).is_ok() {
+                        kind = a.cursor_kind((p.x - a.wx) as f32 / a.scale, (p.y - a.wy) as f32 / a.scale);
+                    }
+                });
+                if kind != 0 {
+                    if let Ok(c) = LoadCursorW(None, if kind == 2 { IDC_IBEAM } else { IDC_HAND }) {
+                        SetCursor(c);
+                        return LRESULT(1);
+                    }
+                }
+            }
+            DefWindowProcW(hwnd, msg, wp, lp)
+        }
         WM_APP => {
             if demo_playing() {
                 return LRESULT(0);
@@ -105,6 +124,10 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
             }
 
             with_app(|a| {
+                if a.expanded() {
+                    a.ripple = Some((x, y, Instant::now()));
+                    schedule(a);
+                }
                 a.drag = Some((x, y));
                 a.drag_dx = 0.0;
                 a.shelf_drag = None;
@@ -112,7 +135,7 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 if a.ready() && !a.editing && a.is_slide(SlideId::Ledge) {
                     for i in 0..a.shelf.len() {
                         let tx = LX + i as f32 * (SH_W + SH_GAP);
-                        if in_rect(x, y, tx, SH_Y, SH_W, SH_H) {
+                        if a.shelf[i].gone.is_none() && in_rect(x, y, tx, SH_Y, SH_W, SH_H) {
                             let (bx, by) = (tx + SH_W - 10.0, SH_Y + 10.0);
                             let d2 = (x - bx).powi(2) + (y - by).powi(2);
                             if d2.sqrt() >= 11.0 {
@@ -623,9 +646,11 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 a.display_off = off;
                 if off {
                     let _ = KillTimer(hwnd, 2);
+                    let _ = KillTimer(hwnd, 3);
                     schedule(a); // want = 0 -> timer animasi mati
                 } else {
                     SetTimer(hwnd, 2, 100, None);
+                    SetTimer(hwnd, 3, 33, None);
                     a.last = Instant::now();
                     present(a);
                     schedule(a);

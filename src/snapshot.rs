@@ -117,9 +117,29 @@ fn test_app(s: f32) -> App {
         prev_fg: 0,
         shelf: Vec::new(),
         shelf_flash: None,
+        todo_pop: None,
+        todo_all: None,
+        water_goal_t: None,
+        tm_done: std::cell::Cell::new(None),
+        todo_ring: std::cell::Cell::new(-1.0),
+        todo_cnt: std::cell::Cell::new((usize::MAX, 0, None)),
+        clip_clear_t: None,
+        art_k: std::cell::Cell::new(1.0),
+        pr_hl: std::cell::Cell::new((0.0, 0.0, 0.0)),
+        pr_past: std::cell::Cell::new([0.0; 8]),
+        nt_cnt: std::cell::Cell::new((0, None)),
+        ripple: None,
+        mag: 0.0,
+        todo_edit_end: None,
+        lt_ver: 0,
+        title_seen: String::new(),
+        title_t: Instant::now() - Duration::from_secs(10),
+        tm_ind: 0.0,
+        tm_iv: 0.0,
         clips: clipboard::History::default(),
         clip_scroll: 0,
         clip_flash: None,
+        clip_gone: Vec::new(),
         cal_link: None,
         cal_status: calendar::CalStatus::Off,
         cal: Vec::new(),
@@ -801,6 +821,8 @@ fn clipboard_remove_and_clear_buttons() {
     let (cx, cy, cw, ch) = clipboard::CLEAR_BTN;
     assert_eq!(a.clip_hit(cx + cw / 2.0, cy + ch / 2.0), Some(clipboard::ClipHit::Clear));
     a.clip_apply(clipboard::ClipHit::Clear);
+    assert!(!a.clips.is_empty(), "first click only arms");
+    a.clip_apply(clipboard::ClipHit::Clear);
     assert!(a.clips.is_empty());
     assert_eq!(a.clip_hit(cx + cw / 2.0, cy + ch / 2.0), None, "no Clear button on an empty list");
 }
@@ -822,6 +844,7 @@ fn clipboard_scrolls_with_the_wheel() {
     assert!(!a.clip_wheel(true));
     assert!(a.clip_wheel(false));
     assert_eq!(a.clip_scroll, 1);
+    a.clip_apply(clipboard::ClipHit::Clear);
     a.clip_apply(clipboard::ClipHit::Clear);
     assert_eq!(a.clip_scroll, 0);
 }

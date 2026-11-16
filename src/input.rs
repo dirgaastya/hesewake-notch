@@ -51,6 +51,16 @@ pub(crate) unsafe fn click(x: f32, y: f32) {
                     schedule(a);
                 } else if a.media.sources > 1 && a.lyric_text().is_none() && in_rect(x, y, LX, 6.0, 190.0, 24.0) {
                     let _ = a.tx.send(Cmd::CycleSource);
+                } else if a.vol_pop_hit(x, y) {
+                    a.vol_pop_set(y);
+                    a.last = Instant::now();
+                    present(a);
+                    schedule(a);
+                } else if a.vol_bar_hit(x, y) {
+                    a.vol_bar_set(x);
+                    a.last = Instant::now();
+                    present(a);
+                    schedule(a);
                 } else if d(MCX + 92.0, MCY) < 14.0 {
                     a.lyric_toggle_mode();
                     a.last = Instant::now();
@@ -101,6 +111,13 @@ pub(crate) unsafe fn click(x: f32, y: f32) {
                                 }
                             } else {
                                 a.todos[ri].0 = !a.todos[ri].0;
+                                if a.todos[ri].0 {
+                                    a.todo_pop = Some((ri, Instant::now()));
+                                    if a.todos.iter().all(|t| t.0) {
+                                        a.todo_all = Some(Instant::now());
+                                    }
+                                    schedule(a);
+                                }
                                 save_todos(&a.todos);
                             }
                             break;
@@ -117,7 +134,7 @@ pub(crate) unsafe fn click(x: f32, y: f32) {
                 let mut hit: Option<(usize, bool)> = None;
                 for i in 0..a.shelf.len() {
                     let tx = LX + i as f32 * (SH_W + SH_GAP);
-                    if in_rect(x, y, tx, SH_Y, SH_W, SH_H) {
+                    if a.shelf[i].gone.is_none() && in_rect(x, y, tx, SH_Y, SH_W, SH_H) {
                         let (bx, by) = (tx + SH_W - 10.0, SH_Y + 10.0);
                         hit = Some((i, ((x - bx).powi(2) + (y - by).powi(2)).sqrt() < 11.0));
                         break;
@@ -126,10 +143,12 @@ pub(crate) unsafe fn click(x: f32, y: f32) {
                 if let Some((i, close)) = hit {
                     // Remove on "x", or when the file/folder no longer exists; otherwise open it.
                     if close || !std::path::Path::new(&a.shelf[i].path).exists() {
-                        a.shelf.remove(i);
-                        save_shelf(&a.shelf);
+                        a.shelf_remove(i);
+                        schedule(a);
                     } else {
+                        a.shelf[i].bump = Some(Instant::now());
                         open_path(&a.shelf[i].path);
+                        schedule(a);
                     }
                 }
                 present(a);
@@ -145,12 +164,26 @@ pub(crate) unsafe fn click(x: f32, y: f32) {
                     if !in_card {
                         a.finish_edit(false, true);
                     }
-                } else if !a.note.is_empty() && in_rect(x, y, RX - 56.0, 8.0, 56.0, 24.0) {
-                    a.note.clear();
-                    save_note(&a.note);
-                } else if in_card {
-                    a.begin_note();
+                } else if a.note_btn_at(x, y) == 1 {
+                    note::clip_set(HWND(a.hwnd as _), &a.note);
+                    a.nv.copied = Some(Instant::now());
                     schedule(a);
+                } else if a.note_btn_at(x, y) == 2 {
+                    if a.note_armed() {
+                        a.note.clear();
+                        a.nv.clear_arm = None;
+                        save_note(&a.note);
+                    } else {
+                        a.nv.clear_arm = Some(Instant::now());
+                    }
+                    schedule(a);
+                } else if in_card {
+                    if let Some(u) = a.note_link_at(x, y) {
+                        sys::open_url(&u);
+                    } else {
+                        a.begin_note();
+                        schedule(a);
+                    }
                 }
                 present(a);
             }

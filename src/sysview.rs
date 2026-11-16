@@ -216,6 +216,7 @@ impl App {
 
     pub(crate) fn slide_system(&self, g: &mut Gfx, ox: f32, al: f32) {
         let blue = g.acc.bright;
+        let cur = self.cursor_canvas();
         g.txtb(tr("System"), LX + ox, 10.0, 15.0, [255, 255, 255], al, 120.0);
         let u = &self.sys_ui;
         let el = u.enter_t.elapsed().as_secs_f32();
@@ -229,25 +230,47 @@ impl App {
         // CPU
         let (x, y, a) = card(0);
         g.fill(&rrect(x, y, CARD_W, CARD_H, 12.0), &paint(255, 255, 255, 0.07 * a));
-        g.txt("CPU", x + 12.0, y + 7.0, 11.0, GREY, a, 60.0);
+        let hot = cur.is_some_and(|(hx, hy)| in_rect(hx, hy, x, y, CARD_W, CARD_H));
+        if hot {
+            let peak = u.hist_cpu.iter().cloned().fold(0.0, f32::max);
+            g.txtb(&fill(tr("peak {}"), &[&format!("{:.0}%", peak)]), x + 14.0, y + 8.0, 10.0, blue, a, 100.0);
+        } else {
+            g.txtb("CPU", x + 14.0, y + 8.0, 10.0, GREY, a, 60.0);
+        }
         let cpu_txt = if u.cpu_known { format!("{:.0}%", u.shown[0].clamp(0.0, 100.0)) } else { "...".to_string() };
-        g.txtb(&cpu_txt, x + 12.0, y + 20.0, 22.0, [255, 255, 255], a, 70.0);
-        self.spark(g, &u.hist_cpu, 100.0, frac, x + 84.0, y + 10.0, 82.0, 34.0, blue, a);
+        g.txtb(&cpu_txt, x + 14.0, y + 18.0, 22.0, [255, 255, 255], a, 70.0);
+        // Beban naik: sparkline bergeser dari aksen ke merah.
+        let load = ((u.shown[0] - 55.0) / 35.0).clamp(0.0, 1.0);
+        let mix = |p: u8, q: u8| (p as f32 + (q as f32 - p as f32) * load) as u8;
+        let cpu_col = [mix(blue[0], 255), mix(blue[1], 110), mix(blue[2], 90)];
+        self.spark(g, &u.hist_cpu, 100.0, frac, x + 88.0, y + 12.0, 76.0, 30.0, cpu_col, a);
 
         // Memori
         let (x, y, a) = card(1);
         g.fill(&rrect(x, y, CARD_W, CARD_H, 12.0), &paint(255, 255, 255, 0.07 * a));
-        g.txt(tr("MEMORY"), x + 12.0, y + 7.0, 11.0, GREY, a, 70.0);
-        g.txtb(&format!("{:.1} GB", u.ram.0), x + 12.0, y + 20.0, 20.0, [255, 255, 255], a, 90.0);
-        g.txt(&fill(tr("of {} GB"), &[&format!("{:.1}", u.ram.1)]), x + 12.0, y + 40.0, 11.0, GREY, a, 90.0);
+        if cur.is_some_and(|(hx, hy)| in_rect(hx, hy, x, y, CARD_W, CARD_H)) {
+            g.txtb(&fill(tr("{} free"), &[&format!("{:.1} GB", (u.ram.1 - u.ram.0).max(0.0))]), x + 14.0, y + 8.0, 10.0, blue, a, 100.0);
+        } else {
+            g.txtb(tr("MEMORY"), x + 14.0, y + 8.0, 10.0, GREY, a, 70.0);
+        }
+        let used = format!("{:.1} GB", u.ram.0);
+        g.txtb(&used, x + 14.0, y + 19.0, 20.0, [255, 255, 255], a, 90.0);
+        // "of 16 GB" di baris yang sama dengan angkanya supaya tidak menempel di dasar kartu.
+        let uw = g.width_ex(&used, 20.0, true);
+        g.txt(&fill(tr("of {} GB"), &[&format!("{:.0}", u.ram.1)]), x + 14.0 + uw + 4.0, y + 29.0, 10.0, GREY, a, 56.0);
         let rc = if u.shown[1] > 85.0 { ACCENT } else { blue };
-        g.ring(x + CARD_W - 28.0, y + CARD_H / 2.0, 14.0, (u.shown[1] / 100.0).clamp(0.0, 1.0), 3.5, &paint(255, 255, 255, 0.14 * a), &paint(rc[0], rc[1], rc[2], a));
-        g.txt_c(&format!("{:.0}", u.shown[1].clamp(0.0, 100.0)), x + CARD_W - 28.0, y + CARD_H / 2.0 - 6.0, 10.5, [235, 235, 240], a, 30.0, true);
+        g.ring(x + CARD_W - 30.0, y + 28.0, 13.0, (u.shown[1] / 100.0).clamp(0.0, 1.0), 3.5, &paint(255, 255, 255, 0.14 * a), &paint(rc[0], rc[1], rc[2], a));
+        g.txt_c(&format!("{:.0}", u.shown[1].clamp(0.0, 100.0)), x + CARD_W - 30.0, y + 28.0 - 6.0, 10.5, [235, 235, 240], a, 30.0, true);
 
         // Jaringan
         let (x, y, a) = card(2);
         g.fill(&rrect(x, y, CARD_W, CARD_H, 12.0), &paint(255, 255, 255, 0.07 * a));
-        g.txt(tr("NETWORK"), x + 12.0, y + 7.0, 11.0, GREY, a, 70.0);
+        if cur.is_some_and(|(hx, hy)| in_rect(hx, hy, x, y, CARD_W, CARD_H)) {
+            let pk = u.hist_net.iter().cloned().fold(0.0, f32::max);
+            g.txtb(&fill(tr("peak {}"), &[&fmt_rate(pk)]), x + 14.0, y + 8.0, 10.0, blue, a, 120.0);
+        } else {
+            g.txtb(tr("NETWORK"), x + 14.0, y + 8.0, 10.0, GREY, a, 70.0);
+        }
         let arrow = |g: &mut Gfx, ax: f32, ay: f32, down: bool, c: [u8; 3]| {
             let p = paint(c[0], c[1], c[2], a);
             let d = if down { 1.0 } else { -1.0 };
@@ -255,20 +278,22 @@ impl App {
             g.line(ax - 2.5, ay + 1.0 * d, ax, ay + 3.5 * d, 1.5, &p);
             g.line(ax + 2.5, ay + 1.0 * d, ax, ay + 3.5 * d, 1.5, &p);
         };
-        arrow(g, x + 16.0, y + 28.0, true, blue);
-        g.txtb(&fmt_rate(u.down), x + 26.0, y + 22.0, 12.0, [255, 255, 255], a, 80.0);
-        arrow(g, x + 16.0, y + 42.0, false, GREEN);
-        g.txt(&fmt_rate(u.up), x + 26.0, y + 36.0, 11.0, [200, 200, 208], a, 80.0);
+        let t = self.t;
+        let sway = |rate: f32, ph: f32| (t * 5.0 + ph).sin() * 0.8 * (rate / 2.0e6).clamp(0.0, 1.0);
+        arrow(g, x + 16.0, y + 29.0 + sway(u.down, 0.0), true, blue);
+        g.txtb(&fmt_rate(u.down), x + 26.0, y + 21.0, 12.0, [255, 255, 255], a, 80.0);
+        arrow(g, x + 16.0, y + 43.0 - sway(u.up * 4.0, 1.0), false, GREEN);
+        g.txt(&fmt_rate(u.up), x + 26.0, y + 35.0, 11.0, [200, 200, 208], a, 80.0);
         let peak = u.hist_net.iter().cloned().fold(256.0 * 1024.0, f32::max);
-        self.spark(g, &u.hist_net, peak, frac, x + 100.0, y + 10.0, 68.0, 34.0, blue, a);
+        self.spark(g, &u.hist_net, peak, frac, x + 104.0, y + 12.0, 60.0, 30.0, blue, a);
 
         // Baterai
         let (x, y, a) = card(3);
         g.fill(&rrect(x, y, CARD_W, CARD_H, 12.0), &paint(255, 255, 255, 0.07 * a));
-        g.txt(tr("BATTERY"), x + 12.0, y + 7.0, 11.0, GREY, a, 70.0);
+        g.txtb(tr("BATTERY"), x + 14.0, y + 8.0, 10.0, GREY, a, 70.0);
         match u.bat {
             Some(b) => {
-                g.txtb(&format!("{:.0}%", u.shown[2].clamp(0.0, 100.0)), x + 12.0, y + 20.0, 22.0, [255, 255, 255], a, 70.0);
+                g.txtb(&format!("{:.0}%", u.shown[2].clamp(0.0, 100.0)), x + 14.0, y + 18.0, 22.0, [255, 255, 255], a, 70.0);
                 let sub = if b.charging {
                     tr("Charging").to_string()
                 } else if b.ac {
@@ -276,16 +301,24 @@ impl App {
                 } else {
                     b.secs.map_or(tr("On battery").to_string(), |s| fill(tr("{} left"), &[&fmt_remaining(s)]))
                 };
-                g.txt(&sub, x + 82.0, y + 29.0, 11.0, GREY, a, 90.0);
+                g.txt(&sub, x + 86.0, y + 28.0, 11.0, GREY, a, 90.0);
                 let col = if b.pct <= 20 && !b.ac { ACCENT } else { GREEN };
-                g.ring(x + CARD_W - 24.0, y + CARD_H / 2.0, 11.0, (u.shown[2] / 100.0).clamp(0.0, 1.0), 3.0, &paint(255, 255, 255, 0.14 * a), &paint(col[0], col[1], col[2], a));
+                let low = b.pct <= 20 && !b.ac;
+                let pul = if low { 0.6 + 0.4 * (self.t * 5.0).sin() } else { 1.0 };
+                g.ring(x + CARD_W - 28.0, y + 28.0, 11.0, (u.shown[2] / 100.0).clamp(0.0, 1.0), 3.0, &paint(255, 255, 255, 0.14 * a), &paint(col[0], col[1], col[2], a * pul));
+                if b.charging {
+                    // sorot putih berputar di cincin saat mengisi
+                    let a0 = self.t * 3.0;
+                    g.arc(x + CARD_W - 28.0, y + 28.0, 11.0, a0, a0 + 0.7, 3.0, &paint(255, 255, 255, 0.7 * a));
+                }
                 if b.ac {
-                    g.icon_bolt(x + CARD_W - 24.0, y + CARD_H / 2.0, 10.0, &paint(col[0], col[1], col[2], a));
+                    g.icon_bolt(x + CARD_W - 28.0, y + 28.0, 10.0 * (1.0 + 0.08 * (self.t * 4.0).sin()), &paint(col[0], col[1], col[2], a));
                 }
             }
             None => {
-                g.txtb(tr("No battery"), x + 12.0, y + 22.0, 14.0, [200, 200, 208], a, 120.0);
-                g.txt(tr("Desktop PC"), x + 12.0, y + 40.0, 11.0, GREY, a, 90.0);
+                g.txtb(tr("No battery"), x + 14.0, y + 21.0, 16.0, [200, 200, 208], a, 100.0);
+                let nw = g.width_ex(tr("No battery"), 16.0, true);
+                g.txt(tr("Desktop PC"), x + 14.0 + nw + 6.0, y + 27.0, 10.0, GREY, a, 70.0);
             }
         }
     }
@@ -316,7 +349,20 @@ impl App {
         let mut area = vec![(pts[0].0, y + h - 2.0)];
         area.extend(pts.iter().copied());
         area.push((pts[n - 1].0, y + h - 2.0));
-        g.poly(&area, &paint(rgb[0], rgb[1], rgb[2], 0.22 * a));
+        let col = |al: f32| Color::from_rgba8(rgb[0], rgb[1], rgb[2], (al.clamp(0.0, 1.0) * 255.0) as u8);
+        let mut ap = Paint::default();
+        if let Some(sh) = LinearGradient::new(Point::from_xy(0.0, y), Point::from_xy(0.0, y + h), vec![GradientStop::new(0.0, col(0.38 * a)), GradientStop::new(1.0, col(0.0))], SpreadMode::Pad, Transform::identity()) {
+            ap.shader = sh;
+            ap.anti_alias = true;
+            g.poly(&area, &ap);
+        } else {
+            g.poly(&area, &paint(rgb[0], rgb[1], rgb[2], 0.22 * a));
+        }
+        // glow tipis di bawah garis
+        let glow = paint(rgb[0], rgb[1], rgb[2], 0.12 * a);
+        for pair in pts.windows(2) {
+            g.line(pair[0].0, pair[0].1, pair[1].0, pair[1].1, 4.0, &glow);
+        }
         let lp = paint(rgb[0], rgb[1], rgb[2], a);
         for pair in pts.windows(2) {
             g.line(pair[0].0, pair[0].1, pair[1].0, pair[1].1, 1.4, &lp);

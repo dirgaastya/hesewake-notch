@@ -4,6 +4,24 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/), versi mengikut
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-16
+
+Rilis ini membawa penyegaran tampilan dan animasi notch, dipindahkan dari prototipe desain ke kode Rust.
+
+### Added
+- **Animasi dan gerak yang lebih hidup di semua slide**: pegas baru yang lebih lincah, notch yang sedikit tertarik ke arah kursor, riak saat klik, titik slide berbentuk kapsul, panah navigasi, transisi antar slide, penanda jumlah di titik Notifications, konfeti, dan animasi tersendiri di tiap slide.
+- **Judul lagu panjang berjalan** di slide Music, dan pengatur volume muncul tepat di atas tombol output.
+- **Prayer**: busur waktu sholat dengan bintang jatuh.
+- **Scrap**: tautan tetap tampil sebagai lencana (chip) saat diedit. Panah dan Backspace/Delete melewati atau menghapus satu tautan utuh. Judul halaman tautan yang ditempel diambil otomatis (satu permintaan GET ke alamat itu); bisa dimatikan di Settings (`link_titles`, menyala secara default).
+- **Settings**: kursor berubah menjadi tangan di atas semua yang bisa diklik dan I-beam di kolom teks; hover memudar halus; klik memberi riak beraksen; tombol, stepper, dan swatch sedikit menciut saat ditekan.
+
+### Changed
+- Slide Ledge kini bernama **Shelf** di tampilan; mengeluarkan item dari Shelf memakai animasi memudar dan menyusut.
+- Teks kecil digambar sedikit lebih tebal supaya lebih mudah dibaca.
+
+### Fixed
+- Teks Scrap berwarna merah muda (sisa tema lama); kini putih netral mengikuti kartu beraksen.
+
 ## [0.13.6] - 2026-11-14
 
 Rilis ini berisi kontribusi dari @MaulanaRhezaArdiansyah (PR #72).

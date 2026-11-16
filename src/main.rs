@@ -112,6 +112,8 @@ mod snapshot;
 mod sys;
 mod sysview;
 mod weather;
+mod linktitle;
+mod cursor;
 mod todo;
 mod textfield;
 mod timer;
@@ -260,10 +262,45 @@ struct App {
     prev_fg: isize,
     shelf: Vec<ShelfItem>,
     shelf_flash: Option<Instant>,
+    /// To-do: baris yang baru dicentang (indeks, waktu) untuk animasi pop.
+    todo_pop: Option<(usize, Instant)>,
+    /// To-do: saat semua tugas baru selesai (konfeti besar).
+    todo_all: Option<Instant>,
+    /// Water: kapan target harian baru tercapai (gelembung dan denyut cincin).
+    water_goal_t: Option<Instant>,
+    /// Timer: kapan hitung mundur selesai (konfeti) dan Clipboard: kapan Clear diarmkan (konfirmasi dua langkah).
+    tm_done: std::cell::Cell<Option<Instant>>,
+    /// Todo: cincin progres yang ditampilkan (mengejar nilai sebenarnya).
+    todo_ring: std::cell::Cell<f32>,
+    /// Todo: jumlah selesai sebelumnya dan kapan berubah (angka berguling).
+    todo_cnt: std::cell::Cell<(usize, usize, Option<Instant>)>,
+    clip_clear_t: Option<Instant>,
+    /// Music: skala sampul yang ditampilkan (mengecil saat dijeda).
+    art_k: std::cell::Cell<f32>,
+    /// Prayer: sorotan emas yang meluncur (x, y, alpha) dan warna "sudah lewat" tiap baris.
+    pr_hl: std::cell::Cell<(f32, f32, f32)>,
+    pr_past: std::cell::Cell<[f32; 8]>,
+    /// Notifications: jumlah terakhir yang tampil dan kapan berubah (denyut lencana).
+    nt_cnt: std::cell::Cell<(usize, Option<Instant>)>,
+    /// Riak klik di notch yang terbuka (x, y, waktu) dan tarikan "magnet" notch kecil ke kursor (0..1).
+    ripple: Option<(f32, f32, Instant)>,
+    mag: f32,
+    /// To-do: kapan input selesai (panel kiri muncul kembali dengan fade).
+    todo_edit_end: Option<Instant>,
+    /// Scrap: versi terakhir hasil judul tautan yang sudah digambar (linktitle.rs).
+    lt_ver: u32,
+    /// Music: judul yang terakhir terlihat dan kapan berganti (transisi judul/artis).
+    title_seen: String,
+    title_t: Instant,
+    /// Timer: posisi x indikator mode yang meluncur (0 = belum diinisialisasi) dan kecepatannya.
+    tm_ind: f32,
+    tm_iv: f32,
     /// Clipboard slide: copied texts (newest first), scroll offset, and when an entry was last copied back.
     clips: clipboard::History,
     clip_scroll: usize,
     clip_flash: Option<Instant>,
+    /// Clipboard: baris yang baru dihapus (teks, baris tampak, waktu) untuk animasi keluar.
+    clip_gone: Vec<(String, usize, Instant)>,
     /// Calendar (ICS link): the link, feed status, upcoming events, meetings already announced, the Settings row's
     /// "no link on the clipboard" / "press again to remove" moments, and the Agenda slide's scroll.
     cal_link: Option<String>,
@@ -663,9 +700,29 @@ fn main() -> Result<()> {
             prev_fg: 0,
             shelf: load_shelf(),
             shelf_flash: None,
+            todo_pop: None,
+            todo_all: None,
+            water_goal_t: None,
+            tm_done: std::cell::Cell::new(None),
+            todo_ring: std::cell::Cell::new(-1.0),
+            todo_cnt: std::cell::Cell::new((usize::MAX, 0, None)),
+            clip_clear_t: None,
+            art_k: std::cell::Cell::new(1.0),
+            pr_hl: std::cell::Cell::new((0.0, 0.0, 0.0)),
+            pr_past: std::cell::Cell::new([0.0; 8]),
+            nt_cnt: std::cell::Cell::new((0, None)),
+            ripple: None,
+            mag: 0.0,
+            todo_edit_end: None,
+            lt_ver: 0,
+            title_seen: String::new(),
+            title_t: Instant::now() - Duration::from_secs(10),
+            tm_ind: 0.0,
+            tm_iv: 0.0,
             clips: clipboard::History::default(),
             clip_scroll: 0,
             clip_flash: None,
+            clip_gone: Vec::new(),
             cal_status: if cal_link.is_some() { calendar::CalStatus::Loading } else { calendar::CalStatus::Off },
             cal_link,
             cal: Vec::new(),
@@ -717,6 +774,7 @@ fn main() -> Result<()> {
 
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         SetTimer(hwnd, 2, 100, None);
+        SetTimer(hwnd, 3, 33, None);
         trim_memory();
 
         pace::run_loop();
