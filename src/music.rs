@@ -1018,7 +1018,19 @@ impl App {
         let tk = (self.title_t.elapsed().as_secs_f32() / 0.35).clamp(0.0, 1.0);
         let tk = tk * tk * (3.0 - 2.0 * tk);
         let (tdx, tal) = ((1.0 - tk) * 14.0, al * (0.15 + 0.85 * tk));
-        g.txtb(title, MX + ox + tdx, 40.0, 17.0, [255, 255, 255], tal, MW);
+        let tw = g.width_ex(title, 17.0, true);
+        if tw <= MW || self.media.title.is_empty() {
+            g.txtb(title, MX + ox + tdx, 40.0, 17.0, [255, 255, 255], tal, MW);
+        } else {
+            // judul panjang berjalan (marquee) seperti di notch kecil: jeda, geser, ulang
+            let cycle = tw + MARQUEE_GAP;
+            let period = MARQUEE_PAUSE + cycle / MARQUEE_SPEED;
+            let e = (self.t - self.title_t0).max(0.0) % period;
+            let off = if e < MARQUEE_PAUSE { 0.0 } else { (e - MARQUEE_PAUSE) * MARQUEE_SPEED };
+            let (cl, cr) = (MX + ox - 1.0, MX + ox + MW + 1.0);
+            g.txtb_clip(title, MX + ox + tdx - off, 40.0, 17.0, [255, 255, 255], tal, cl, cr, 8.0);
+            g.txtb_clip(title, MX + ox + tdx - off + cycle, 40.0, 17.0, [255, 255, 255], tal, cl, cr, 8.0);
+        }
         g.txt(&self.media.artist, MX + ox + tdx, 64.0, 13.0, [170, 170, 175], tal, MW);
         if self.media.dur > 0 {
             let fr = (self.media.pos as f32 / self.media.dur as f32).clamp(0.0, 1.0);

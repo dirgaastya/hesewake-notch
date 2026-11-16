@@ -379,6 +379,12 @@ impl Gfx {
             t.draw(&mut self.pm, s, x, y + self.text_dy, size, col, al, f32::INFINITY, false, Some((cl, cr, fade)));
         }
     }
+    /// Like `txt_clip`, bold.
+    pub(crate) fn txtb_clip(&mut self, s: &str, x: f32, y: f32, size: f32, col: [u8; 3], al: f32, cl: f32, cr: f32, fade: f32) {
+        if let Some(t) = self.text.as_mut() {
+            t.draw(&mut self.pm, s, x, y + self.text_dy, size, col, al, f32::INFINITY, true, Some((cl, cr, fade)));
+        }
+    }
     pub(crate) fn txt(&mut self, s: &str, x: f32, y: f32, size: f32, col: [u8; 3], al: f32, max_w: f32) {
         self.txt_ex(s, x, y, size, col, al, max_w, false);
     }
