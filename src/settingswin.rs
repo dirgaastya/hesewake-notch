@@ -21,6 +21,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TR
 
 /// Not in the enabled `windows` features (it lives with the common controls).
 const WM_MOUSELEAVE: u32 = 0x02A3;
+/// The click ripple and the dip of a pressed control, in seconds.
+const RIPPLE_SECS: f32 = 0.7;
+const PRESS_SECS: f32 = 0.22;
 
 // ---------------------------------------------------------------- layout (logical px)
 const WIN_W: f32 = 820.0;
@@ -146,7 +149,7 @@ impl Sec {
 }
 
 /// Something clickable in the window.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Hit {
     Nav(usize),
     Close,
@@ -229,6 +232,12 @@ pub(crate) struct Win {
     buf: Vec<u8>,
     hits: Vec<(f32, f32, f32, f32, Hit)>,
     hover: Option<Hit>,
+    /// How far each element's hover has faded in (0..1); an entry goes away once it is back to 0.
+    hv: HashMap<Hit, f32>,
+    /// The last click: where (logical px) and when, for the ripple.
+    rip: Option<(f32, f32, Instant)>,
+    /// The element last pressed and when: it dips for a moment.
+    press: Option<(Hit, Instant)>,
     cut: Vec<String>,
     content_h: f32,
     scroll: f32,
@@ -264,6 +273,9 @@ impl Win {
             buf: Vec::new(),
             hits: Vec::new(),
             hover: None,
+            hv: HashMap::new(),
+            rip: None,
+            press: None,
             cut: Vec::new(),
             content_h: 0.0,
             scroll: 0.0,
@@ -495,6 +507,9 @@ impl App {
         let w = &self.sw;
         (w.pill.0 - nav_y(w.sec)).abs() > 0.01
             || w.pill.1.abs() > 0.01
+            || w.hv.iter().any(|(&h, &x)| (x - if w.hover == Some(h) { 1.0 } else { 0.0 }).abs() > 0.004)
+            || w.rip.is_some_and(|(_, _, t)| t.elapsed().as_secs_f32() < RIPPLE_SECS)
+            || w.press.is_some_and(|(_, t)| t.elapsed().as_secs_f32() < PRESS_SECS)
             || (w.scroll - w.scroll_to).abs() > 0.3
             || w.knobs.iter().any(|(&k, &(x, v))| (x - self.sw_target(k)).abs() > 0.001 || v.abs() > 0.01)
             || w.segs.iter().any(|(&o, &(x, v))| (x - self.opt_choice(o) as f32).abs() > 0.001 || v.abs() > 0.01)
@@ -560,6 +575,15 @@ impl App {
         if (self.sw.scroll - self.sw.scroll_to).abs() < 0.3 {
             self.sw.scroll = self.sw.scroll_to;
         }
+        let hover = self.sw.hover;
+        for (h, x) in self.sw.hv.iter_mut() {
+            let t = if hover == Some(*h) { 1.0 } else { 0.0 };
+            *x += (t - *x) * (1.0 - (-dt * if t > 0.5 { 22.0 } else { 12.0 }).exp());
+            if (t - *x).abs() < 0.004 {
+                *x = t;
+            }
+        }
+        self.sw.hv.retain(|h, x| *x > 0.0 || hover == Some(*h));
         let knobs: Vec<(Knob, f32)> = self.sw.knobs.keys().map(|&k| (k, self.sw_target(k))).collect();
         for (k, t) in knobs {
             if let Some((x, v)) = self.sw.knobs.get_mut(&k) {
@@ -631,6 +655,9 @@ impl App {
             self.sw.pill = (nav_y(self.sw.sec), 0.0);
             self.sw.knobs.clear();
             self.sw.segs.clear();
+            self.sw.hv.clear();
+            self.sw.rip = None;
+            self.sw.press = None;
             SetTimer(hwnd, 2, 500, None);
             // Windows only asks for the frame again (WM_NCCALCSIZE, where the caption is dropped) once it is told
             // the frame changed; without this the system title bar stays.
@@ -805,6 +832,31 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 LRESULT(HTCLIENT as isize)
             }
         }
+        WM_SETCURSOR => {
+            // a hand over anything that answers a click, an I-beam over the text box
+            if (lp.0 & 0xffff) as u32 == HTCLIENT {
+                let mut p = POINT::default();
+                if GetCursorPos(&mut p).is_ok() {
+                    let _ = ScreenToClient(hwnd, &mut p);
+                    let s = scale();
+                    let mut kind = 0u8;
+                    with_app(|a| {
+                        kind = match a.sw_hit(p.x as f32 / s, p.y as f32 / s) {
+                            Some(Hit::PanelInput) => 2,
+                            Some(_) => 1,
+                            None => 0,
+                        };
+                    });
+                    if kind != 0 {
+                        if let Ok(c) = LoadCursorW(None, if kind == 2 { IDC_IBEAM } else { IDC_HAND }) {
+                            SetCursor(c);
+                            return LRESULT(1);
+                        }
+                    }
+                }
+            }
+            DefWindowProcW(hwnd, msg, wp, lp)
+        }
         WM_ERASEBKGND => LRESULT(1),
         WM_PAINT => {
             let mut ps = PAINTSTRUCT::default();
@@ -843,7 +895,10 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 let h = a.sw_hit(px as f32 / s, py as f32 / s);
                 if h != a.sw.hover {
                     a.sw.hover = h;
-                    let _ = InvalidateRect(hwnd, None, false);
+                    if let Some(h) = h {
+                        a.sw.hv.entry(h).or_insert(0.0);
+                    }
+                    a.sw_kick();
                 }
             });
             LRESULT(0)
@@ -852,7 +907,7 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
             with_app(|a| {
                 a.sw.tracking = false;
                 if a.sw.hover.take().is_some() {
-                    let _ = InvalidateRect(hwnd, None, false);
+                    a.sw_kick();
                 }
             });
             LRESULT(0)
@@ -864,7 +919,11 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
             with_app(|a| match a.sw_hit(px as f32 / s, py as f32 / s) {
                 Some(Hit::Close) => after = After::Close,
                 Some(Hit::Minimize) => after = After::Minimize,
-                Some(h) => a.sw_click(h),
+                Some(h) => {
+                    a.sw.rip = Some((px as f32 / s, py as f32 / s, Instant::now()));
+                    a.sw.press = Some((h, Instant::now()));
+                    a.sw_click(h);
+                }
                 None => a.sw_field_focus(false),
             });
             match after {
@@ -928,6 +987,9 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 a.sw.gfx = None;
                 a.sw.buf = Vec::new();
                 a.sw.hover = None;
+                a.sw.hv.clear();
+                a.sw.rip = None;
+                a.sw.press = None;
                 a.sw.tracking = false;
             });
             LRESULT(0)
@@ -974,9 +1036,22 @@ pub(crate) fn render(a: &mut App) {
     };
     g.acc = accent::get(a.cfg.accent);
     g.pm.fill(Color::from_rgba8(PANEL[0], PANEL[1], PANEL[2], 255));
-    let mut d = Draw { hits: Vec::new(), hover: a.sw.hover, cut: Vec::new() };
+    let press = a.sw.press.map(|(h, t)| (h, t.elapsed().as_secs_f32() / PRESS_SECS)).filter(|&(_, e)| e < 1.0).map(|(h, e)| (h, (1.0 - e).powi(2)));
+    let mut d = Draw { hits: Vec::new(), hover: a.sw.hover, lv: a.sw.hv.clone(), press, cut: Vec::new() };
     let content_h = d.page(a, &mut g);
     d.chrome(a, &mut g);
+    // click ripple: a small accent circle that widens and fades, like the notch's
+    if let Some((rx, ry, t)) = a.sw.rip {
+        let e = t.elapsed().as_secs_f32() / RIPPLE_SECS;
+        if e < 1.0 {
+            let k = 1.0 - (1.0 - e).powi(3);
+            let r = 3.0 + k * 22.0;
+            let (b, m) = (g.acc.bright, g.acc.main);
+            g.circle(rx, ry, r, &paint(b[0], b[1], b[2], 0.14 * (1.0 - e)));
+            let ringp = paint(m[0], m[1], m[2], 0.55 * (1.0 - e));
+            g.ring(rx, ry, r, 1.0, 0.8, &ringp, &ringp);
+        }
+    }
     a.sw.gfx = Some(g);
     a.sw.hits = d.hits;
     a.sw.cut = d.cut;
@@ -1028,12 +1103,21 @@ pub(crate) fn scroll_to_end(a: &mut App) {
 struct Draw {
     hits: Vec<(f32, f32, f32, f32, Hit)>,
     hover: Option<Hit>,
+    /// Hover fade levels by element, and the element dipping from a press (1 = just pressed, down to 0).
+    lv: HashMap<Hit, f32>,
+    press: Option<(Hit, f32)>,
     /// Texts that did not fit their room on this frame (tests check none is cut).
     cut: Vec<String>,
 }
 
 fn rgb(c: [u8; 3], a: f32) -> Paint<'static> {
     paint(c[0], c[1], c[2], a)
+}
+
+/// `a` towards `b` by `t`.
+fn mixc(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
+    let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t.clamp(0.0, 1.0)).round() as u8;
+    [m(a[0], b[0]), m(a[1], b[1]), m(a[2], b[2])]
 }
 
 impl Draw {
@@ -1052,8 +1136,14 @@ impl Draw {
         }
     }
 
-    fn is_hover(&self, h: Hit) -> bool {
-        self.hover == Some(h)
+    /// 0..1: how much `h` is hovered (fading in and out).
+    fn hv(&self, h: Hit) -> f32 {
+        self.lv.get(&h).copied().unwrap_or(if self.hover == Some(h) { 1.0 } else { 0.0 })
+    }
+
+    /// 0..1: how much `h` is dipping from a press.
+    fn pr(&self, h: Hit) -> f32 {
+        self.press.filter(|&(p, _)| p == h).map_or(0.0, |(_, k)| k)
     }
 
     /// Sidebar and top bar: drawn last, over the scrolled page.
@@ -1072,19 +1162,21 @@ impl Draw {
 
         // window buttons
         let (cx, cy, cw, ch) = close_rect();
-        if self.is_hover(Hit::Close) {
-            g.fill(&rrect(cx, cy, cw, ch, 9.0), &paint(232, 17, 35, 1.0));
+        let hc = self.hv(Hit::Close);
+        if hc > 0.01 {
+            g.fill(&rrect(cx, cy, cw, ch, 9.0), &paint(232, 17, 35, hc));
         }
-        let col = if self.is_hover(Hit::Close) { paint(255, 255, 255, 1.0) } else { rgb(TEXT_FAINT, 1.0) };
+        let col = rgb(mixc(TEXT_FAINT, [255, 255, 255], hc), 1.0);
         let (mx, my) = (cx + cw / 2.0, cy + ch / 2.0);
         g.line(mx - 5.0, my - 5.0, mx + 5.0, my + 5.0, 1.6, &col);
         g.line(mx + 5.0, my - 5.0, mx - 5.0, my + 5.0, 1.6, &col);
         self.hits.push((cx, cy, cw, ch, Hit::Close));
         let (nx, ny, nw, nh) = min_rect();
-        if self.is_hover(Hit::Minimize) {
-            g.fill(&rrect(nx, ny, nw, nh, 9.0), &paint(255, 255, 255, 0.08));
+        let hm = self.hv(Hit::Minimize);
+        if hm > 0.01 {
+            g.fill(&rrect(nx, ny, nw, nh, 9.0), &paint(255, 255, 255, 0.08 * hm));
         }
-        let col = if self.is_hover(Hit::Minimize) { paint(255, 255, 255, 1.0) } else { rgb(TEXT_FAINT, 1.0) };
+        let col = rgb(mixc(TEXT_FAINT, [255, 255, 255], hm), 1.0);
         g.line(nx + nw / 2.0 - 6.0, ny + nh / 2.0, nx + nw / 2.0 + 6.0, ny + nh / 2.0, 1.6, &col);
         self.hits.push((nx, ny, nw, nh, Hit::Minimize));
 
@@ -1108,10 +1200,13 @@ impl Draw {
         for (i, &sec) in SECS.iter().enumerate() {
             let y = nav_y(i);
             let on = i == a.sw.sec;
-            let hot = self.is_hover(Hit::Nav(i));
-            let icol = if on { g.sacc(1.0) } else if hot { paint(255, 255, 255, 0.9) } else { rgb(TEXT_FAINT, 1.0) };
+            let hot = self.hv(Hit::Nav(i));
+            if !on && hot > 0.01 {
+                g.fill(&rrect(10.0, y, SIDE_W - 20.0, NAV_H, 10.0), &paint(255, 255, 255, 0.04 * hot));
+            }
+            let icol = if on { g.sacc(1.0) } else { rgb(mixc(TEXT_FAINT, [255, 255, 255], hot * 0.9), 1.0) };
             sec.icon(g, 32.0, y + NAV_H / 2.0, 15.0, &icol);
-            let tcol = if on || hot { [255, 255, 255] } else { TEXT_DIM };
+            let tcol = if on { [255, 255, 255] } else { mixc(TEXT_DIM, [255, 255, 255], hot) };
             let ty0 = y + ty(NAV_H, 13.0);
             self.check(g, sec.name(), 13.0, true, SIDE_W - 66.0);
             if on {
@@ -1233,13 +1328,13 @@ impl Draw {
                 for i in 0..n {
                     let c = accent::get(i).main;
                     let x = x0 + i as f32 * 32.0;
-                    let hot = self.is_hover(Hit::Pick(r.id, i));
+                    let hot = self.hv(Hit::Pick(r.id, i));
                     if i == a.opt_choice(r.id) {
                         if let Some(p) = PathBuilder::from_circle(x, cy, 15.0) {
                             g.stroke(&p, &rgb(c, 1.0), 2.0);
                         }
                     }
-                    g.circle(x, cy, if hot { 12.5 } else { 11.0 }, &rgb(c, 1.0));
+                    g.circle(x, cy, 11.0 + 1.5 * hot - 2.0 * self.pr(Hit::Pick(r.id, i)), &rgb(c, 1.0));
                     self.hit(x - 16.0, cy - 16.0, 32.0, 32.0, Hit::Pick(r.id, i));
                 }
                 x0 - 16.0
@@ -1249,8 +1344,8 @@ impl Draw {
                 let px = right - 14.0;
                 let mx = px - 28.0 - vw;
                 for (x, plus) in [(mx, false), (px, true)] {
-                    let hot = self.is_hover(Hit::Step(r.id, plus));
-                    g.circle(x, cy, 14.0, &paint(255, 255, 255, if hot { 0.14 } else { 0.07 }));
+                    let hot = self.hv(Hit::Step(r.id, plus));
+                    g.circle(x, cy, 14.0 - 1.5 * self.pr(Hit::Step(r.id, plus)), &paint(255, 255, 255, 0.07 + 0.07 * hot));
                     let c = paint(255, 255, 255, 0.9);
                     let d = if plus { 1.0 } else { -1.0 };
                     g.line(x - 2.0 * d, cy - 4.5, x + 2.5 * d, cy, 1.6, &c);
@@ -1263,9 +1358,10 @@ impl Draw {
             Ctl::Button(label, danger) => {
                 let bw = g.width_ex(label, 12.5, true).ceil() + 30.0;
                 let bx = right - bw;
-                let hot = self.is_hover(Hit::Press(r.id));
+                let hot = self.hv(Hit::Press(r.id));
                 let (fill, text) = if *danger { ([255, 69, 58], [255, 165, 155]) } else { (g.acc.bright, g.acc.pale) };
-                g.fill(&rrect(bx, cy - 15.0, bw, 30.0, 15.0), &rgb(fill, if hot { 0.32 } else { 0.2 }));
+                let d = 1.5 * self.pr(Hit::Press(r.id));
+                g.fill(&rrect(bx + d, cy - 15.0 + d, bw - 2.0 * d, 30.0 - 2.0 * d, 15.0 - d), &rgb(fill, 0.2 + 0.12 * hot + 0.1 * d));
                 g.txt_c(label, bx + bw / 2.0, cy + ty(0.0, 12.5), 12.5, text, 1.0, bw, true);
                 self.hit(bx, cy - 15.0, bw, 30.0, Hit::Press(r.id));
                 bx
@@ -1295,8 +1391,8 @@ impl Draw {
         g.fill(&th, &g.sacc(0.24));
         g.stroke(&th, &g.sacc(0.4), 1.0);
         for (i, (label, &(bx, bw))) in opts.iter().zip(rects).enumerate() {
-            let hot = self.is_hover(Hit::Pick(o, i));
-            let col = if i == cur { g.acc.pale } else if hot { [255, 255, 255] } else { TEXT_DIM };
+            let hot = self.hv(Hit::Pick(o, i));
+            let col = if i == cur { g.acc.pale } else { mixc(TEXT_DIM, [255, 255, 255], hot) };
             self.check(g, label, 12.5, true, bw - 4.0);
             g.txt_c(label, bx + bw / 2.0, y + 3.0 + ty(24.0, 12.5), 12.5, col, 1.0, bw - 4.0, i == cur);
             self.hit(bx, y, bw, 30.0, Hit::Pick(o, i));
@@ -1327,11 +1423,11 @@ impl Draw {
             self.hit(kx - 4.0, cy - 17.0, 54.0, 34.0, Hit::SlideToggle(i));
             for (bx, up, ok) in [(kx - 22.0, false, i + 1 < n), (kx - 52.0, true, i > 0)] {
                 let hit = Hit::SlideMove(i, up);
-                let hot = ok && self.is_hover(hit);
-                if hot {
-                    g.circle(bx, cy, 13.0, &paint(255, 255, 255, 0.1));
+                let hot = if ok { self.hv(hit) } else { 0.0 };
+                if hot > 0.01 {
+                    g.circle(bx, cy, 13.0 - 1.5 * self.pr(hit), &paint(255, 255, 255, 0.1 * hot));
                 }
-                let c = paint(255, 255, 255, if !ok { 0.15 } else if hot { 1.0 } else { 0.6 });
+                let c = paint(255, 255, 255, if !ok { 0.15 } else { 0.6 + 0.4 * hot });
                 let d = if up { -1.0 } else { 1.0 };
                 g.line(bx - 4.5, cy - 2.0 * d, bx, cy + 2.5 * d, 1.6, &c);
                 g.line(bx, cy + 2.5 * d, bx + 4.5, cy - 2.0 * d, 1.6, &c);
@@ -1577,12 +1673,12 @@ impl Draw {
                 }
                 let on = t.id == sel;
                 let hit = Hit::PanelTab(n);
-                let hot = self.is_hover(hit);
+                let hot = self.hv(hit);
                 if on {
                     let c = g.acc.deep;
                     g.pill(x, y, w, 26.0, c, 0.9, 1.0);
                 } else {
-                    g.pill(x, y, w, 26.0, [255, 255, 255], if hot { 0.2 } else { 0.1 }, 1.0);
+                    g.pill(x, y, w, 26.0, [255, 255, 255], 0.1 + 0.1 * hot, 1.0);
                 }
                 self.check(g, &label, 12.0, true, w - 8.0);
                 g.txt_c(&label, x + w / 2.0, y + ty(26.0, 12.0), 12.0, if on { [255, 255, 255] } else { [215, 215, 222] }, 1.0, w - 4.0, true);
@@ -1610,8 +1706,9 @@ impl Draw {
                 if k > 0 {
                     g.rect(X0 + 16.0, ry, X1 - X0 - 32.0, 1.0, &paint(255, 255, 255, 0.05));
                 }
-                if self.is_hover(hit) {
-                    g.fill(&rrect(X0 + 6.0, ry + 2.0, X1 - X0 - 12.0, PANEL_ROW_H - 4.0, 8.0), &paint(255, 255, 255, 0.06));
+                let hot = self.hv(hit);
+                if hot > 0.01 {
+                    g.fill(&rrect(X0 + 6.0, ry + 2.0, X1 - X0 - 12.0, PANEL_ROW_H - 4.0, 8.0), &paint(255, 255, 255, 0.06 * hot));
                 }
                 let mut tx = X0 + 18.0;
                 if r.mark {
@@ -1757,8 +1854,8 @@ impl Draw {
         let w = (g.width_ex(label, 12.0, true) + 24.0).max(56.0);
         let x = rx - w;
         self.check(g, label, 12.0, true, w - 8.0);
-        let hot = enabled && self.is_hover(hit);
-        g.pill(x, y, w, 26.0, [255, 255, 255], if !enabled { 0.05 } else if hot { 0.22 } else { 0.12 }, 1.0);
+        let hot = if enabled { self.hv(hit) } else { 0.0 };
+        g.pill(x, y, w, 26.0, [255, 255, 255], if !enabled { 0.05 } else { 0.12 + 0.1 * hot + 0.08 * self.pr(hit) }, 1.0);
         g.txt_c(label, x + w / 2.0, y + ty(26.0, 12.0), 12.0, if enabled { [255, 255, 255] } else { TEXT_FAINT }, 1.0, w - 4.0, true);
         if enabled {
             self.hit(x, y, w, 26.0, hit);
@@ -1818,9 +1915,10 @@ impl Draw {
         if let Some(b) = button {
             let bw = g.width_ex(b, 12.5, true).ceil() + 30.0;
             let bx = right - bw;
-            let hot = self.is_hover(Hit::Update);
+            let hot = self.hv(Hit::Update);
             let (fill, text) = (g.acc.bright, g.acc.pale);
-            g.fill(&rrect(bx, cy - 15.0, bw, 30.0, 15.0), &rgb(fill, if hot { 0.32 } else { 0.2 }));
+            let d = 1.5 * self.pr(Hit::Update);
+            g.fill(&rrect(bx + d, cy - 15.0 + d, bw - 2.0 * d, 30.0 - 2.0 * d, 15.0 - d), &rgb(fill, 0.2 + 0.12 * hot + 0.1 * d));
             g.txt_c(b, bx + bw / 2.0, cy + ty(0.0, 12.5), 12.5, text, 1.0, bw, true);
             self.hit(bx, cy - 15.0, bw, 30.0, Hit::Update);
             text_r = bx;

@@ -835,7 +835,7 @@ impl App {
             let pr = self.nv.saved.map_or(1.0, |t| (t.elapsed().as_secs_f32() / 0.25).clamp(0.0, 1.0));
             for (lx, item, w) in &lines[li] {
                 match item {
-                    ReadItem::Word(t) => g.txt(t, tx + lx, y, NOTE_SIZE, [255, 228, 225], al, *w + 4.0),
+                    ReadItem::Word(t) => g.txt(t, tx + lx, y, NOTE_SIZE, [238, 242, 250], al, *w + 4.0),
                     ReadItem::Chip { label, domain, k, loading, .. } => {
                         // chip muncul dengan naik dan memudar masuk setelah catatan disimpan
                         self.draw_chip(g, tx + lx, y + 0.5 + (1.0 - pr) * 3.0, *w, label, domain, *k, *loading, al * pr);
@@ -1033,7 +1033,7 @@ impl App {
                     let w = pre[s + b] - pre[s + a];
                     g.rect(sx, y + dy + NOTE_SIZE * 1.12, w.min(NOTE_W), 1.0, &paint(c[0], c[1], c[2], 0.7 * al * am));
                 } else {
-                    g.txt(&seg, sx, y + dy, NOTE_SIZE, [255, 228, 225], al * am, NOTE_W + 4.0);
+                    g.txt(&seg, sx, y + dy, NOTE_SIZE, [238, 242, 250], al * am, NOTE_W + 4.0);
                 }
             };
             let draw_seg = |g: &mut Gfx, a: usize, b: usize, url: bool| {
