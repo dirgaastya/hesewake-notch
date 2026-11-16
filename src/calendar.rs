@@ -276,6 +276,14 @@ impl App {
         v
     }
 
+    pub(crate) fn agenda_animating(&self) -> bool {
+        if !(self.expanded() && self.is_slide(SlideId::Agenda)) {
+            return false;
+        }
+        let now = notif::now_unix() as i64;
+        self.agenda(now, local_offset()).iter().any(|e| e.link.is_some() && !e.all_day && (e.start <= now || e.start - now <= 300))
+    }
+
     pub(crate) fn agenda_hit(&self, x: f32, y: f32, now: i64, offset: i32) -> Option<AgendaHit> {
         let rows = self.agenda(now, offset);
         (0..ROWS).find_map(|vi| {
@@ -429,6 +437,11 @@ impl App {
             let running = !e.all_day && e.start <= now;
             let bg = if running { g.sacc(0.22 * al) } else { paint(255, 255, 255, 0.08 * al) };
             g.fill(&rrect(x, y, ROW_W, ROW_H, 10.0), &bg);
+            if running && e.end > e.start {
+                // Rapat yang sedang berjalan: isian aksen yang melebar sesuai waktu berlalu.
+                let frac = ((now - e.start) as f32 / (e.end - e.start) as f32).clamp(0.0, 1.0);
+                g.fill(&rrect(x, y, (ROW_W * frac).max(18.0), ROW_H, 10.0), &g.sacc(0.20 * al));
+            }
             let (time, tcol) = if e.all_day {
                 (tr("All day").to_string(), TEXT_DIM)
             } else if running {
@@ -438,13 +451,32 @@ impl App {
             };
             g.txtb(&time, x + 12.0, y + ty(ROW_H, 12.0), 12.0, tcol, al, TIME_W - 4.0);
             let join = e.link.is_some();
-            let maxw = ROW_W - 12.0 - TIME_W - if join { JOIN_W + 16.0 } else { 12.0 };
+            // "25m left" untuk yang berjalan, "in 40m" untuk yang mulai dalam satu jam.
+            let rest = if running {
+                Some(fill(tr("{} left"), &[&format!("{}m", ((e.end - now + 59) / 60).max(0))]))
+            } else if !e.all_day && e.start > now && e.start - now <= 3600 {
+                Some(fill(tr("in {}"), &[&format!("{}m", (e.start - now + 59) / 60)]))
+            } else {
+                None
+            };
+            let rw = rest.as_ref().map_or(0.0, |t| g.width(t, 11.0) + 10.0);
+            let maxw = ROW_W - 12.0 - TIME_W - if join { JOIN_W + 16.0 } else { 12.0 } - rw;
             let title = if g.width(&e.summary, 13.0) > maxw { ellipsize(g, &e.summary, 13.0, maxw) } else { e.summary.clone() };
             g.txt(&title, x + 12.0 + TIME_W, y + ty(ROW_H, 13.0), 13.0, [242, 242, 242], al, maxw + 2.0);
+            if let Some(t) = &rest {
+                let right = x + ROW_W - if join { JOIN_W + 6.0 + 8.0 } else { 12.0 };
+                let tw = g.width(t, 11.0);
+                g.txt(t, right - tw, y + ty(ROW_H, 11.0), 11.0, TEXT_DIM, al, tw + 2.0);
+            }
             if join {
                 let (bx, by, bw, bh) = join_rect(vi);
                 let over = cur.is_some_and(|(cx, cy)| in_rect(cx, cy, bx, by, bw, bh));
                 let a = g.acc.deep;
+                if running || (e.start > now && e.start - now <= 300) {
+                    let ph = (self.t % 1.8) / 1.8;
+                    let b = g.acc.bright;
+                    g.stroke(&rrect(bx + ox - ph * 6.0, by - ph * 6.0, bw + ph * 12.0, bh + ph * 12.0, 11.0 + ph * 6.0), &paint(b[0], b[1], b[2], 0.55 * (1.0 - ph) * al), 1.4);
+                }
                 g.pill(bx + ox, by, bw, bh, a, if over { 1.0 } else { 0.85 } * al, 1.0);
                 g.txt_c(tr("Join"), bx + ox + bw / 2.0, by + ty(bh, 12.0), 12.0, [255, 255, 255], al, bw, true);
             }

@@ -50,6 +50,9 @@ pub(crate) struct ExtView {
     /// The tab the user just clicked, until the extension answers with its own.
     pub(crate) tab_sel: Option<String>,
     pub(crate) copied: Option<Instant>,
+    /// Indikator tab yang meluncur: (x, lebar) yang ditampilkan dan (x, lebar) tujuan; dan apakah ada animasi terus-menerus (penanda, skeleton).
+    pub(crate) tab_ind: std::cell::Cell<(f32, f32, f32, f32)>,
+    pub(crate) live_anim: std::cell::Cell<bool>,
     /// The picture of the page's hero, decoded once: what it was made from (a hash of its bytes) and the square.
     pub(crate) hero_pm: RefCell<Option<(u64, Pixmap)>>,
 }
@@ -57,6 +60,21 @@ pub(crate) struct ExtView {
 enum Item<'a> {
     Head(&'a str),
     Row(&'a Row),
+}
+
+/// Baris bayangan yang berkilau selagi isi dimuat.
+fn skeleton(g: &mut Gfx, t: f32, ox: f32, al: f32) {
+    for i in 0..3 {
+        let y = Y_ROWS + i as f32 * ROW_P;
+        g.fill(&rrect(LX + ox, y, CW, ROW_H, 10.0), &paint(255, 255, 255, 0.06 * al));
+        let wd = [150.0, 110.0, 190.0][i];
+        g.fill(&rrect(LX + 12.0 + ox, y + ROW_H / 2.0 - 4.0, wd, 8.0, 4.0), &paint(255, 255, 255, 0.10 * al));
+        let sx = LX + (((t * 0.8 + i as f32 * 0.15) % 1.5) - 0.25) * CW;
+        let (l, r) = (sx.max(LX + 4.0), (sx + 90.0).min(LX + CW - 4.0));
+        if r > l {
+            g.fill(&rrect(l + ox, y + 3.0, r - l, ROW_H - 6.0, 8.0), &paint(255, 255, 255, 0.07 * al));
+        }
+    }
 }
 
 fn items(s: &SlideMsg) -> Vec<Item<'_>> {
@@ -224,6 +242,19 @@ impl App {
         }
     }
 
+    /// Tombol dan baris extension yang bisa diklik (kursor tangan), dari daftar area yang dicatat saat menggambar.
+    pub(crate) fn ext_hand(&self, i: usize, x: f32, y: f32) -> bool {
+        self.ext.list.get(i).is_some_and(|e| e.view.hits.borrow().iter().any(|h| in_rect(x, y, h.0, h.1, h.2, h.3)))
+    }
+
+    pub(crate) fn ext_page_animating(&self) -> bool {
+        self.expanded()
+            && self.ext.list.iter().any(|e| {
+                let (x, w, tx, tw) = e.view.tab_ind.get();
+                e.page_t.is_some_and(|t| t.elapsed().as_secs_f32() < 0.3) || (x - tx).abs() > 0.3 || (w - tw).abs() > 0.3 || e.view.live_anim.get()
+            })
+    }
+
     pub(crate) fn slide_ext(&self, g: &mut Gfx, i: usize, ox: f32, al: f32) {
         let Some(e) = self.ext.list.get(i) else { return };
         let hits = Hits { list: &e.view.hits, record: ox.abs() < 0.5 };
@@ -231,6 +262,15 @@ impl App {
             e.view.hits.borrow_mut().clear();
         }
         let cur = self.cursor_canvas();
+        // Revamp: halaman daftar <-> detail bergeser 18 px sambil memudar (0,25 dtk).
+        let (ox, al) = match e.page_t {
+            Some(t) => {
+                let k = (t.elapsed().as_secs_f32() / 0.25).clamp(0.0, 1.0);
+                let k = k * k * (3.0 - 2.0 * k);
+                (ox + (1.0 - k) * e.page_dir * 18.0, al * (0.35 + 0.65 * k))
+            }
+            None => (ox, al),
+        };
         let name = e.manifest.as_ref().map_or("", |m| m.name.as_str());
         let sacc = Some(i);
         let _ = sacc;
@@ -249,15 +289,20 @@ impl App {
             self.draw_detail(g, e, d, &hits, cur, ox, al);
             return;
         }
+        e.view.live_anim.set(false);
         let Some(s) = &e.slide else {
             header(g, &hits, cur, name, false, None, &[], ox, al);
-            centered(g, &hits, cur, tr("Loading\u{2026}"), "", None, ox, al);
+            e.view.live_anim.set(true);
+            skeleton(g, self.t, ox, al);
             return;
         };
         let title = if s.title.is_empty() { name } else { s.title.as_str() };
         header(g, &hits, cur, title, s.back, s.stepper.as_ref(), &s.actions, ox, al);
         match s.state {
-            State::Loading => return centered(g, &hits, cur, tr("Loading\u{2026}"), "", None, ox, al),
+            State::Loading => {
+                e.view.live_anim.set(true);
+                return skeleton(g, self.t, ox, al);
+            }
             State::Empty => return centered(g, &hits, cur, if s.message.is_empty() { tr("Nothing here") } else { &s.message }, "", None, ox, al),
             State::Error => return centered(g, &hits, cur, &s.message, "", Some((tr("Retry"), ExtHit::Retry)), ox, al),
             State::Setup => {
@@ -270,6 +315,7 @@ impl App {
         if tabs {
             let sel = e.view.tab_sel.as_deref().unwrap_or(&s.tab);
             let mut x = LX;
+            let mut cells = Vec::new();
             for t in &s.tabs {
                 let label = match t.count {
                     Some(n) => format!("{} {}", t.label, n),
@@ -279,18 +325,32 @@ impl App {
                 if x + w > RX {
                     break;
                 }
-                let r = (x, Y_TABS, w, TAB_H);
-                let on = t.id == sel;
-                let hot = over(cur, r);
-                if on {
-                    let c = g.acc.deep;
-                    g.pill(r.0 + ox, r.1, r.2, r.3, c, 0.9 * al, 1.0);
-                } else {
-                    g.pill(r.0 + ox, r.1, r.2, r.3, [255, 255, 255], if hot { 0.2 } else { 0.1 } * al, 1.0);
-                }
-                g.txt_c(&label, r.0 + ox + w / 2.0, r.1 + ty(TAB_H, 11.0), 11.0, if on { [255, 255, 255] } else { [215, 215, 222] }, al, w, true);
-                hits.add(r, ExtHit::Tab(t.id.clone()));
+                cells.push(((x, Y_TABS, w, TAB_H), label, t.id == sel, t.id.clone()));
                 x += w + 6.0;
+            }
+            // indikator terpilih meluncur ke tab baru
+            if let Some(c) = cells.iter().find(|c| c.2) {
+                let (mut ix, mut iw, _, _) = e.view.tab_ind.get();
+                if iw == 0.0 {
+                    (ix, iw) = (c.0 .0, c.0 .2);
+                } else {
+                    ix += (c.0 .0 - ix) * 0.28;
+                    iw += (c.0 .2 - iw) * 0.28;
+                }
+                e.view.tab_ind.set((ix, iw, c.0 .0, c.0 .2));
+            }
+            for c in cells.iter().filter(|c| !c.2) {
+                let hot = over(cur, c.0);
+                g.pill(c.0 .0 + ox, c.0 .1, c.0 .2, c.0 .3, [255, 255, 255], if hot { 0.2 } else { 0.1 } * al, 1.0);
+            }
+            let (ix, iw, _, _) = e.view.tab_ind.get();
+            if iw > 0.0 {
+                g.pill(ix + ox, Y_TABS, iw, TAB_H, g.acc.deep, 0.9 * al, 1.0);
+            }
+            for c in &cells {
+                let r = c.0;
+                g.txt_c(&c.1, r.0 + ox + r.2 / 2.0, r.1 + ty(TAB_H, 11.0), 11.0, if c.2 { [255, 255, 255] } else { [215, 215, 222] }, al, r.2, true);
+                hits.add(r, ExtHit::Tab(c.3.clone()));
             }
         }
         let list = items(s);
@@ -305,9 +365,16 @@ impl App {
                     let rect = (LX, y, w, ROW_H);
                     let hot = over(cur, rect);
                     g.fill(&rrect(rect.0 + ox, y, w, ROW_H, 10.0), &paint(255, 255, 255, if hot { 0.14 } else { 0.08 } * al));
+                    if hot {
+                        let c = g.acc.bright;
+                        g.fill(&rrect(rect.0 + ox, y + 5.0, 3.0, ROW_H - 10.0, 1.5), &paint(c[0], c[1], c[2], al));
+                    }
                     let mut tx = LX + 12.0;
                     if r.mark {
                         let c = g.acc.bright;
+                        e.view.live_anim.set(true);
+                        let pu = 0.5 + 0.5 * (self.t * 4.0).sin();
+                        g.circle(tx + 3.0 + ox, y + ROW_H / 2.0, 3.0 + 2.5 * pu, &paint(c[0], c[1], c[2], 0.18 * (1.0 - pu) * al));
                         g.circle(tx + 3.0 + ox, y + ROW_H / 2.0, 3.0, &paint(c[0], c[1], c[2], al));
                         tx += 12.0;
                     }

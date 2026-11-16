@@ -850,6 +850,109 @@ impl App {
         }
     }
 
+    /// Bar di indikator volume (yang muncul setelah scroll): geometri x, y tengah, lebar.
+    fn vol_bar_geom() -> (f32, f32, f32) {
+        let (x, y, w, h) = output::OVERLAY;
+        (x + 40.0, y + h / 2.0, w - 40.0 - 50.0)
+    }
+
+    /// Indikator volume sedang tampil (dan bukan overlay pilihan output) dan (x, y) ada di barnya.
+    pub(crate) fn vol_bar_hit(&self, x: f32, y: f32) -> bool {
+        let (bx, by, bw) = Self::vol_bar_geom();
+        self.vol_overlay_active() && self.vol_t > self.out_t && x >= bx - 6.0 && x <= bx + bw + 6.0 && (y - by).abs() <= 14.0
+    }
+
+    /// Klik di bar indikator volume: atur volume master ke posisi itu.
+    pub(crate) fn vol_bar_set(&mut self, x: f32) {
+        let (bx, _, bw) = Self::vol_bar_geom();
+        let target = ((x - bx) / bw).clamp(0.0, 1.0);
+        if let Some((cur, _)) = audio::get() {
+            if let Some((vol, muted)) = audio::adjust(target - cur) {
+                self.vol_state = ((vol * 100.0).round() as u8, muted);
+                self.vol_t = Instant::now();
+            }
+        }
+    }
+
+    /// Popover volume vertikal di atas tombol output: x, y, lebar, tinggi.
+    fn vol_pop_rect() -> (f32, f32, f32, f32) {
+        (output::BTN.0 - 13.0, 54.0, 26.0, 52.0)
+    }
+
+    /// Tampil saat kursor di tombol output atau di popover itu sendiri (dan daftar perangkat tidak terbuka).
+    pub(crate) fn vol_pop_visible(&self) -> bool {
+        if !(self.expanded() && self.is_slide(SlideId::Music)) || self.lyric_mode || self.out_list_shown() || self.outs.list.is_empty() {
+            return false;
+        }
+        let (px, py, pw, _) = Self::vol_pop_rect();
+        self.cursor_canvas().is_some_and(|(x, y)| {
+            in_rect(x, y, px - 4.0, py - 4.0, pw + 8.0, (output::BTN.1 - 10.0) - (py - 4.0))
+                || ((x - output::BTN.0).powi(2) + (y - output::BTN.1).powi(2)).sqrt() <= 18.0
+        })
+    }
+
+    pub(crate) fn vol_pop_hit(&self, x: f32, y: f32) -> bool {
+        let (px, py, pw, ph) = Self::vol_pop_rect();
+        self.vol_pop_visible() && in_rect(x, y, px, py, pw, ph)
+    }
+
+    /// Klik di popover: atur volume master sesuai tinggi klik.
+    pub(crate) fn vol_pop_set(&mut self, y: f32) {
+        let (_, py, _, ph) = Self::vol_pop_rect();
+        let target = (((py + ph - 8.0) - y) / (ph - 16.0)).clamp(0.0, 1.0);
+        if let Some((cur, _)) = audio::get() {
+            if let Some((vol, muted)) = audio::adjust(target - cur) {
+                self.vol_state = ((vol * 100.0).round() as u8, muted);
+                self.vol_t = Instant::now();
+            }
+        }
+    }
+
+    fn draw_vol_pop(&self, g: &mut Gfx, ox: f32, al: f32) {
+        if !self.vol_pop_visible() {
+            return;
+        }
+        let (px, py, pw, ph) = Self::vol_pop_rect();
+        let (vol, muted) = audio::get().unwrap_or((0.0, false));
+        let x = px + ox;
+        g.fill(&rrect(x, py, pw, ph, 13.0), &paint(14, 20, 40, 0.96 * al));
+        g.stroke(&rrect(x + 0.5, py + 0.5, pw - 1.0, ph - 1.0, 12.5), &paint(255, 255, 255, 0.14 * al), 1.0);
+        let (cx, top, bot) = (x + pw / 2.0, py + 8.0, py + ph - 8.0);
+        g.fill(&rrect(cx - 2.0, top, 4.0, bot - top, 2.0), &paint(255, 255, 255, 0.18 * al));
+        let lvl = if muted { 0.0 } else { vol.clamp(0.0, 1.0) };
+        let fy = bot - (bot - top) * lvl;
+        if lvl > 0.0 {
+            let c = g.acc.main;
+            g.fill(&rrect(cx - 2.0, fy, 4.0, bot - fy, 2.0), &paint(c[0], c[1], c[2], al));
+        }
+        g.circle(cx, fy, 5.0, &paint(255, 255, 255, al));
+    }
+
+    /// Tombol, bar progres, dan popover di slide Music yang bisa diklik (kursor tangan).
+    pub(crate) fn music_hand(&self, x: f32, y: f32) -> bool {
+        if self.lyric_mode {
+            return false;
+        }
+        let d = |px: f32, py: f32| ((x - px).powi(2) + (y - py).powi(2)).sqrt();
+        Self::media_btn_at(x, y).is_some()
+            || (self.media.dur > 0 && in_rect(x, y, MX, 88.0, MW, 16.0))
+            || d(MCX + 92.0, MCY) < 14.0
+            || d(output::BTN.0, output::BTN.1) < 14.0
+            || self.vol_pop_hit(x, y)
+            || self.vol_bar_hit(x, y)
+    }
+
+    pub(crate) fn music_eq_animating(&self) -> bool {
+        self.expanded()
+            && self.is_slide(SlideId::Music)
+            && !self.lyric_mode
+            && (self.media.playing || (self.art_k.get() - if self.media.title.is_empty() { 1.0 } else { 0.93 }).abs() > 0.004)
+    }
+
+    pub(crate) fn title_animating(&self) -> bool {
+        self.expanded() && self.is_slide(SlideId::Music) && self.title_t.elapsed().as_secs_f32() < 0.4
+    }
+
     pub(crate) fn press_animating(&self) -> bool {
         self.btn_press.is_some_and(|p| p.1.elapsed().as_secs_f32() < PRESS_SECS)
     }
@@ -883,6 +986,20 @@ impl App {
                 }
             }
         }
+        // equalizer kecil di sebelah "Now Playing" selagi lagu diputar (4 batang, sama dengan notch kecil)
+        let default_label = self.lyric_text().is_none() && !matches!(self.lyrics, lyrics::Lyrics::Loading | lyrics::Lyrics::Unavailable);
+        if self.media.playing && default_label {
+            let lw = if self.media.sources > 1 && !self.media.source.is_empty() {
+                g.width(&fill(tr("Now Playing \u{b7} {}"), &[&self.media.source]), 12.0) + 26.0
+            } else {
+                g.width(tr("Now Playing"), 12.0) + 9.0
+            };
+            let c = g.acc.main;
+            for i in 0..4 {
+                let bh = 4.0 + 8.0 * ((self.t * (4.0 + i as f32 * 1.3) + i as f32).sin()).abs();
+                g.fill(&rrect(LX + ox + lw + i as f32 * 6.0, 20.4 - bh / 2.0, 3.0, bh, 1.5), &paint(c[0], c[1], c[2], al));
+            }
+        }
         // small clock on the top row, right side; a synced lyric line has that row to itself
         if self.lyric_text().is_none() {
             let st = clock::now_tm();
@@ -890,14 +1007,36 @@ impl App {
             let w = g.width(&hm, 12.0);
             g.txt(&hm, RX - w + ox, 14.0, 12.0, TEXT_DIM, al, w + 2.0);
         }
-        self.art_at(g, LX + ox, 44.0, 88.0, 12.0, al);
+        // sampul mengecil sedikit saat dijeda (halus)
+        let ak_t = if self.media.playing || self.media.title.is_empty() { 1.0 } else { 0.93 };
+        let ak = self.art_k.get() + (ak_t - self.art_k.get()) * 0.15;
+        self.art_k.set(ak);
+        let asz = 88.0 * ak;
+        self.art_at(g, LX + ox + (88.0 - asz) / 2.0, 44.0 + (88.0 - asz) / 2.0, asz, 12.0 * ak, al);
         let title = if self.media.title.is_empty() { tr("No media") } else { &self.media.title };
-        g.txtb(title, MX + ox, 40.0, 17.0, [255, 255, 255], al, MW);
-        g.txt(&self.media.artist, MX + ox, 64.0, 13.0, [170, 170, 175], al, MW);
+        // lagu baru: judul dan artis meluncur masuk 14 px sambil memudar
+        let tk = (self.title_t.elapsed().as_secs_f32() / 0.35).clamp(0.0, 1.0);
+        let tk = tk * tk * (3.0 - 2.0 * tk);
+        let (tdx, tal) = ((1.0 - tk) * 14.0, al * (0.15 + 0.85 * tk));
+        g.txtb(title, MX + ox + tdx, 40.0, 17.0, [255, 255, 255], tal, MW);
+        g.txt(&self.media.artist, MX + ox + tdx, 64.0, 13.0, [170, 170, 175], tal, MW);
         if self.media.dur > 0 {
             let fr = (self.media.pos as f32 / self.media.dur as f32).clamp(0.0, 1.0);
-            g.fill(&rrect(MX + ox, 96.0, MW, 4.0, 2.0), &paint(255, 255, 255, 0.18 * al));
-            g.fill(&rrect(MX + ox, 96.0, (MW * fr).max(4.0), 4.0, 2.0), &g.sacc(al));
+            let hov = self.cursor_canvas().filter(|&(hx, hy)| hx >= MX + ox - 4.0 && hx <= MX + ox + MW + 4.0 && (88.0..=112.0).contains(&hy));
+            let bh = if hov.is_some() { 6.0 } else { 4.0 };
+            let by = 98.0 - bh / 2.0;
+            g.fill(&rrect(MX + ox, by, MW, bh, bh / 2.0), &paint(255, 255, 255, 0.18 * al));
+            g.fill(&rrect(MX + ox, by, (MW * fr).max(bh), bh, bh / 2.0), &g.sacc(al));
+            if let Some((hx, _)) = hov {
+                // knob + waktu di posisi kursor (klik = seek, seperti sebelumnya)
+                g.circle(MX + ox + MW * fr, 98.0, 5.5, &paint(255, 255, 255, al));
+                let q = ((hx - (MX + ox)) / MW).clamp(0.0, 1.0);
+                let t = fmt_time((q * self.media.dur as f32) as _);
+                let w = g.width_ex(&t, 11.0, true) + 14.0;
+                let tx = (hx - w / 2.0).clamp(MX + ox, MX + ox + MW - w);
+                g.fill(&rrect(tx, 72.0, w, 18.0, 9.0), &paint(14, 20, 40, 0.96 * al));
+                g.txt_c(&t, tx + w / 2.0, 72.0 + ty(18.0, 11.0), 11.0, [255, 255, 255], al, w, true);
+            }
             g.txt(&fmt_time(self.media.pos), MX + ox, 104.0, 11.0, TEXT_DIM, al, 60.0);
             let ds = fmt_time(self.media.dur);
             let dw = g.width(&ds, 11.0);
@@ -912,18 +1051,21 @@ impl App {
             g.icon_bubble(cx + 92.0, cy, 15.0, &paint(255, 255, 255, if has { 0.9 * al } else { 0.4 * al }), &paint(12, 12, 16, al));
         }
         let white = paint(255, 255, 255, al);
-        let px = cx - 56.0;
+        let hot = self.cursor_canvas().and_then(|(hx, hy)| Self::media_btn_at(hx, hy));
+        let hv = |b: MediaBtn| if hot == Some(b) { 1.12 } else { 1.0 };
+        let nudge = |b: MediaBtn| self.press_t(b).map_or(0.0, |t| 5.0 * (-t * 9.0).exp());
+        let px = cx - 56.0 - nudge(MediaBtn::Prev);
         self.press_halo(g, MediaBtn::Prev, px, cy, al);
-        let k = self.press_scale(MediaBtn::Prev);
+        let k = self.press_scale(MediaBtn::Prev) * hv(MediaBtn::Prev);
         g.poly(&[(px + 6.0 * k, cy - 7.0 * k), (px + 6.0 * k, cy + 7.0 * k), (px - 6.0 * k, cy)], &white);
         g.rect(px - 9.0 * k, cy - 7.0 * k, 2.5 * k, 14.0 * k, &white);
-        let nx = cx + 56.0;
+        let nx = cx + 56.0 + nudge(MediaBtn::Next);
         self.press_halo(g, MediaBtn::Next, nx, cy, al);
-        let k = self.press_scale(MediaBtn::Next);
+        let k = self.press_scale(MediaBtn::Next) * hv(MediaBtn::Next);
         g.poly(&[(nx - 6.0 * k, cy - 7.0 * k), (nx - 6.0 * k, cy + 7.0 * k), (nx + 6.0 * k, cy)], &white);
         g.rect(nx + 6.5 * k, cy - 7.0 * k, 2.5 * k, 14.0 * k, &white);
         self.press_halo(g, MediaBtn::Play, cx, cy, al);
-        let k = self.press_scale(MediaBtn::Play);
+        let k = self.press_scale(MediaBtn::Play) * hv(MediaBtn::Play);
         g.circle(cx, cy, 17.0 * k, &white);
         let blk = paint(0, 0, 0, al);
         if self.media.playing {
@@ -933,6 +1075,7 @@ impl App {
             g.poly(&[(cx - 4.0 * k, cy - 8.0 * k), (cx - 4.0 * k, cy + 8.0 * k), (cx + 8.0 * k, cy)], &blk);
         }
         self.draw_out_button(g, ox, al);
+        self.draw_vol_pop(g, ox, al);
         // the newer of the two overlays (volume, or the output device after a switch)
         if self.out_t > self.vol_t {
             self.draw_out_overlay(g, ox, al);

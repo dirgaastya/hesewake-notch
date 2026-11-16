@@ -15,9 +15,9 @@ pub(crate) fn target(a: &App) -> (f32, f32) {
         let extra = a.bell_extra() + a.priv_extra() + a.prayer_play_extra();
         ((a.lyric_w + 88.0 + 16.0 + extra).clamp(PLAYING.0 + extra, EXP_W), PLAYING.1)
     } else if a.now_playing_bar() {
-        (PLAYING.0 + a.bell_extra() + a.priv_extra() + a.prayer_play_extra(), PLAYING.1)
+        (PLAYING.0 + a.bell_extra() + a.priv_extra() + a.prayer_play_extra() + 14.0 * a.mag, PLAYING.1 + 5.0 * a.mag)
     } else {
-        (IDLE.0 + a.priv_extra() + a.timer_extra() + a.prayer_idle_extra(), IDLE.1)
+        (IDLE.0 + a.priv_extra() + a.timer_extra() + a.prayer_idle_extra() + 14.0 * a.mag, IDLE.1 + 5.0 * a.mag)
     }
 }
 
@@ -33,6 +33,12 @@ fn settled(a: &App) -> bool {
 
 /// Timer: 16 ms saat bergerak / animasi droplet / mid-blink, 40 ms saat mata istirahat (glow mengalir),
 /// 33 ms untuk equalizer, dan mati kalau tidak ada yang bergerak.
+impl App {
+    pub(crate) fn ripple_animating(&self) -> bool {
+        self.ripple.is_some_and(|r| r.2.elapsed().as_secs_f32() < 0.75)
+    }
+}
+
 pub(crate) unsafe fn schedule(a: &mut App) {
     if a.hwnd == 0 {
         return; // no window (tests)
@@ -42,7 +48,7 @@ pub(crate) unsafe fn schedule(a: &mut App) {
         0
     } else if pulsing {
         16
-    } else if !settled(a) || a.lyric_fading() || a.art_fading() || a.toast.is_some() || a.water_animating() || a.lyric_scroll_animating() || a.bell_animating() || a.notif_ui_animating() || a.privacy_animating() || a.vol_overlay_active() || a.press_animating() || a.sys_animating() || a.timer_animating() || a.clip_animating() {
+    } else if !settled(a) || a.lyric_fading() || a.art_fading() || a.toast.is_some() || a.water_animating() || a.lyric_scroll_animating() || a.bell_animating() || a.notif_ui_animating() || a.privacy_animating() || a.vol_overlay_active() || a.press_animating() || a.sys_animating() || a.timer_animating() || a.clip_animating() || a.todo_animating() || a.ext_page_animating() || a.title_animating() || a.ripple_animating() || a.prayer_animating() || a.music_eq_animating() || a.agenda_animating() || a.shelf_animating() || a.note_animating() {
         16
     } else if let Some(ms) = Some(a.weather_frame_ms(sys::input_idle_secs())).filter(|&ms| ms > 0) {
         ms // the weather slot: 16 ms while it changes, 20 fps while a moving icon shows
@@ -79,6 +85,36 @@ pub(crate) unsafe fn schedule(a: &mut App) {
     }
 }
 
+/// Hover tidak lagi menunggu poll 100 ms: kursor dicek tiap 33 ms (hanya posisi kursor, murah).
+unsafe fn fast_pointer(a: &mut App) {
+    if a.menu_open || a.display_off {
+        return;
+    }
+    let mut p = POINT::default();
+    if GetCursorPos(&mut p).is_ok() {
+        let x = (p.x - a.wx) as f32 / a.scale;
+        let y = (p.y - a.wy) as f32 / a.scale;
+        // "magnet": notch kecil membesar sedikit saat kursor mendekat (sebelum membuka)
+        let m = if a.expanded() || a.toast.is_some() || a.thin() {
+            0.0
+        } else {
+            let dx = ((x - CX).abs() - (IDLE.0 / 2.0 + 6.0)).max(0.0);
+            let dy = (y - (IDLE.1 + 6.0)).max(0.0);
+            (1.0 - dx.hypot(dy) / 45.0).clamp(0.0, 1.0)
+        };
+        if (m - a.mag).abs() > 0.03 {
+            a.mag = m;
+            a.last = Instant::now();
+            schedule(a);
+        }
+        if a.pointer_step(x, y) {
+            a.last = Instant::now();
+            present(a);
+            schedule(a);
+        }
+    }
+}
+
 unsafe fn poll(a: &mut App) {
     a.tick_n = a.tick_n.wrapping_add(1);
     let mut changed = false;
@@ -91,6 +127,23 @@ unsafe fn poll(a: &mut App) {
     }
     if a.toast_update() {
         redraw = true;
+    }
+    if a.media.title != a.title_seen {
+        a.title_seen = a.media.title.clone();
+        a.title_t = Instant::now();
+        redraw = true;
+    }
+    // Scrap: judul halaman untuk tautan di catatan (hanya saat slide terlihat dan pengaturannya nyala)
+    if a.tick_n % 5 == 0 && a.cfg.link_titles && a.expanded() && a.is_slide(SlideId::Scrap) {
+        for u in linktitle::urls_in(&a.note) {
+            linktitle::request(&u);
+        }
+    }
+    if linktitle::version() != a.lt_ver {
+        a.lt_ver = linktitle::version();
+        if a.expanded() && a.is_slide(SlideId::Scrap) {
+            redraw = true;
+        }
     }
     a.notif_ui_step();
     if a.tick_n % 5 == 0 && a.ext_tick() {
@@ -321,6 +374,10 @@ pub(crate) unsafe fn tick(id: usize) {
             poll(a);
             return;
         }
+        if id == 3 {
+            fast_pointer(a);
+            return;
+        }
         splash_tick(a);
         a.lyric_update();
         a.toast_update();
@@ -331,6 +388,7 @@ pub(crate) unsafe fn tick(id: usize) {
         a.water_ui_step(dt);
         a.lyric_scroll_step(dt);
         a.sys_step(dt);
+        a.timer_ind_step(dt);
         a.notif_ui_step();
 
         // Only advance the eye once the notch is back to its small size, so the pop-open is actually seen.
@@ -340,22 +398,25 @@ pub(crate) unsafe fn tick(id: usize) {
         }
 
         let (tw, th) = target(a);
-        const K: f32 = 380.0;
-        const C: f32 = 40.0;
+        // Revamp: lebar sedikit memantul, tinggi sedikit lebih cepat (sebelumnya satu pegas 380/40 untuk keduanya).
+        const KW: f32 = 300.0;
+        const CW_: f32 = 24.0;
+        const KH: f32 = 420.0;
+        const CH: f32 = 30.0;
         const SK: f32 = 320.0;
         const SC: f32 = 36.0;
         let n = ((dt / 0.008).ceil() as i32).max(1);
         let sdt = dt / n as f32;
         for _ in 0..n {
-            a.vw += (K * (tw - a.w) - C * a.vw) * sdt;
-            a.vh += (K * (th - a.h) - C * a.vh) * sdt;
+            a.vw += (KW * (tw - a.w) - CW_ * a.vw) * sdt;
+            a.vh += (KH * (th - a.h) - CH * a.vh) * sdt;
             a.w += a.vw * sdt;
             a.h += a.vh * sdt;
             a.sv += (SK * (a.slide as f32 - a.sp) - SC * a.sv) * sdt;
             a.sp += a.sv * sdt;
         }
         a.w = a.w.max(20.0);
-        a.h = a.h.max(2.0);
+        a.h = a.h.clamp(2.0, H as f32 - 1.0);
         if settled(a) {
             a.w = tw;
             a.h = th;

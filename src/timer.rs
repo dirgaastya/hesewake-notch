@@ -372,7 +372,37 @@ impl App {
 
     /// Slide terbuka dan timer berjalan: butuh frame terus-menerus (angka/ring bergerak).
     pub(crate) fn timer_animating(&self) -> bool {
-        self.timer_visible() && self.tm.running()
+        self.timer_visible() && (self.tm.running() || self.tm_done.get().is_some_and(|t| t.elapsed().as_secs_f32() < 1.8) || (self.tm_ind != 0.0 && (self.tm_ind - self.mode_x()).abs() > 0.2))
+    }
+
+    /// Tombol di slide Timer yang bisa diklik (kursor tangan).
+    pub(crate) fn timer_hand(&self, x: f32, y: f32) -> bool {
+        t_hits(self.tm.mode).iter().any(|(_, r)| in_rect(x, y, r.0, r.1, r.2, r.3))
+    }
+
+    /// Posisi x chip mode yang sedang dipilih.
+    fn mode_x(&self) -> f32 {
+        t_hits(self.tm.mode).iter().find(|(h, _)| *h == THit::Mode(self.tm.mode)).map_or(0.0, |(_, r)| r.0)
+    }
+
+    /// Indikator mode meluncur ke chip yang dipilih dengan pegas (dipanggil tiap frame).
+    pub(crate) fn timer_ind_step(&mut self, dt: f32) {
+        let tg = self.mode_x();
+        if self.tm_ind == 0.0 || !self.timer_visible() {
+            self.tm_ind = tg;
+            self.tm_iv = 0.0;
+            return;
+        }
+        let n = ((dt / 0.008).ceil() as i32).max(1);
+        let sdt = dt / n as f32;
+        for _ in 0..n {
+            self.tm_iv += (380.0 * (tg - self.tm_ind) - 26.0 * self.tm_iv) * sdt;
+            self.tm_ind += self.tm_iv * sdt;
+        }
+        if (tg - self.tm_ind).abs() < 0.2 && self.tm_iv.abs() < 1.0 {
+            self.tm_ind = tg;
+            self.tm_iv = 0.0;
+        }
     }
 
     /// Pil timer tampil di notch idle: timer berjalan dan notch kecil dalam keadaan diam.
@@ -493,6 +523,33 @@ impl App {
         let count = tm.counts_down();
         let pomo = tm.mode == TMode::Pomodoro;
         g.txtb("Timer", LX + ox, 10.0, 15.0, [255, 255, 255], al, 100.0);
+        let ind = if self.tm_ind == 0.0 { self.mode_x() } else { self.tm_ind };
+        let bc = g.acc.bright;
+        g.fill(&rrect(ind + ox, MODE_Y, MODE_W, 22.0, 11.0), &paint(bc[0], bc[1], bc[2], 0.28 * al));
+        // konfeti sekali saat hitung mundur selesai
+        if tm.finished(now) {
+            if self.tm_done.get().is_none() {
+                self.tm_done.set(Some(now));
+            }
+        } else if self.tm_done.get().is_some() {
+            self.tm_done.set(None);
+        }
+        if let Some(e) = self.tm_done.get().map(|t| t.elapsed().as_secs_f32()).filter(|&e| e < 1.8) {
+            let cols = [[255u8, 99, 71], [255, 214, 64], [90, 200, 250], [120, 220, 140], [255, 140, 200]];
+            for i in 0..26 {
+                let ang = (i as f32 * 2.399) % std::f32::consts::TAU;
+                let sp = 70.0 + ((i * 37) % 60) as f32;
+                let (x, y) = (LX + 90.0 + ox + ang.cos() * sp * e, 92.0 + ang.sin() * sp * e + 90.0 * e * e);
+                let c = cols[i % 5];
+                g.circle(x, y, 2.4 * (1.0 - e / 1.8), &paint(c[0], c[1], c[2], (1.0 - e / 1.8) * al));
+            }
+        }
+        let cur = self.cursor_canvas();
+        let held = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(windows::Win32::UI::Input::KeyboardAndMouse::VK_LBUTTON.0 as i32) } as u16 & 0x8000 != 0;
+        let hs = |r: (f32, f32, f32, f32)| match cur {
+            Some((hx, hy)) if in_rect(hx, hy, r.0 + ox, r.1, r.2, r.3) => if held { 0.95 } else { 1.04 },
+            _ => 1.0,
+        };
         for (h, r) in t_hits(tm.mode) {
             match h {
                 THit::Mode(m) => {
@@ -501,15 +558,21 @@ impl App {
                         TMode::Countdown => tr("Countdown##short"),
                         TMode::Pomodoro => "Pomodoro",
                     };
-                    g.chip(r.0 + ox, r.1, r.2, r.3, label, m == tm.mode, al)
+                    // indikator meluncur di belakang; teks memutih/menebal sesuai kedekatan dengan indikator
+                    let near = (1.0 - (ind - r.0).abs() / 90.0).clamp(0.0, 1.0);
+                    g.fill(&rrect(r.0 + ox, r.1, r.2, r.3, r.3 / 2.0), &paint(255, 255, 255, 0.08 * al));
+                    let pale = g.acc.pale;
+                    let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * near) as u8;
+                    let col = [mix(170, pale[0]), mix(170, pale[1]), mix(176, pale[2])];
+                    g.txt_c(label, r.0 + ox + r.2 / 2.0, r.1 + ty(r.3, 12.0), 12.0, col, al, r.2, near > 0.5)
                 }
                 THit::Toggle => {
                     let label = if running { tr("Pause") } else if tm.elapsed(now) > Duration::ZERO && !tm.finished(now) { tr("Resume") } else { tr("Start") };
-                    g.pill(r.0 + ox, r.1, r.2, r.3, if running { [255, 255, 255] } else { g.acc.dark }, if running { 0.14 } else { 0.85 } * al, 1.0);
+                    g.pill(r.0 + ox, r.1, r.2, r.3, if running { [255, 255, 255] } else { g.acc.dark }, if running { 0.14 } else { 0.85 } * al, hs(r));
                     g.txt_c(label, r.0 + ox + r.2 / 2.0, r.1 + ty(r.3, 14.0), 14.0, [225, 238, 255], al, r.2, true);
                 }
                 THit::Reset => {
-                    g.pill(r.0 + ox, r.1, r.2, r.3, [255, 255, 255], 0.10 * al, 1.0);
+                    g.pill(r.0 + ox, r.1, r.2, r.3, [255, 255, 255], 0.10 * al, hs(r));
                     g.txt_c("Reset", r.0 + ox + r.2 / 2.0, r.1 + ty(r.3, 13.0), 13.0, [225, 228, 236], al, r.2, true);
                 }
                 THit::Preset(i) => {
@@ -518,12 +581,12 @@ impl App {
                 }
                 THit::Minus | THit::Plus => {
                     let label = if h == THit::Minus { tr("\u{2212} 1 min") } else { tr("+ 1 min") };
-                    g.pill(r.0 + ox, r.1, r.2, r.3, [255, 255, 255], 0.10 * al, 1.0);
+                    g.pill(r.0 + ox, r.1, r.2, r.3, [255, 255, 255], 0.10 * al, hs(r));
                     g.txt_c(label, r.0 + ox + r.2 / 2.0, r.1 + ty(r.3, 12.0), 12.0, [225, 228, 236], if running { al * 0.45 } else { al }, r.2, true);
                 }
                 THit::Skip => {
                     let label = if tm.phase == Phase::Focus { tr("Skip to break") } else { tr("Skip break") };
-                    g.pill(r.0 + ox, r.1, r.2, r.3, [255, 255, 255], 0.10 * al, 1.0);
+                    g.pill(r.0 + ox, r.1, r.2, r.3, [255, 255, 255], 0.10 * al, hs(r));
                     g.txt_c(label, r.0 + ox + r.2 / 2.0, r.1 + ty(r.3, 12.0), 12.0, [225, 228, 236], al, r.2, true);
                 }
             }
@@ -536,7 +599,8 @@ impl App {
             for i in 0..LONG_EVERY {
                 let (cx, cy) = (PX + ox + 8.0 + i as f32 * 24.0, 74.0);
                 if i < filled {
-                    g.circle(cx, cy, 7.0, &paint(TOMATO[0], TOMATO[1], TOMATO[2], al));
+                    let pk = if i + 1 == filled { self.tm_done.get().map_or(1.0, |t| 1.0 + 0.35 * (-6.0 * t.elapsed().as_secs_f32()).exp()) } else { 1.0 };
+                    g.circle(cx, cy, 7.0 * pk, &paint(TOMATO[0], TOMATO[1], TOMATO[2], al));
                 } else if i == filled && tm.phase == Phase::Focus {
                     // the session in progress: a ring
                     let frac = tm.elapsed(now).as_secs_f32() / FOCUS_SECS as f32;
@@ -554,7 +618,25 @@ impl App {
         let done = count && tm.finished(now);
         let col = if done { GREEN } else { [255, 255, 255] };
         let big = fmt_clock(secs);
-        g.txtb(&big, LX + ox, 36.0, 44.0, col, al, 215.0);
+        // Digit yang berubah berguling ke atas saat detik berganti; titik dua berkedip selagi berjalan.
+        let since = if count { let r = tm.remaining(now).as_secs_f32(); r.ceil() - r } else { tm.elapsed(now).subsec_millis() as f32 / 1000.0 };
+        let prev = fmt_clock(if count { secs + 1 } else { secs.saturating_sub(1) });
+        let rolling = running && !done && since < 0.22 && prev.len() == big.len() && prev != big;
+        let (bc, pc): (Vec<char>, Vec<char>) = (big.chars().collect(), prev.chars().collect());
+        let mut prefix = String::new();
+        for (i, ch) in bc.iter().enumerate() {
+            let px = LX + ox + g.width_ex(&prefix, 44.0, true);
+            if rolling && pc[i] != *ch {
+                let q = (since / 0.22).clamp(0.0, 1.0);
+                let q = q * q * (3.0 - 2.0 * q);
+                g.txtb(&pc[i].to_string(), px, 36.0 - q * 22.0, 44.0, col, al * (1.0 - q), 60.0);
+                g.txtb(&ch.to_string(), px, 36.0 + (1.0 - q) * 22.0, 44.0, col, al * q, 60.0);
+            } else {
+                let a = if *ch == ':' && running && !done { al * (0.35 + 0.65 * (0.5 + 0.5 * (since * std::f32::consts::TAU).cos())) } else { al };
+                g.txtb(&ch.to_string(), px, 36.0, 44.0, col, a, 60.0);
+            }
+            prefix.push(*ch);
+        }
         if !count {
             let w = g.width_ex(&big, 44.0, true);
             let tenth = tm.elapsed(now).subsec_millis() / 100;
@@ -568,6 +650,15 @@ impl App {
         };
         let sub_col = if pomo { tm.phase.color() } else if done { GREEN } else { GREY };
         g.txt(&sub, LX + ox, 92.0, 12.0, sub_col, al, 200.0);
+        // Bar tipis sisa waktu (countdown dan Pomodoro).
+        if count {
+            let fr = (tm.remaining(now).as_secs_f32() / tm.duration().max(1) as f32).clamp(0.0, 1.0);
+            g.fill(&rrect(LX + ox, 109.0, 188.0, 3.0, 1.5), &paint(255, 255, 255, 0.12 * al));
+            if fr > 0.0 {
+                let c = if pomo { tm.phase.color() } else { g.acc.bright };
+                g.fill(&rrect(LX + ox, 109.0, (188.0 * fr).max(3.0), 3.0, 1.5), &paint(c[0], c[1], c[2], al));
+            }
+        }
 
         // Stopwatch: ring yang menyapu sekali tiap menit di sisi kanan.
         if !count {

@@ -36,6 +36,8 @@ pub(crate) struct Settings {
     pub(crate) mic_hotkey: bool,
     /// Running downloads in the Downloads folder: speed in the notch, list on Ledge, toast when done (downloads.rs).
     pub(crate) downloads: bool,
+    /// Scrap: judul halaman untuk tautan yang ditempel (satu permintaan GET ke alamat itu, linktitle.rs).
+    pub(crate) link_titles: bool,
     /// HUD saat volume / kecerahan berubah dari luar (tombol keyboard, mixer).
     pub(crate) hud_volume: bool,
     pub(crate) hud_brightness: bool,
@@ -110,6 +112,7 @@ impl Default for Settings {
             slide_hotkeys: true,
             mic_hotkey: true,
             downloads: true,
+            link_titles: true,
             hud_volume: true,
             hud_brightness: true,
             weather_on: true,
@@ -157,6 +160,7 @@ impl Settings {
                 "slide_hotkeys" => s.slide_hotkeys = flag,
                 "mic_hotkey" => s.mic_hotkey = flag,
                 "downloads" => s.downloads = flag,
+                "link_titles" => s.link_titles = flag,
                 "hud_volume" => s.hud_volume = flag,
                 "hud_brightness" => s.hud_brightness = flag,
                 "weather" => s.weather_on = flag,
@@ -225,7 +229,7 @@ impl Settings {
 
     pub(crate) fn serialize(&self) -> String {
         format!(
-            "minimal={}\nnotifications={}\nbusy_on_maximized={}\nlyric_lead_ms={}\nromaji_lyrics={}\nnotif_avatar={}\nlock_toast={}\nprivacy_dot={}\nslide_hotkeys={}\nmic_hotkey={}\ndownloads={}\nhud_volume={}\nhud_brightness={}\nweather={}\nweather_city={}\nglow={}\nnotch_song={}\nprayer={}\nimsak_terbit={}\nramadan={}\nadhan={}\nadhan_file={}\nwibu={}\nwibu_file={}\nwibu_dim={}\next_on={}\next_mute={}\nmonitor={}\nnotch_size={}\nidle_display={}\naccent={}\nlang={}\nupdate_check={}\nupdate_seen={}\nslides={}\n",
+            "minimal={}\nnotifications={}\nbusy_on_maximized={}\nlyric_lead_ms={}\nromaji_lyrics={}\nnotif_avatar={}\nlock_toast={}\nprivacy_dot={}\nslide_hotkeys={}\nmic_hotkey={}\ndownloads={}\nlink_titles={}\nhud_volume={}\nhud_brightness={}\nweather={}\nweather_city={}\nglow={}\nnotch_song={}\nprayer={}\nimsak_terbit={}\nramadan={}\nadhan={}\nadhan_file={}\nwibu={}\nwibu_file={}\nwibu_dim={}\next_on={}\next_mute={}\nmonitor={}\nnotch_size={}\nidle_display={}\naccent={}\nlang={}\nupdate_check={}\nupdate_seen={}\nslides={}\n",
             self.minimal as u8,
             self.notifications as u8,
             self.busy_on_maximized as u8,
@@ -237,6 +241,7 @@ impl Settings {
             self.slide_hotkeys as u8,
             self.mic_hotkey as u8,
             self.downloads as u8,
+            self.link_titles as u8,
             self.hud_volume as u8,
             self.hud_brightness as u8,
             self.weather_on as u8,
@@ -358,6 +363,14 @@ mod tests {
         assert_eq!(Settings::parse(&s.serialize()).lang, crate::i18n::ID);
         assert_eq!(Settings::parse("lang=99").lang, crate::i18n::EN, "unknown = English");
         assert_eq!(Settings::parse("lang=x").lang, crate::i18n::EN);
+    }
+
+    #[test]
+    fn link_titles_roundtrip_and_default_on() {
+        assert!(Settings::parse("minimal=1\n").link_titles, "old file = on");
+        let mut s = Settings::default();
+        s.link_titles = false;
+        assert!(!Settings::parse(&s.serialize()).link_titles);
     }
 
     #[test]

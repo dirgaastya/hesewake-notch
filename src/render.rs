@@ -137,7 +137,13 @@ pub(crate) fn draw(a: &mut App) {
     // Collapsed content only shows once the notch is tall enough for it, also right after a toast, when the notch
     // may be shrinking back to the thin busy line.
     let fit = ((h - 16.0) / 12.0).clamp(0.0, 1.0);
-    let ca = if hold { fit } else { (1.0 - p * 2.0).clamp(0.0, 1.0) * fit };
+    // Revamp: isi kecil dan isi slide saling memudar bertahap (sebelumnya patah di p = 0.04 dan 0.5).
+    let ss = |x: f32| {
+        let t = x.clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    let pc = ss((p - 0.12) / 0.55);
+    let ca = if hold { fit } else { (1.0 - ss(p / 0.35)) * fit };
     if ca > 0.03 {
         a.draw_collapsed(&mut g, w, h, ca);
         if a.toast.is_none() {
@@ -149,7 +155,7 @@ pub(crate) fn draw(a: &mut App) {
         let pos = a.sp - a.drag_dx / 160.0;
         let n = a.n_slides();
         let to = (a.drag_dx == 0.0).then(|| a.slide.rem_euclid(n as i32) as usize);
-        let vis: Vec<(usize, f32, f32)> = visible_slides(pos, n, to).into_iter().map(|(i, ox, al)| (i, ox, al * p)).collect();
+        let vis: Vec<(usize, f32, f32)> = visible_slides(pos, n, to).into_iter().map(|(i, ox, al)| (i, ox, al * pc)).collect();
         let glow_on = a.cfg.glow;
         for &(i, _, al) in vis.iter().filter(|_| glow_on) {
             match a.order[i] {
@@ -161,6 +167,10 @@ pub(crate) fn draw(a: &mut App) {
                 }
             }
         }
+        // isi slide naik 8 px sambil memudar saat notch dibuka (teks lewat text_dy, bentuk lewat transform)
+        let rise = (1.0 - pc) * 8.0;
+        g.ts = Transform::from_scale(g.s, g.s).pre_translate(0.0, rise);
+        g.text_dy = rise;
         for &(i, ox, al) in &vis {
             match a.order[i] {
                 SlideId::Music => a.slide_music(&mut g, ox, al),
@@ -177,9 +187,23 @@ pub(crate) fn draw(a: &mut App) {
                 SlideId::Ext(i) => a.slide_ext(&mut g, i as usize, ox, al),
             }
         }
+        g.ts = Transform::from_scale(g.s, g.s);
+        g.text_dy = 0.0;
         if !a.lyric_screen() {
-            a.draw_nav(&mut g, p);
-            a.draw_dots(&mut g, pos, p);
+            a.draw_nav(&mut g, pc);
+            a.draw_dots(&mut g, pos, pc);
+        }
+        // riak klik: lingkaran kecil berwarna aksen yang melebar dan memudar
+        if let Some((rx, ry, t)) = a.ripple {
+            let e = t.elapsed().as_secs_f32() / 0.7;
+            if e < 1.0 {
+                let k = 1.0 - (1.0 - e).powi(3);
+                let r = 3.0 + k * 20.0;
+                let (b, m) = (g.acc.bright, g.acc.main);
+                g.circle(rx, ry, r, &paint(b[0], b[1], b[2], 0.12 * (1.0 - e)));
+                let ringp = paint(m[0], m[1], m[2], 0.55 * (1.0 - e));
+                g.ring(rx, ry, r, 1.0, 0.8, &ringp, &ringp);
+            }
         }
     }
     apply_mask(&mut g, &shape, cur);

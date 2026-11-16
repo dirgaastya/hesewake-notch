@@ -87,14 +87,20 @@ impl App {
     }
 
     pub(crate) fn draw_nav(&self, g: &mut Gfx, p: f32) {
-        let bg = paint(255, 255, 255, 0.12 * p);
+        // Revamp: panah menyala, membesar, dan bergeser sedikit ke luar saat kursor mendekat.
+        let cur = self.cursor_canvas();
+        let near = |c: (f32, f32)| cur.map_or(0.0, |(x, y)| (1.0 - ((x - c.0).powi(2) + (y - c.1).powi(2)).sqrt() / 55.0).clamp(0.0, 1.0));
         let wh = paint(255, 255, 255, 0.95 * p);
         let (lx, ly) = NAV_L;
-        g.circle(lx, ly, 13.0, &bg);
+        let nl = near(NAV_L);
+        g.circle(lx, ly, 13.0 * (1.0 + 0.12 * nl), &paint(255, 255, 255, (0.12 + 0.14 * nl) * p));
+        let lx = lx - 3.0 * nl;
         g.line(lx + 2.5, ly - 5.5, lx - 2.5, ly, 2.2, &wh);
         g.line(lx - 2.5, ly, lx + 2.5, ly + 5.5, 2.2, &wh);
         let (rx, ry) = NAV_R;
-        g.circle(rx, ry, 13.0, &bg);
+        let nr = near(NAV_R);
+        g.circle(rx, ry, 13.0 * (1.0 + 0.12 * nr), &paint(255, 255, 255, (0.12 + 0.14 * nr) * p));
+        let rx = rx + 3.0 * nr;
         g.line(rx - 2.5, ry - 5.5, rx + 2.5, ry, 2.2, &wh);
         g.line(rx + 2.5, ry, rx - 2.5, ry + 5.5, 2.2, &wh);
     }
@@ -105,13 +111,15 @@ impl App {
             let near = (1.0 - cyc(i as f32 - pos, n).abs()).clamp(0.0, 1.0);
             let r = 2.3 + 1.2 * near;
             let a = (0.28 + 0.72 * near) * p;
-            if near > 0.5 {
-                g.circle(dot_x(i, n), EXP_H - 11.0, r, &g.sacc(a));
-            } else {
-                g.circle(dot_x(i, n), EXP_H - 11.0, r, &paint(255, 255, 255, a));
-            }
+            // dot aktif memanjang jadi kapsul selama carousel bergerak, lalu kembali bulat
+            let stretch = (self.sv.abs() * 1.2).clamp(0.0, 10.0) * near;
+            let (dx, dy) = (dot_x(i, n), EXP_H - 11.0);
+            let pt = if near > 0.5 { g.sacc(a) } else { paint(255, 255, 255, a) };
+            g.fill(&rrect(dx - r - stretch / 2.0, dy - r, 2.0 * r + stretch, 2.0 * r, r), &pt);
+            // unread Windows notifications while another slide is open
+            let unread = matches!(self.order[i], SlideId::Notifications) && i != self.cur() && self.notifs.iter().any(|n| n.unread && n.dismiss.is_none());
             // an extension has something new
-            if self.ext_dot_badge(i) {
+            if unread || self.ext_dot_badge(i) {
                 let c = g.acc.bright;
                 g.circle(dot_x(i, n) + 5.0, EXP_H - 17.0, 2.4, &paint(c[0], c[1], c[2], p));
             }

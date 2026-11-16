@@ -50,6 +50,9 @@ pub(crate) struct Ext {
     pub(crate) problem: Option<String>,
     pub(crate) slide: Option<SlideMsg>,
     pub(crate) detail: Option<DetailMsg>,
+    /// Saat halaman berganti (daftar <-> detail): waktu dan arah (+1 masuk ke detail, -1 kembali) untuk transisi geser.
+    pub(crate) page_t: Option<Instant>,
+    pub(crate) page_dir: f32,
     pub(crate) badge: bool,
     /// What it was last told by `visible`: someone looks at its slide or its panel.
     seen: bool,
@@ -89,6 +92,8 @@ impl Ext {
             problem: None,
             slide: None,
             detail: None,
+            page_t: None,
+            page_dir: 1.0,
             badge: false,
             seen: false,
             view: Default::default(),
@@ -375,6 +380,10 @@ impl ExtState {
                     let Some(e) = self.find_mut(&id) else { continue };
                     match msg {
                         FromExt::Slide(s) => {
+                            if e.detail.is_some() {
+                                e.page_t = Some(Instant::now());
+                                e.page_dir = -1.0;
+                            }
                             e.slide = Some(s);
                             e.detail = None;
                             // the extension answers the tab the user clicked with its own
@@ -383,6 +392,10 @@ impl ExtState {
                         FromExt::Detail(d) => {
                             if e.detail.as_ref().map_or(true, |old| old.for_id != d.for_id) {
                                 e.view.dscroll = 0;
+                            }
+                            if e.detail.is_none() {
+                                e.page_t = Some(Instant::now());
+                                e.page_dir = 1.0;
                             }
                             e.detail = Some(d);
                         }

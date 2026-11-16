@@ -437,6 +437,7 @@ impl App {
                     ],
                 ),
                 (tr("Downloads"), vec![toggle(Rid::Downloads, tr("Download progress"), tr("Downloads folder"))]),
+                ("Scrap", vec![toggle(Rid::LinkTitles, tr("Link titles"), tr("Page title for links"))]),
             ],
             Sec::Weather => vec![
                 (tr("Location"), vec![row(Rid::City, tr("City"), tr("Location"), Ctl::Stepper(weather::CITIES[self.cfg.weather_city].0.to_string()))]),

@@ -410,9 +410,17 @@ impl App {
     }
 
     /// True selama ada animasi Water yang masih bergerak (menahan timer 16 ms).
+    fn water_settings_view(&self) -> bool {
+        self.wui.view == 1
+    }
+
     pub(crate) fn water_animating(&self) -> bool {
         if !self.water_visible() {
             return false;
+        }
+        // kilau bar progres terus bergerak selama slide ini terlihat
+        if !self.water_settings_view() {
+            return true;
         }
         let u = &self.wui;
         let targets = self.water_bar_targets();
@@ -431,7 +439,11 @@ impl App {
     }
 
     pub(crate) fn water_add(&mut self, d: i32) {
+        let was = self.water.ml >= self.water.goal;
         self.water.add(d, now_tm().wHour as usize);
+        if !was && self.water.ml >= self.water.goal {
+            self.water_goal_t = Some(Instant::now());
+        }
         self.reminding = false;
         self.peek_until = None;
     }
@@ -472,6 +484,14 @@ impl App {
     }
 
     /// Klik pada slide Water (koordinat kanvas).
+    /// Tombol di slide Water yang bisa diklik (kursor tangan).
+    pub(crate) fn water_hand(&self, x: f32, y: f32) -> bool {
+        if self.wui.view == 1 {
+            return in_rect(x, y, BACK.0, BACK.1, BACK.2, BACK.3);
+        }
+        [TOGGLE, DRINK, SIDE].iter().any(|r| in_rect(x, y, r.0, r.1, r.2, r.3))
+    }
+
     pub(crate) fn water_click(&mut self, x: f32, y: f32) {
         let hit = |r: (f32, f32, f32, f32)| in_rect(x, y, r.0, r.1, r.2, r.3);
         if self.wui.view == 1 {
@@ -546,7 +566,8 @@ impl App {
         let rx = lead + title_w + 22.0;
         let frac = if wt.goal > 0 { (self.wui.shown / wt.goal as f32).clamp(0.0, 1.0) } else { 0.0 };
         let rc = if wt.ml >= wt.goal { GREEN } else { g.acc.bright };
-        g.ring(rx, y + 9.5, 8.0, frac, 2.6, &paint(255, 255, 255, 0.14 * al), &paint(rc[0], rc[1], rc[2], al));
+        let pulse = self.water_goal_t.map(|t| t.elapsed().as_secs_f32()).filter(|&e| e < 1.0).map_or(0.0, |e| (-5.0 * e).exp() * (18.0 * e).sin());
+        g.ring(rx, y + 9.5, 8.0 + 2.5 * pulse, frac, 2.6, &paint(255, 255, 255, 0.14 * al), &paint(rc[0], rc[1], rc[2], al));
         let tx = rx + 16.0;
         if self.reminding && !settings {
             g.txtb(tr("Time to drink"), tx, y + 1.0, 13.0, g.acc.bright, al, 140.0);
@@ -589,7 +610,7 @@ impl App {
         } else {
             fill(tr(" \u{b7} {} L to go"), &[&fmt_l((wt.goal - wt.ml) as f32)])
         };
-        g.txt(&rest, x, sy, 12.0, GREY, al, 140.0);
+        g.txt(&rest, x, sy, 12.0, if wt.ml >= wt.goal { GREEN } else { GREY }, al, 140.0);
 
         // Progress bar gradasi.
         let (bx, by, bwid) = (LX + ox, 102.0, 150.0);
@@ -597,7 +618,41 @@ impl App {
         let frac = if wt.goal > 0 { (shown / wt.goal as f32).clamp(0.0, 1.0) } else { 0.0 };
         if frac > 0.005 {
             let fw = (bwid * frac).max(7.0);
-            g.fill(&rrect(bx, by, fw, 7.0, 3.5), &hgrad(bx, bx + bwid, g.acc.pale, g.acc.bright, al));
+            g.fill(&rrect(bx, by, fw, 7.0, 3.5), &hgrad(bx, bx + bwid, g.acc.pale, if wt.ml >= wt.goal { GREEN } else { g.acc.bright }, al));
+            // kilau yang menyapu bagian terisi
+            let sx = bx + ((self.t * 70.0) % (fw + 60.0)) - 30.0;
+            let (l, r) = ((sx - 18.0).max(bx + 3.0), (sx + 18.0).min(bx + fw - 3.0));
+            if r > l {
+                g.fill(&rrect(l, by + 1.0, r - l, 5.0, 2.5), &paint(255, 255, 255, 0.35 * al));
+            }
+        }
+        // target tercapai: gelembung naik dari bar (posisi dihitung dari waktu)
+        if let Some(e) = self.water_goal_t.map(|t| t.elapsed().as_secs_f32()).filter(|&e| e < 1.6) {
+            let c = g.acc.pale;
+            for i in 0..14 {
+                let (bxp, rise) = (bx + ((i * 53) % 150) as f32, (30 + (i * 29) % 50) as f32);
+                let (x, y) = (bxp + (e * 5.0 + i as f32).sin() * 4.0, by + 3.5 - rise * (e / 1.6));
+                let p = paint(c[0], c[1], c[2], (1.0 - e / 1.6) * 0.8 * al);
+                g.ring(x, y, 2.0 + (i % 3) as f32, 1.0, 1.0, &p, &p);
+            }
+        }
+
+        // Tetes air terbang dari tombol Drink ke ujung bar, lalu riak kecil di ujung.
+        if let Some(t) = self.wui.ripple {
+            let e = t.elapsed().as_secs_f32();
+            let tip = bx + bwid * frac.max(0.04);
+            let c = g.acc.bright;
+            if e < 0.5 {
+                let p = e / 0.5;
+                let sp = p * p * (3.0 - 2.0 * p);
+                let (ix, iy) = (DRINK.0 + ox + 22.0, DRINK.1 + DRINK.3 / 2.0);
+                let (x, y) = (ix + (tip - ix) * sp, iy + (by + 3.5 - iy) * p - 24.0 * (std::f32::consts::PI * p).sin());
+                g.circle(x, y, 3.4, &paint(c[0], c[1], c[2], al));
+            } else if e < 0.9 {
+                let q = (e - 0.5) / 0.4;
+                let p = paint(c[0], c[1], c[2], (1.0 - q) * 0.7 * al);
+                g.ring(tip, by + 3.5, 2.0 + q * 14.0, 0.0, 1.4, &p, &p);
+            }
         }
 
         // Tombol Drink (+ efek tekan + riak dari ikon tetes) dan Settings / Snooze.
@@ -608,7 +663,9 @@ impl App {
             }
         };
         let (dx, dy, dw, dh) = (DRINK.0 + ox, DRINK.1, DRINK.2, DRINK.3);
-        g.pill(dx, dy, dw, dh, g.acc.dark, 0.85 * al, press(0));
+        let cur = self.cursor_canvas();
+        let hov = |r: (f32, f32, f32, f32)| if cur.is_some_and(|(cx, cy)| in_rect(cx, cy, r.0 + ox, r.1, r.2, r.3)) { 1.04 } else { 1.0 };
+        g.pill(dx, dy, dw, dh, g.acc.dark, 0.85 * al, press(0) * hov(DRINK));
         let (ix, iy) = (dx + 22.0, dy + dh / 2.0);
         if let Some(t) = self.wui.ripple {
             let e = t.elapsed().as_secs_f32() / 0.8;
@@ -622,10 +679,10 @@ impl App {
 
         let (sx, sy2, sw, sh) = (SIDE.0 + ox, SIDE.1, SIDE.2, SIDE.3);
         if self.reminding {
-            g.pill(sx, sy2, sw, sh, [255, 255, 255], 0.14 * al, press(1));
+            g.pill(sx, sy2, sw, sh, [255, 255, 255], 0.14 * al, press(1) * hov(SIDE));
             g.txt_c(tr("Snooze 10 min"), sx + sw / 2.0, sy2 + ty(sh, 13.0), 13.0, [225, 230, 240], al, sw, true);
         } else {
-            g.pill(sx, sy2, sw, sh, [255, 255, 255], 0.10 * al, press(1));
+            g.pill(sx, sy2, sw, sh, [255, 255, 255], 0.10 * al, press(1) * hov(SIDE));
             g.icon_sliders(sx + 20.0, sy2 + sh / 2.0, 14.0, &paint(225, 225, 232, al));
             g.txtb(tr("Settings##short"), sx + 36.0, sy2 + ty(sh, 13.0), 13.0, [225, 225, 232], al, 64.0);
         }
@@ -658,9 +715,15 @@ impl App {
             g.txt(&label, pr + 8.0, y - 6.0, 11.0, GREY, al, 40.0);
         }
         // Batang: latar redup penuh + isi bergradasi yang tumbuh dari dasar.
+        let cur = self.cursor_canvas();
+        let mut tip: Option<(usize, f32)> = None;
         for i in 0..N_BARS {
             let x = pl + i as f32 * (bw + gap);
-            g.fill(&rrect(x, PLOT_T, bw, ph, bw / 2.0), &paint(255, 255, 255, 0.06 * al));
+            let hov = cur.is_some_and(|(cx, cy)| in_rect(cx, cy, x - 2.0, PLOT_T - 4.0, bw + 4.0, ph + 8.0));
+            g.fill(&rrect(x, PLOT_T, bw, ph, bw / 2.0), &paint(255, 255, 255, if hov { 0.10 } else { 0.06 } * al));
+            if hov {
+                tip = Some((i, x));
+            }
             let f = self.wui.bars[i].clamp(0.0, 1.05);
             let target = wt.hours[start + i];
             if target > 0 || f > 0.003 {
@@ -673,6 +736,22 @@ impl App {
             if i % 3 == 0 {
                 g.txt_c(&format!("{:02}", start + i), x + bw / 2.0, PLOT_B + 6.0, 11.0, GREY, al, 24.0, false);
             }
+            // titik kecil di bawah jam yang sedang berjalan
+            if start + i == now_h {
+                let c = g.acc.bright;
+                g.circle(x + bw / 2.0, PLOT_B + 22.0, 2.0, &paint(c[0], c[1], c[2], al));
+            }
+        }
+        if let Some((i, x)) = tip {
+            let txt = format!("{:02}:00 \u{b7} {} ml", start + i, wt.hours[start + i]);
+            let w = g.width_ex(&txt, 11.0, true) + 14.0;
+            let f = self.wui.bars[i].clamp(0.0, 1.05);
+            let tx = (x + bw / 2.0 - w / 2.0).clamp(pl - 6.0, pr + 30.0 - w);
+            let ty0 = (PLOT_B - ph * f - 28.0).max(36.0);
+            g.fill(&rrect(tx, ty0, w, 19.0, 9.5), &paint(14, 20, 40, 0.96 * al));
+            let c = g.acc.bright;
+            g.stroke(&rrect(tx + 0.5, ty0 + 0.5, w - 1.0, 18.0, 9.0), &paint(c[0], c[1], c[2], 0.5 * al), 1.0);
+            g.txt_c(&txt, tx + w / 2.0, ty0 + ty(19.0, 11.0), 11.0, [255, 255, 255], al, w, true);
         }
     }
 

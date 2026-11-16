@@ -143,7 +143,9 @@ impl Text {
         let asc = size * ASC;
         let mut pen = 0.0f32;
         let data = pm.data_mut();
-        let lut = if is_light(col) { Some(boost_lut()) } else { None };
+        // Teks kecil reguler di latar gelap paling mudah tampak tipis/pecah: kurva lebih kuat (revamp font).
+        let small = !bold && size / k <= 13.5;
+        let lut = if is_light(col) { Some(if small { boost_lut_small() } else { boost_lut() }) } else { None };
         for ch in s.chars() {
             let (m, bm) = glyph_of(&mut self.cache, chain, ch, size, bold);
             if pen + m.advance_width > max_w {
@@ -196,6 +198,17 @@ fn is_light(col: [u8; 3]) -> bool {
     (col[0] as u32 * 299 + col[1] as u32 * 587 + col[2] as u32 * 114) / 1000 > 128
 }
 
+fn boost_lut_small() -> &'static [u8; 256] {
+    static LUT: std::sync::OnceLock<[u8; 256]> = std::sync::OnceLock::new();
+    LUT.get_or_init(|| {
+        let mut t = [0u8; 256];
+        for (i, v) in t.iter_mut().enumerate() {
+            *v = (255.0 * (i as f32 / 255.0).powf(0.52)).round().clamp(0.0, 255.0) as u8;
+        }
+        t
+    })
+}
+
 fn boost_lut() -> &'static [u8; 256] {
     static LUT: std::sync::OnceLock<[u8; 256]> = std::sync::OnceLock::new();
     LUT.get_or_init(|| {
@@ -226,6 +239,8 @@ pub(crate) struct Gfx {
     /// Skala DPI dan transform-nya: semua gambar memakai koordinat logis (lihat scale.rs).
     pub(crate) s: f32,
     pub(crate) ts: Transform,
+    /// Pergeseran vertikal teks (logis) selagi slide naik saat notch dibuka; bentuk memakai `ts`.
+    pub(crate) text_dy: f32,
     /// The user's accent color; refreshed from Settings at the start of every frame (render::draw).
     pub(crate) acc: Accent,
 }
@@ -246,6 +261,7 @@ impl Gfx {
             dirty: full,
             s,
             ts: Transform::from_scale(s, s),
+            text_dy: 0.0,
             acc: accent::get(0),
         }
     }
@@ -265,6 +281,7 @@ impl Gfx {
             dirty: full,
             s,
             ts: Transform::from_scale(s, s),
+            text_dy: 0.0,
             acc: accent::get(0),
         }
     }
@@ -325,6 +342,25 @@ impl Gfx {
             self.fill(&path, p);
         }
     }
+    /// Busur lingkaran (radian, 0 = kanan, searah jarum jam) dengan ujung bulat.
+    pub(crate) fn arc(&mut self, cx: f32, cy: f32, r: f32, a0: f32, a1: f32, wd: f32, p: &Paint) {
+        let steps = (((a1 - a0).abs() * 12.0).ceil() as i32).max(2);
+        let mut pb = PathBuilder::new();
+        for s in 0..=steps {
+            let a = a0 + (a1 - a0) * s as f32 / steps as f32;
+            let (px, py) = (cx + r * a.cos(), cy + r * a.sin());
+            if s == 0 {
+                pb.move_to(px, py);
+            } else {
+                pb.line_to(px, py);
+            }
+        }
+        if let Some(path) = pb.finish() {
+            let st = Stroke { width: wd, line_cap: LineCap::Round, ..Default::default() };
+            self.pm.stroke_path(&path, p, &st, self.ts, None);
+        }
+    }
+
     pub(crate) fn line(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, wd: f32, p: &Paint) {
         let (dx, dy) = (x2 - x1, y2 - y1);
         let len = (dx * dx + dy * dy).sqrt().max(0.001);
@@ -335,12 +371,12 @@ impl Gfx {
     }
     fn txt_ex(&mut self, s: &str, x: f32, y: f32, size: f32, col: [u8; 3], al: f32, max_w: f32, bold: bool) {
         if let Some(t) = self.text.as_mut() {
-            t.draw(&mut self.pm, s, x, y, size, col, al, max_w, bold, None);
+            t.draw(&mut self.pm, s, x, y + self.text_dy, size, col, al, max_w, bold, None);
         }
     }
     pub(crate) fn txt_clip(&mut self, s: &str, x: f32, y: f32, size: f32, col: [u8; 3], al: f32, cl: f32, cr: f32, fade: f32) {
         if let Some(t) = self.text.as_mut() {
-            t.draw(&mut self.pm, s, x, y, size, col, al, f32::INFINITY, false, Some((cl, cr, fade)));
+            t.draw(&mut self.pm, s, x, y + self.text_dy, size, col, al, f32::INFINITY, false, Some((cl, cr, fade)));
         }
     }
     pub(crate) fn txt(&mut self, s: &str, x: f32, y: f32, size: f32, col: [u8; 3], al: f32, max_w: f32) {
@@ -618,7 +654,7 @@ mod tests {
         let mut g = gfx_100();
         scene(&mut g);
         // Hash diperbarui sekali saat tepi teks terang diperkuat (boost_lut); sebelum itu 6528788650261307270 (= sebelum skala DPI).
-        assert_eq!(fnv(g.pm.data()), 4458421239539419709, "hash adegan 100% berubah: pastikan perubahan gambar memang disengaja");
+        assert_eq!(fnv(g.pm.data()), 14813722633327843799, "hash adegan 100% berubah: pastikan perubahan gambar memang disengaja");
     }
 
     /// Implementasi lama (kuadratik) sebagai acuan kebenaran.

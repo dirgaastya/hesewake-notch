@@ -243,11 +243,21 @@ impl App {
                 Some(text)
             }
             ClipHit::Remove(i) => {
+                if let Some(c) = self.clips.items().get(i) {
+                    self.clip_gone.retain(|g| g.2.elapsed().as_secs_f32() < 0.3);
+                    self.clip_gone.push((c.text.clone(), i.saturating_sub(self.clip_scroll), Instant::now()));
+                }
                 self.clips.remove(i);
                 None
             }
             ClipHit::Clear => {
-                self.clips.clear();
+                // dua langkah: klik pertama meminta konfirmasi ("Sure?"), klik kedua dalam 2,5 detik menghapus
+                if self.clip_clear_t.is_some_and(|t| t.elapsed().as_secs_f32() < 2.5) {
+                    self.clips.clear();
+                    self.clip_clear_t = None;
+                } else {
+                    self.clip_clear_t = Some(Instant::now());
+                }
                 None
             }
         };
@@ -281,10 +291,16 @@ impl App {
     }
 
     pub(crate) fn clip_animating(&self) -> bool {
-        self.expanded() && self.is_slide(SlideId::Clipboard) && self.clip_flashing()
+        self.expanded()
+            && self.is_slide(SlideId::Clipboard)
+            && (self.clip_flashing()
+                || self.clip_clear_t.is_some_and(|t| t.elapsed().as_secs_f32() < 2.6)
+                || self.clip_gone.iter().any(|g| g.2.elapsed().as_secs_f32() < 0.3)
+                || self.clips.items().first().is_some_and(|c| c.at.elapsed().as_secs_f32() < 0.35))
     }
 
     pub(crate) fn slide_clipboard(&self, g: &mut Gfx, ox: f32, al: f32) {
+        let cur = self.cursor_canvas();
         let x = LX + ox;
         g.txtb("Clip", x, 12.0, 15.0, [255, 255, 255], al, 80.0);
         let tw = g.width_ex("Clip", 15.0, true);
@@ -297,26 +313,90 @@ impl App {
             return;
         }
         let (bx, by, bw, bh) = CLEAR_BTN;
-        g.fill(&rrect(bx + ox, by, bw, bh, bh / 2.0), &paint(255, 255, 255, 0.11 * al));
-        g.txt_c(tr("Clear"), bx + ox + bw / 2.0, by + ty(bh, 12.0), 12.0, [255, 255, 255], al, bw, false);
+        let armed = self.clip_clear_t.is_some_and(|t| t.elapsed().as_secs_f32() < 2.5);
+        if armed {
+            g.fill(&rrect(bx + ox, by, bw, bh, bh / 2.0), &paint(235, 87, 87, 0.30 * al));
+        } else {
+            g.fill(&rrect(bx + ox, by, bw, bh, bh / 2.0), &paint(255, 255, 255, 0.11 * al));
+        }
+        g.txt_c(if armed { tr("Sure?") } else { tr("Clear") }, bx + ox + bw / 2.0, by + ty(bh, 12.0), 12.0, [255, 255, 255], al, bw, armed);
         let count = fill(tr("{} of {}"), &[&n, &MAX_ITEMS]);
         let cw = g.width(&count, 11.0);
         g.txt(&count, bx + ox - 10.0 - cw, 15.0, 11.0, TEXT_FAINT, al, 80.0);
 
         let w = row_w(n);
+        // baris yang baru dihapus: bergeser ke kanan sambil memudar di posisi lamanya
+        for (text, vi, t) in &self.clip_gone {
+            let k = (t.elapsed().as_secs_f32() / 0.25).clamp(0.0, 1.0);
+            if k < 1.0 && *vi < ROWS {
+                let a = al * (1.0 - k);
+                let y = ROW_Y0 + *vi as f32 * ROW_P;
+                g.fill(&rrect(x + k * 24.0, y, w, ROW_H, 10.0), &paint(255, 255, 255, 0.08 * a));
+                let line = row_text(g, text.lines().next().unwrap_or(""), w - 60.0);
+                g.txt(&line, x + 38.0 + k * 24.0, y + ty(ROW_H, 13.0), 13.0, [242, 242, 242], a, w - 58.0);
+            }
+        }
         let flashing = self.clip_flashing();
         for (vi, c) in self.clips.items().iter().skip(self.clip_scroll).take(ROWS).enumerate() {
             let i = self.clip_scroll + vi;
-            let y = ROW_Y0 + vi as f32 * ROW_P;
+            // item yang baru disalin meluncur masuk dari atas sambil memudar
+            let born = (i == 0).then(|| (c.at.elapsed().as_secs_f32() / 0.3).clamp(0.0, 1.0)).unwrap_or(1.0);
+            let born = born * born * (3.0 - 2.0 * born);
+            let al = al * born;
+            let shift: f32 = self
+                .clip_gone
+                .iter()
+                .filter(|(_, gvi, _)| vi >= *gvi)
+                .map(|(_, _, t)| (1.0 - (t.elapsed().as_secs_f32() / 0.25).clamp(0.0, 1.0)) * ROW_P)
+                .sum();
+            let y = ROW_Y0 + vi as f32 * ROW_P - (1.0 - born) * 10.0 + shift;
             let copied = i == 0 && flashing;
-            let bg = if copied { g.sacc(0.30 * al) } else { paint(255, 255, 255, 0.08 * al) };
+            let hover = cur.is_some_and(|(hx, hy)| in_rect(hx, hy, x, y, w, ROW_H));
+            let bg = if copied { g.sacc(0.30 * al) } else { paint(255, 255, 255, if hover { 0.13 } else { 0.08 } * al) };
             g.fill(&rrect(x, y, w, ROW_H, 10.0), &bg);
-            let (right, rcol) = if copied { (tr("Copied").to_string(), g.acc.bright) } else { (ago(c.at.elapsed().as_secs()), TEXT_FAINT) };
+            let (right, rcol) = if copied {
+                (tr("Copied").to_string(), g.acc.bright)
+            } else if hover {
+                (tr("Click to copy").to_string(), g.acc.bright)
+            } else {
+                (ago(c.at.elapsed().as_secs()), TEXT_FAINT)
+            };
             let rw = g.width(&right, 11.0);
             g.txt(&right, x + w - X_W - rw, y + ty(ROW_H, 11.0), 11.0, rcol, al, 60.0);
-            let maxw = w - 12.0 - X_W - rw - 10.0;
-            let line = row_text(g, &c.text, maxw);
-            g.txt(&line, x + 12.0, y + ty(ROW_H, 13.0), 13.0, [242, 242, 242], al, maxw + 2.0);
+            let kind = clip_kind(&c.text);
+            clip_tile(g, kind, x + 8.0, y + 4.0, al);
+            let tx = x + 38.0;
+            let trimmed = c.text.trim();
+            let extra = trimmed.lines().count().saturating_sub(1);
+            let first = trimmed.lines().next().unwrap_or("");
+            let maxw = w - 38.0 - X_W - rw - 10.0 - if extra > 0 { 30.0 } else { 0.0 };
+            let ry = y + ty(ROW_H, 13.0);
+            let used = if let ClipKind::Url = kind {
+                // alamat: domain tebal, sisanya redup
+                let s = first.trim_start_matches("https://").trim_start_matches("http://").trim_start_matches("www.");
+                let (dom, rest) = match s.find('/') {
+                    Some(i) => (&s[..i], &s[i..]),
+                    None => (s, ""),
+                };
+                let dw = g.width_ex(dom, 13.0, true).min(maxw);
+                g.txtb(dom, tx, ry, 13.0, [255, 255, 255], al, maxw + 2.0);
+                if dw < maxw - 8.0 && !rest.is_empty() {
+                    let r = row_text(g, rest, maxw - dw - 2.0);
+                    g.txt(&r, tx + dw + 2.0, ry, 13.0, [150, 155, 168], al, maxw - dw);
+                    dw + 2.0 + g.width(&r, 13.0)
+                } else {
+                    dw
+                }
+            } else {
+                let line = row_text(g, first, maxw);
+                g.txt(&line, tx, ry, 13.0, [242, 242, 242], al, maxw + 2.0);
+                g.width(&line, 13.0).min(maxw)
+            };
+            if extra > 0 {
+                let bx = tx + used + 6.0;
+                g.fill(&rrect(bx, y + 8.0, 24.0, 14.0, 7.0), &paint(255, 255, 255, 0.16 * al));
+                g.txt_c(&format!("+{extra}"), bx + 12.0, y + 8.0 + ty(14.0, 10.0), 10.0, [225, 225, 232], al, 24.0, true);
+            }
             let (cx, cy) = (x + w - X_W / 2.0, y + ROW_H / 2.0);
             let xp = paint(255, 255, 255, 0.45 * al);
             g.line(cx - 3.0, cy - 3.0, cx + 3.0, cy + 3.0, 1.5, &xp);
@@ -328,6 +408,78 @@ impl App {
             let ty0 = ROW_Y0 + (th - thumb) * self.clip_scroll as f32 / (n - ROWS) as f32;
             g.fill(&rrect(RX - 4.0 + ox, ROW_Y0, 3.0, th, 1.5), &paint(255, 255, 255, 0.10 * al));
             g.fill(&rrect(RX - 4.0 + ox, ty0, 3.0, thumb, 1.5), &paint(255, 255, 255, 0.55 * al));
+        }
+    }
+}
+
+/// Jenis isi salinan untuk petak di kiri baris.
+#[derive(Clone, Copy)]
+enum ClipKind {
+    Url,
+    Email,
+    Color([u8; 3]),
+    Code,
+    Text,
+}
+
+fn clip_kind(text: &str) -> ClipKind {
+    let s = text.trim();
+    let one = !s.contains(char::is_whitespace);
+    if (s.starts_with("http://") || s.starts_with("https://")) && one {
+        return ClipKind::Url;
+    }
+    if one {
+        if let Some((a, b)) = s.split_once('@') {
+            if !a.is_empty() && b.contains('.') {
+                return ClipKind::Email;
+            }
+        }
+    }
+    if let Some(h) = s.strip_prefix('#') {
+        if (h.len() == 3 || h.len() == 6) && h.chars().all(|c| c.is_ascii_hexdigit()) {
+            let v = |i: usize| -> u8 {
+                if h.len() == 3 {
+                    u8::from_str_radix(&h[i..i + 1].repeat(2), 16).unwrap_or(0)
+                } else {
+                    u8::from_str_radix(&h[i * 2..i * 2 + 2], 16).unwrap_or(0)
+                }
+            };
+            return ClipKind::Color([v(0), v(1), v(2)]);
+        }
+    }
+    let starts = ["npm ", "git ", "cargo ", "cd ", "ls ", "python ", "node ", "$ "];
+    if starts.iter().any(|p| s.starts_with(p)) || s.contains('{') || s.contains('}') || s.contains(';') || s.contains("=>") {
+        return ClipKind::Code;
+    }
+    ClipKind::Text
+}
+
+fn clip_tile(g: &mut Gfx, kind: ClipKind, x: f32, y: f32, al: f32) {
+    let acc = g.acc.main;
+    let (tc, a) = match kind {
+        ClipKind::Url => (acc, 0.28),
+        ClipKind::Email => ([50, 200, 210], 0.28),
+        ClipKind::Code => ([255, 150, 60], 0.28),
+        ClipKind::Text => ([150, 155, 170], 0.28),
+        ClipKind::Color(_) => ([255, 255, 255], 0.10),
+    };
+    g.fill(&rrect(x, y, 22.0, 22.0, 7.0), &paint(tc[0], tc[1], tc[2], a * al));
+    let (cx, cy) = (x + 11.0, y + 11.0);
+    let w = [255, 255, 255];
+    match kind {
+        ClipKind::Url => {
+            let p = paint(255, 255, 255, 0.92 * al);
+            g.ring(cx, cy, 5.2, 1.0, 1.3, &p, &p);
+            g.line(cx - 5.2, cy, cx + 5.2, cy, 1.1, &p);
+            g.line(cx, cy - 5.2, cx, cy + 5.2, 1.1, &p);
+        }
+        ClipKind::Email => g.txt_c("@", cx, cy - 8.5, 13.0, w, al, 20.0, true),
+        ClipKind::Code => g.txt_c(">_", cx, cy - 7.3, 11.0, w, al, 20.0, true),
+        ClipKind::Text => g.txt_c("Aa", cx, cy - 7.3, 11.0, w, al, 20.0, true),
+        ClipKind::Color(c) => {
+            g.circle(cx, cy, 7.0, &paint(c[0], c[1], c[2], al));
+            let p = paint(255, 255, 255, 0.4 * al);
+            g.ring(cx, cy, 7.0, 1.0, 1.0, &p, &p);
         }
     }
 }

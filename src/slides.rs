@@ -66,7 +66,7 @@ impl SlideId {
             SlideId::Music => crate::i18n::tr("Music"),
             SlideId::Water => crate::i18n::tr("Water"),
             SlideId::Todo => crate::i18n::tr("To-do"),
-            SlideId::Ledge => "Ledge",
+            SlideId::Ledge => "Shelf",
             SlideId::Scrap => "Scrap",
             SlideId::Notifications => crate::i18n::tr("Notifications"),
             SlideId::System => crate::i18n::tr("System"),

@@ -40,6 +40,27 @@ impl App {
         v
     }
 
+    /// Tombol dan baris di slide To-do yang bisa diklik (kursor tangan).
+    pub(crate) fn todo_hand(&self, x: f32, y: f32) -> bool {
+        if self.editing {
+            return false;
+        }
+        if in_rect(x, y, LX, 116.0, 92.0, 28.0) || in_rect(x, y, LX + 98.0, 116.0, 92.0, 28.0) {
+            return true;
+        }
+        let (rx, rw, y0, max) = rows_geom(false);
+        let shown = self.todos.len().saturating_sub(self.todo_scroll).min(max);
+        (0..shown).any(|vi| in_rect(x, y, rx, y0 + vi as f32 * ROW_P, rw, ROW_H))
+    }
+
+    pub(crate) fn todo_animating(&self) -> bool {
+        self.expanded() && self.is_slide(SlideId::Todo) && (self.todo_pop.is_some_and(|p| p.1.elapsed().as_secs_f32() < 0.75) || self.todo_edit_end.is_some_and(|t| t.elapsed().as_secs_f32() < 0.25) || self.todo_all.is_some_and(|t| t.elapsed().as_secs_f32() < 0.95) || (self.editing && self.edit_start.elapsed().as_secs_f32() < 0.25) || self.todo_cnt.get().2.is_some_and(|t| t.elapsed().as_secs_f32() < 0.35) || (self.edit_mode && !self.todos.is_empty()) || self.todo_ring.get() >= 0.0 && {
+            let tot = self.todos.len();
+            let f = if tot > 0 { self.todos.iter().filter(|t| t.0).count() as f32 / tot as f32 } else { 0.0 };
+            (self.todo_ring.get() - f).abs() > 0.002
+        })
+    }
+
     pub(crate) fn fix_scroll(&mut self) {
         let max = self.todos.len().saturating_sub(3);
         self.todo_scroll = self.todo_scroll.min(max);
@@ -61,6 +82,7 @@ impl App {
         if self.note_mode {
             // The note is edited in place, so Esc / click away / focus loss all keep the text.
             save_note(&self.note);
+            self.nv.saved = Some(Instant::now());
             self.note_mode = false;
             self.editing = false;
             if restore && self.prev_fg != 0 {
@@ -79,6 +101,7 @@ impl App {
             }
         }
         self.editing = false;
+        self.todo_edit_end = Some(Instant::now());
         self.edit_idx = None;
         self.input.clear();
         if restore && self.prev_fg != 0 {
@@ -91,14 +114,41 @@ impl App {
         if dn {
             g.fill(&rrect(x, y, w, ROW_H, 10.0), &g.sacc(0.20 * al));
         } else {
-            g.fill(&rrect(x, y, w, ROW_H, 10.0), &paint(255, 255, 255, 0.08 * al));
+            let hov = self.cursor_canvas().is_some_and(|(hx, hy)| in_rect(hx, hy, x, y, w, ROW_H));
+            g.fill(&rrect(x, y, w, ROW_H, 10.0), &paint(255, 255, 255, if hov { 0.13 } else { 0.08 } * al));
         }
         let (cx, cy) = (x + 17.0, y + ROW_H / 2.0);
+        // Baru dicentang: lingkaran memantul (pop), tanda centang tergambar bertahap, coretan memanjang.
+        let pop = self.todo_pop.filter(|p| p.0 == ri).map(|p| p.1.elapsed().as_secs_f32()).filter(|&e| e < 0.7);
         if dn {
-            g.circle(cx, cy, 8.0, &g.sacc(al));
+            if let Some(e) = pop {
+                // konfeti kecil dari kotak centang: posisi dihitung langsung dari waktu (lintasan parabola)
+                let cols = [g.acc.main, g.acc.bright, g.acc.pale, [255, 255, 255]];
+                for i in 0..9 {
+                    let ang = i as f32 * std::f32::consts::TAU / 9.0 + ri as f32;
+                    let sp = 45.0 + ((i * 37) % 55) as f32;
+                    let (px, py) = (cx + ang.cos() * sp * e, cy + ang.sin() * sp * e - 40.0 * e + 0.5 * 420.0 * e * e);
+                    let a = (1.0 - e / 0.7).clamp(0.0, 1.0) * al;
+                    let c = cols[i % 4];
+                    g.circle(px, py, 1.6, &paint(c[0], c[1], c[2], a));
+                }
+            }
+            let r = pop.map_or(8.0, |e| 8.0 * (1.0 - (-10.0 * e).exp() * (20.0 * e).cos()).max(0.0));
+            g.circle(cx, cy, r, &g.sacc(al));
             let wh = paint(255, 255, 255, al);
-            g.line(cx - 3.6, cy + 0.4, cx - 1.0, cy + 3.0, 1.9, &wh);
-            g.line(cx - 1.0, cy + 3.0, cx + 3.8, cy - 2.8, 1.9, &wh);
+            let pk = pop.map_or(1.0, |e| ((e - 0.08) / 0.2).clamp(0.0, 1.0));
+            let len = pk * (3.67 + 6.1);
+            if pk > 0.0 && r > 2.4 {
+                let (p0, p1, p2) = ((cx - 3.6, cy + 0.4), (cx - 1.0, cy + 3.0), (cx + 3.8, cy - 2.8));
+                if len <= 3.67 {
+                    let k = len / 3.67;
+                    g.line(p0.0, p0.1, p0.0 + (p1.0 - p0.0) * k, p0.1 + (p1.1 - p0.1) * k, 1.9, &wh);
+                } else {
+                    g.line(p0.0, p0.1, p1.0, p1.1, 1.9, &wh);
+                    let k = (len - 3.67) / 6.1;
+                    g.line(p1.0, p1.1, p1.0 + (p2.0 - p1.0) * k, p1.1 + (p2.1 - p1.1) * k, 1.9, &wh);
+                }
+            }
         } else {
             g.circle(cx, cy, 8.0, &paint(255, 255, 255, 0.32 * al));
             g.circle(cx, cy, 6.7, &paint(22, 22, 24, al));
@@ -108,11 +158,13 @@ impl App {
         let maxw = w - 33.0 - 10.0 - if self.edit_mode { 24.0 } else { 0.0 };
         g.txt(s, tx, y + ty(ROW_H, 13.0), 13.0, col, al, maxw);
         if dn {
-            let tw = g.width(s, 13.0).min(maxw);
+            let k = pop.map_or(1.0, |e| (e / 0.3).clamp(0.0, 1.0));
+            let tw = g.width(s, 13.0).min(maxw) * k;
             g.rect(tx, cy, tw, 1.3, &paint(175, 175, 175, 0.9 * al));
         }
         if self.edit_mode {
-            let (bx, by) = (x + w - 17.0, cy);
+            // × bergoyang pelan di mode edit
+            let (bx, by) = (x + w - 17.0, cy + (self.t * 14.0 + ri as f32).sin() * 0.9);
             g.circle(bx, by, 8.0, &g.sacc(0.9 * al));
             let wh = paint(255, 255, 255, al);
             g.line(bx - 2.8, by - 2.8, bx + 2.8, by + 2.8, 1.6, &wh);
@@ -121,7 +173,8 @@ impl App {
     }
 
     fn pill(&self, g: &mut Gfx, x: f32, y: f32, label: &str, edit_icon: bool, active: bool, al: f32) {
-        let bg = if active { g.sacc(0.95 * al) } else { paint(255, 255, 255, 0.11 * al) };
+        let hov = self.cursor_canvas().is_some_and(|(cx, cy)| in_rect(cx, cy, x, y, 92.0, 28.0));
+        let bg = if active { g.sacc(0.95 * al) } else { paint(255, 255, 255, if hov { 0.19 } else { 0.11 } * al) };
         g.fill(&rrect(x, y, 92.0, 28.0, 14.0), &bg);
         let (ix, iy) = (x + 16.0, y + 14.0);
         let wh = paint(255, 255, 255, al);
@@ -162,31 +215,83 @@ impl App {
         let done = self.todos.iter().filter(|t| t.0).count();
         let total = self.todos.len();
         let frac = if total > 0 { done as f32 / total as f32 } else { 0.0 };
-        g.ring(dx - 16.0, 23.0, 8.0, frac, 3.0, &paint(255, 255, 255, 0.16 * al), &g.sacc(al));
+        let all_done = total > 0 && done == total;
+        let ring_fg = if all_done { paint(60, 200, 110, al) } else { g.sacc(al) };
+        let shown = if self.todo_ring.get() < 0.0 { frac } else { self.todo_ring.get() + (frac - self.todo_ring.get()) * 0.2 };
+        self.todo_ring.set(if (shown - frac).abs() < 0.002 { frac } else { shown });
+        g.ring(dx - 16.0, 23.0, 8.0, shown, 3.0, &paint(255, 255, 255, 0.16 * al), &ring_fg);
 
         let (rx, rw, y0, max) = rows_geom(self.editing);
+        let ek = (self.edit_start.elapsed().as_secs_f32() / 0.2).clamp(0.0, 1.0);
+        let ek = ek * ek * (3.0 - 2.0 * ek);
         if self.editing {
-            g.fill(&rrect(LX - 1.0 + ox, 39.0, CW + 2.0, 32.0, 11.0), &g.sacc(0.55 * al));
-            g.fill(&rrect(LX + ox, 40.0, CW, 30.0, 10.0), &paint(26, 26, 29, al));
+            // bilah input turun dari atas sambil memudar (0,2 dtk)
+            let (eal, eo) = (al * ek, (1.0 - ek) * -8.0);
+            g.fill(&rrect(LX - 1.0 + ox, 39.0 + eo, CW + 2.0, 32.0, 11.0), &g.sacc(0.55 * eal));
+            g.fill(&rrect(LX + ox, 40.0 + eo, CW, 30.0, 10.0), &paint(26, 26, 29, eal));
             let shown: &str = if self.input.is_empty() { tr("Type a task, Enter to save, Esc to cancel") } else { &self.input };
             let col = if self.input.is_empty() { TEXT_FAINT } else { [255, 255, 255] };
-            g.txt(shown, LX + 12.0 + ox, 40.0 + ty(30.0, 13.0), 13.0, col, al, CW - 30.0);
+            g.txt(shown, LX + 12.0 + ox, 40.0 + eo + ty(30.0, 13.0), 13.0, col, eal, CW - 30.0);
             if self.caret_on {
                 let cw = if self.input.is_empty() { 0.0 } else { g.width(&self.input, 13.0).min(CW - 30.0) };
-                g.rect(LX + 12.0 + ox + cw + 1.0, 46.0, 1.5, 18.0, &paint(255, 255, 255, al));
+                g.rect(LX + 12.0 + ox + cw + 1.0, 46.0 + eo, 1.5, 18.0, &paint(255, 255, 255, eal));
             }
+        }
+        // panel kiri (angka, keterangan, tombol): memudar dan bergeser ke kiri saat input dibuka, kembali saat selesai
+        let pa = if self.editing {
+            1.0 - ek
         } else {
-            g.txtb(&format!("{}/{}", done, total), x, 36.0, 42.0, [255, 255, 255], al, 190.0);
-            g.txt(tr("Tasks done today"), x, 92.0, 12.0, TEXT_DIM, al, 190.0);
-            self.pill(g, x, 116.0, tr("Add Task"), false, false, al);
-            self.pill(g, x + 98.0, 116.0, if self.edit_mode { tr("Done") } else { tr("Edit Task") }, true, self.edit_mode, al);
-            if self.todos.is_empty() {
-                g.txt(tr("No tasks yet"), rx + ox + 8.0, 56.0, 13.0, TEXT_FAINT, al, 180.0);
+            self.todo_edit_end.map_or(1.0, |t| {
+                let k = (t.elapsed().as_secs_f32() / 0.2).clamp(0.0, 1.0);
+                k * k * (3.0 - 2.0 * k)
+            })
+        };
+        if pa > 0.02 {
+            let (px, pal) = (x - (1.0 - pa) * 16.0, al * pa);
+            // angka selesai berguling ke atas saat berubah (pemakaian pertama hanya menyamakan nilai)
+            let (mut prev, mut cur_n, mut ct) = self.todo_cnt.get();
+            if prev == usize::MAX {
+                (prev, cur_n, ct) = (done, done, None);
+                self.todo_cnt.set((prev, cur_n, ct));
+            } else if cur_n != done {
+                (prev, cur_n, ct) = (cur_n, done, Some(Instant::now()));
+                self.todo_cnt.set((prev, cur_n, ct));
+            }
+            let roll = ct.map_or(1.0, |t| (t.elapsed().as_secs_f32() / 0.3).clamp(0.0, 1.0));
+            if roll < 1.0 {
+                let e = 1.0 - (1.0 - roll).powi(3);
+                g.txtb(&format!("{}/{}", prev, total), px, 36.0 - 18.0 * e, 42.0, [255, 255, 255], pal * (1.0 - e), 190.0);
+                g.txtb(&format!("{}/{}", done, total), px, 36.0 + 18.0 * (1.0 - e), 42.0, [255, 255, 255], pal * e, 190.0);
+            } else {
+                g.txtb(&format!("{}/{}", done, total), px, 36.0, 42.0, [255, 255, 255], pal, 190.0);
+            }
+            if all_done {
+                g.txtb(tr("All done, nice work!"), px, 92.0, 12.0, [60, 200, 110], pal, 190.0);
+            } else {
+                g.txt(tr("Tasks done today"), px, 92.0, 12.0, TEXT_DIM, pal, 190.0);
+            }
+            self.pill(g, px, 116.0, tr("Add Task"), false, false, pal);
+            self.pill(g, px + 98.0, 116.0, if self.edit_mode { tr("Done") } else { tr("Edit Task") }, true, self.edit_mode, pal);
+            if self.todos.is_empty() && !self.editing {
+                crate::shelf::dashed(g, &rrect(rx + ox, 40.0, rw, 56.0, 12.0), &paint(255, 255, 255, 0.22 * pal), 1.2, 6.0, 0.0);
+                g.txt_c(tr("No tasks yet"), rx + ox + rw / 2.0, 56.0, 13.0, TEXT_FAINT, pal, rw, false);
+                g.txt_c(tr("Add Task"), rx + ox + rw / 2.0, 74.0, 12.0, g.acc.bright, pal, rw, true);
             }
         }
         let order = self.todo_order();
         for (vi, &ri) in order.iter().skip(self.todo_scroll).take(max).enumerate() {
             self.todo_row(g, rx + ox, y0 + vi as f32 * ROW_P, rw, ri, al);
+        }
+        // semua tugas selesai: konfeti besar dari angka hitungan (posisi dihitung dari waktu, tanpa state tambahan)
+        if let Some(e) = self.todo_all.map(|t| t.elapsed().as_secs_f32()).filter(|&e| e < 0.9) {
+            let cols = [g.acc.main, g.acc.bright, g.acc.pale, [60, 200, 110], [255, 255, 255]];
+            for i in 0..26 {
+                let ang = i as f32 * std::f32::consts::TAU / 26.0 + 0.3;
+                let sp = 70.0 + ((i * 53) % 110) as f32;
+                let (px, py) = (x + 30.0 + ang.cos() * sp * e, 60.0 + ang.sin() * sp * e - 50.0 * e + 0.5 * 420.0 * e * e);
+                let c = cols[i % 5];
+                g.circle(px, py, 1.9, &paint(c[0], c[1], c[2], (1.0 - e / 0.9) * al));
+            }
         }
         let n = order.len();
         if n > max {
