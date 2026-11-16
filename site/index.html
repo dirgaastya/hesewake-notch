@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hesewake Notch</title>
+<meta name="description" content="A tiny notch for the top of your Windows screen: music with synced lyrics, clock, water, to-do, file shelf, notes, calendar and prayer times. Free, open source, one small .exe.">
+<meta name="color-scheme" content="dark">
+<meta property="og:title" content="Hesewake Notch">
+<meta property="og:description" content="A tiny notch for the top of your Windows screen. Free and open source.">
+<meta property="og:type" content="website">
+<link rel="icon" href="icon.ico">
+<style>
+/* Design notes (why each choice): the page is black with one blue accent because the app itself is a black notch with an
+   accent colour; Instrument Sans is the app's own font; every slide picture hangs from the top edge of a "screen"
+   because that is where the real notch lives; section spacing and layout change from one section to the next so the
+   page does not read as one repeated template. */
+@font-face{font-family:"Instrument Sans";font-weight:400;font-display:swap;src:url(fonts/InstrumentSans-Regular.ttf) format("truetype")}
+@font-face{font-family:"Instrument Sans";font-weight:700;font-display:swap;src:url(fonts/InstrumentSans-Bold.ttf) format("truetype")}
+:root{
+  --bg:#05060a; --band:#090b11; --panel:#0e1016; --line:rgba(255,255,255,.09);
+  --tx:#f2f4fa; --dim:#aab0c0; --faint:#7d8496;
+  --acc:#5a96ff; --acc-bright:#5aaaff; --acc-pale:#bee1ff; --glow:rgba(90,120,200,.26);
+  /* filled buttons: white text must reach 4.5:1 (5.2:1, and 6.1:1 on hover) */
+  --btn:#1f6ad1; --btn-hover:#1a5fc0;
+  --wall:radial-gradient(120% 90% at 20% 0%,#3d5a9e 0%,#1d2a52 45%,#0b0f1d 100%);
+  --max:1080px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.6 "Instrument Sans",system-ui,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--tx);text-decoration-color:rgba(255,255,255,.32);text-underline-offset:3px}
+a:hover{color:var(--acc-pale);text-decoration-color:currentColor}
+:focus-visible{outline:2px solid var(--acc);outline-offset:3px;border-radius:6px}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 20px}
+.skip{position:absolute;left:-999px;top:8px;background:var(--btn);color:#fff;padding:8px 14px;border-radius:8px;z-index:10}
+.skip:focus{left:8px}
+code{font:13px/1.4 ui-monospace,Consolas,monospace;background:rgba(255,255,255,.07);padding:2px 6px;border-radius:6px;color:var(--tx)}
+
+/* top bar */
+header.top{position:sticky;top:0;z-index:5;background:rgba(5,6,10,.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.bar{display:flex;align-items:center;gap:20px;height:60px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;color:var(--tx);text-decoration:none;white-space:nowrap}
+.brand img{width:26px;height:26px;border-radius:7px}
+nav{margin-left:auto;display:flex;align-items:center;gap:2px;font-size:14px}
+nav a{color:var(--dim);text-decoration:none;padding:12px 10px;border-radius:8px}
+nav a:hover{color:#fff}
+nav a.navbtn{background:var(--btn);color:#fff;font-weight:700;padding:0 18px;height:44px;display:inline-flex;align-items:center;border-radius:22px;margin-left:8px}
+nav a.navbtn:hover{background:var(--btn-hover)}
+@media(max-width:640px){nav a.opt{display:none}}
+@media(max-width:520px){nav a.opt2{display:none}}
+@media(max-width:380px){.wrap{padding:0 16px}.bar{gap:10px}.brand{font-size:14px;gap:8px}}
+
+/* hero */
+.hero{position:relative;text-align:center;padding:64px 0 28px;overflow:hidden}
+.hero::before{content:"";position:absolute;left:50%;top:-140px;width:760px;height:420px;transform:translateX(-50%);background:radial-gradient(closest-side,var(--glow),transparent);pointer-events:none}
+h1{position:relative;margin:0 auto 16px;max-width:760px;font-size:clamp(34px,6vw,58px);line-height:1.08;letter-spacing:-.02em}
+h1 em{font-style:normal;color:var(--acc-bright)}
+.lead{position:relative;margin:0 auto 28px;max-width:620px;color:var(--dim);font-size:clamp(16px,2.2vw,19px)}
+.cta{position:relative;display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-bottom:14px}
+.btn{display:inline-flex;align-items:center;height:46px;padding:0 24px;border-radius:23px;font-weight:700;font-size:15px;text-decoration:none;border:1px solid transparent;transition:transform .15s,background .15s}
+.btn:active{transform:scale(.97)}
+.btn.main{background:var(--btn);color:#fff}
+.btn.main:hover{background:var(--btn-hover);color:#fff}
+.btn.ghost{background:rgba(255,255,255,.06);border-color:var(--line);color:var(--tx)}
+.btn.ghost:hover{background:rgba(255,255,255,.1);color:#fff}
+.meta{position:relative;color:var(--faint);font-size:13px}
+.demo{margin:36px auto 0;max-width:900px}
+.frame{border:1px solid var(--line);border-radius:22px;background:#000;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+.frame iframe{display:block;width:100%;height:min(46vw,330px);min-height:300px;border:0;background:#000}
+.demo p{margin:12px 4px 0;color:var(--faint);font-size:13px}
+.demo .small{display:none}
+/* the preview needs a pointer to hover and a wide screen: on a phone just link to it */
+@media(max-width:760px){.frame,.demo .big{display:none}.demo .small{display:block}}
+
+/* sections: spacing changes on purpose */
+section{padding:72px 0;scroll-margin-top:40px} /* so a jump from the menu does not hide the heading under the sticky bar */
+section.s-lg{padding:96px 0}
+section.s-sm{padding:44px 0 56px}
+.band{background:var(--band);border-block:1px solid var(--line)}
+h2{margin:0 0 10px;font-size:clamp(26px,4vw,36px);letter-spacing:-.015em;line-height:1.15}
+h3{margin:0 0 8px;font-size:20px}
+.sub{margin:0 0 30px;color:var(--dim);max-width:640px}
+.sub code{white-space:nowrap}
+
+/* slide showcase: pictures of the real slides, hanging from the top edge of a screen */
+.show{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:clamp(24px,5vw,56px);align-items:center;padding:26px 0}
+.show:nth-of-type(even){grid-template-columns:minmax(0,7fr) minmax(0,5fr)}
+.show:nth-of-type(even) .copy{order:2}
+.copy p{margin:0;color:var(--dim)}
+.screen{display:flex;justify-content:center;padding:0 clamp(12px,4vw,40px) 34px;background:var(--wall);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.screen img{display:block;width:100%;max-width:540px;height:auto}
+@media(max-width:760px){.show,.show:nth-of-type(even){grid-template-columns:1fr;gap:18px}.show:nth-of-type(even) .copy{order:0}}
+.more-h{margin:56px 0 4px}
+.more{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 48px;margin:0;padding:0;list-style:none}
+.more li{padding:14px 0;border-top:1px solid var(--line);color:var(--dim)}
+.more strong{color:var(--tx)}
+@media(max-width:700px){.more{grid-template-columns:1fr}}
+
+/* download and signing */
+.two{display:grid;gap:18px;grid-template-columns:1fr 1fr}
+@media(max-width:760px){.two{grid-template-columns:1fr}}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:24px}
+.box h3{font-size:18px}
+.box p,.box li{color:var(--dim);font-size:15px}
+.box ul{margin:8px 0 0;padding-left:20px}
+.signing{margin-top:56px;padding-top:36px;border-top:1px solid var(--line)}
+.tag{display:inline-block;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;background:rgba(255,190,80,.14);color:#ffcf7a;margin-bottom:10px}
+
+/* changelog: a plain timeline, not boxes */
+.log{list-style:none;margin:0;padding:0}
+.log>li{display:grid;grid-template-columns:150px 1fr;gap:10px 32px;padding:22px 0;border-top:1px solid var(--line)}
+.log .v{font-weight:700;font-size:18px}
+.log time{display:block;color:var(--faint);font-size:13px;font-weight:400}
+.log ul{margin:0;padding-left:18px;color:var(--dim);list-style:disc}
+.log li li{margin:3px 0}
+@media(max-width:640px){.log>li{grid-template-columns:1fr}}
+
+/* contributors: two columns, a hairline above each entry, the name and role on one line and what they built below.
+   No pictures (nobody's photo is used without asking, and a placeholder avatar would only be decoration). */
+.crew{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 56px;list-style:none;padding:0;margin:0 0 30px}
+.crew li{padding:24px 0 26px;border-top:1px solid var(--line)}
+.crew .n{font-size:19px;font-weight:700;overflow-wrap:anywhere}
+.crew .n a{display:inline-block;padding:4px 0}
+.crew .r{margin-left:8px;color:var(--faint);font-size:13px;font-weight:400}
+.crew p{margin:6px 0 0;max-width:46ch;color:var(--dim);font-size:15px}
+/* on a phone: one column, and the name is 44px tall so a thumb can hit it */
+@media(max-width:700px){.crew{grid-template-columns:1fr}.crew .n a{padding:10px 0}}
+
+/* privacy table; stacks on a phone */
+.tw table{width:100%;border-collapse:collapse;font-size:14.5px}
+.tw th,.tw td{text-align:left;padding:10px;border-bottom:1px solid var(--line);vertical-align:top}
+.tw th{color:var(--faint);font-weight:700;font-size:12px;letter-spacing:.05em;text-transform:uppercase}
+.tw td{color:var(--dim)}
+.tw td:first-child{color:var(--tx);white-space:nowrap}
+@media(max-width:640px){
+  .tw table,.tw tbody,.tw tr,.tw td{display:block}
+  .tw thead{display:none}
+  .tw tr{padding:12px 0;border-bottom:1px solid var(--line)}
+  .tw td{border:0;padding:2px 0;white-space:normal}
+  .tw td:first-child{white-space:normal;font-weight:700}
+  .tw td[data-label]::before{content:attr(data-label) ": ";color:var(--faint)}
+}
+
+footer{border-top:1px solid var(--line);padding:34px 0 48px;color:var(--faint);font-size:13.5px}
+footer p{margin:0 0 8px;max-width:760px}
+footer a{color:var(--dim)}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap bar">
+    <a class="brand" href="#top"><img src="icon.ico" alt="" width="26" height="26">Hesewake Notch</a>
+    <nav aria-label="Main">
+      <a class="opt" href="#features">Features</a>
+      <a class="opt" href="#changelog">What's new</a>
+      <a class="opt" href="#contributors">Contributors</a>
+      <a class="opt" href="#privacy">Privacy</a>
+      <a class="opt2" href="https://github.com/dirgaastya/hesewake-notch">GitHub</a>
+      <a class="navbtn" href="#download">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<div class="hero" id="top">
+  <div class="wrap">
+    <h1>A tiny notch for the top of your <em>Windows</em> screen.</h1>
+    <p class="lead">Music with synced lyrics, clock, water, to-do, file shelf, notes, calendar and prayer times in one small carousel. One lightweight <code>.exe</code>, and your data stays on your PC.</p>
+    <div class="cta">
+      <a class="btn main" href="https://github.com/dirgaastya/hesewake-notch/releases/latest">Download for Windows</a>
+      <a class="btn ghost" href="https://github.com/dirgaastya/hesewake-notch">View on GitHub</a>
+    </div>
+    <div class="meta">Windows 10 and 11 &middot; free and open source (MIT)</div>
+
+    <div class="demo">
+      <div class="frame">
+        <iframe src="demo.html" title="Interactive preview of the Hesewake Notch interface" loading="lazy"></iframe>
+      </div>
+      <p class="big">Move your pointer over the notch to open it, then use the arrows to change slides. With a keyboard: Tab to the preview, Enter to open, Left and Right to change slides, Escape to close. This is an interactive design preview in your browser, not the real app. <a href="demo.html">Open it full screen</a>.</p>
+      <p class="small">There is an interactive design preview of the interface, best on a computer with a mouse. <a href="demo.html">Open the preview</a>.</p>
+    </div>
+  </div>
+</div>
+
+<section id="features" class="s-sm">
+  <div class="wrap">
+    <h2>What is in the notch</h2>
+    <p class="sub">Hover the top edge of the screen and the notch opens into a carousel of small apps. Move away and it shrinks back; a maximized or fullscreen window makes it a thin line. These are the real slides, drawn by the app itself.</p>
+
+    <article class="show">
+      <div class="copy">
+        <h3>Music</h3>
+        <p>Now playing from Spotify, browsers and other media apps, with the cover, playback controls and a sound output switcher. Synced lyrics from LRCLIB and lrc.red scroll along with the song, and Japanese and Korean lyrics can be shown in romaji.</p>
+      </div>
+      <div class="screen"><img src="img/slides/music.png" width="1080" height="384" alt="The Music slide: a song called Midnight Drive with its cover, a progress bar and playback buttons" loading="lazy" decoding="async"></div>
+    </article>
+
+    <article class="show">
+      <div class="copy">
+        <h3>Scrap</h3>
+        <p>A small notepad for up to 3,333 characters. Pasted links become badges that show the page title, and Backspace removes a whole link at once. Fetching titles can be turned off in Settings.</p>
+      </div>
+      <div class="screen"><img src="img/slides/scrap.png" width="1080" height="384" alt="The Scrap slide: a short note containing two links shown as badges with their page titles" loading="lazy" decoding="async"></div>
+    </article>
+
+    <article class="show">
+      <div class="copy">
+        <h3>Agenda</h3>
+        <p>What is left on today's calendar, with a Join button for Meet, Zoom and Teams links. It reads the secret calendar link you paste, which stays in Windows Credential Manager.</p>
+      </div>
+      <div class="screen"><img src="img/slides/agenda.png" width="1080" height="384" alt="The Agenda slide: three meetings today, two of them with a Join button" loading="lazy" decoding="async"></div>
+    </article>
+
+    <article class="show">
+      <div class="copy">
+        <h3>Prayer times</h3>
+        <p>Times computed on your PC with the Kemenag parameters, a countdown in the last 15 minutes, a toast when a prayer starts and an optional adhan. Ramadan mode adds Imsak and Iftar.</p>
+      </div>
+      <div class="screen"><img src="img/slides/prayer.png" width="1080" height="384" alt="The Prayer slide: an arc showing the time left until Ashar, and the day's prayer times" loading="lazy" decoding="async"></div>
+    </article>
+
+    <article class="show">
+      <div class="copy">
+        <h3>Timer and Pomodoro</h3>
+        <p>A countdown, a stopwatch and a Pomodoro with automatic focus and break cycles. While the notch is closed, a small chip keeps the time.</p>
+      </div>
+      <div class="screen"><img src="img/slides/timer.png" width="1080" height="384" alt="The Timer slide in Pomodoro mode: a focus session with 15 minutes left and two sessions done" loading="lazy" decoding="async"></div>
+    </article>
+
+    <article class="show">
+      <div class="copy">
+        <h3>Notifications</h3>
+        <p>Windows notifications in a list with the app's icon or the sender's photo, and a click opens the app. Toasts also cover the charger, Bluetooth, lock keys, and a microphone or camera in use.</p>
+      </div>
+      <div class="screen"><img src="img/slides/notifs.png" width="1080" height="384" alt="The Notifications slide: three notifications from a calendar, a chat and a mail app" loading="lazy" decoding="async"></div>
+    </article>
+
+    <h3 class="more-h">And more in the carousel</h3>
+    <ul class="more">
+      <li><strong>Water.</strong> A daily tracker with quick add buttons, a goal and gentle reminders.</li>
+      <li><strong>To-do.</strong> A checklist that stays one hover away.</li>
+      <li><strong>Shelf.</strong> Drop files and folders in, click to open, drag them back out.</li>
+      <li><strong>Clipboard.</strong> The last 10 texts you copied, kept in memory only (optional).</li>
+      <li><strong>System.</strong> CPU, memory, network and battery at a glance.</li>
+      <li><strong>Extensions.</strong> Small programs next to the notch can add a slide or alerts over a local pipe only your Windows user can open.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="download" class="band s-lg">
+  <div class="wrap">
+    <h2>Download</h2>
+    <p class="sub">The latest installer is on the GitHub releases page, together with a <code>SHA256SUMS</code> file.</p>
+    <div class="two">
+      <div class="box">
+        <h3>Install</h3>
+        <p>Windows 10 or 11. Download <code>HesewakeNotch-Setup-&lt;version&gt;.exe</code> from the latest release and run it. The app can also check for updates by itself and verifies the installer's SHA-256 before running it.</p>
+        <p><a class="btn main" href="https://github.com/dirgaastya/hesewake-notch/releases/latest">Latest release</a></p>
+      </div>
+      <div class="box">
+        <h3>Verify your download</h3>
+        <p>Compare the installer with the published checksum in PowerShell:</p>
+        <p><code>Get-FileHash .\HesewakeNotch-Setup-*.exe -Algorithm SHA256</code></p>
+        <p>The hash must match the line for your file in <code>SHA256SUMS</code> on the same release page.</p>
+      </div>
+    </div>
+
+    <div class="signing" id="signing">
+      <span class="tag">Status: in preparation</span>
+      <h3>Code signing policy</h3>
+      <div class="two">
+        <div>
+          <p style="margin-top:0;color:var(--dim)">Release installers are not code-signed yet, so Windows SmartScreen may warn about an unknown publisher. We are applying for free code signing for open source projects from <a href="https://signpath.org">SignPath Foundation</a>. This page will state the final wording once a certificate is issued.</p>
+          <p style="color:var(--dim)">Until then, use the checksum above to confirm that your installer is the one that was built from this repository.</p>
+        </div>
+        <div>
+          <p style="margin-top:0;color:var(--dim)">How releases are made:</p>
+          <ul style="margin:0;padding-left:20px;color:var(--dim)">
+            <li>Releases are built by GitHub Actions from the public source code, never on a personal machine.</li>
+            <li>Changes reach <code>main</code> through pull requests that must pass the CI checks.</li>
+            <li>The maintainer (<a href="https://github.com/dirgaastya">dirgaastya</a>) is the only person who approves a release.</li>
+            <li>Each release lists its changes in the <a href="https://github.com/dirgaastya/hesewake-notch/blob/main/CHANGELOG.md">changelog</a>.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="changelog" class="s-md">
+  <div class="wrap">
+    <h2>What's new</h2>
+    <p class="sub">The latest releases. The <a href="https://github.com/dirgaastya/hesewake-notch/blob/main/CHANGELOG.md">full changelog</a> lists every version.</p>
+    <ol class="log">
+      <li>
+        <div class="v">0.14.0<time datetime="2026-11-16">2026-11-16</time></div>
+        <ul>
+          <li>Livelier animation across the carousel: new springs, a slight pull towards the cursor, click ripples, capsule dots and slide transitions.</li>
+          <li>Music: long titles scroll. Prayer: a time arc with shooting stars. Shelf: removed items fade out.</li>
+          <li>Scrap keeps links as badges while you edit, and can fetch the page title of a pasted link (can be turned off).</li>
+          <li>Settings: a hand cursor over clickable things, smooth hover fades and click ripples.</li>
+        </ul>
+      </li>
+      <li>
+        <div class="v">0.13.6<time datetime="2026-11-14">2026-11-14</time></div>
+        <ul>
+          <li>Extensions are told when their slide comes into view or leaves it, and a slide's badge clears when it is opened (<a href="https://github.com/dirgaastya/hesewake-notch/pull/72">#72</a>, @MaulanaRhezaArdiansyah).</li>
+        </ul>
+      </li>
+      <li>
+        <div class="v">0.13.5<time datetime="2026-11-03">2026-11-03</time></div>
+        <ul>
+          <li>Press feedback on the music buttons (<a href="https://github.com/dirgaastya/hesewake-notch/pull/65">#65</a>, @yourLogic01).</li>
+          <li>New settings: Background glow and Song in the notch.</li>
+        </ul>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section id="contributors" class="s-sm">
+  <div class="wrap">
+    <h2>Contributors</h2>
+    <p class="sub">Hesewake Notch is built in the open, and these people made it better. Thank you.</p>
+    <ul class="crew">
+      <li><div class="n"><a href="https://github.com/dirgaastya">@dirgaastya</a><span class="r">Maintainer</span></div><p>Creator and maintainer of Hesewake Notch: the fork, the redesign, the releases and the project site.</p></li>
+      <li><div class="n"><a href="https://github.com/MaulanaRhezaArdiansyah">@MaulanaRhezaArdiansyah</a><span class="r">Contributor</span></div><p>Prayer times, Pomodoro mode, accent colors, slide hotkeys, clipboard history, the calendar reader, the Indonesian interface, update checks, mic mute and the CI and release workflows, among much more.</p></li>
+      <li><div class="n"><a href="https://github.com/gewall">@gewall</a><span class="r">Contributor</span></div><p>Romaji for Japanese lyrics (<a href="https://github.com/dirgaastya/hesewake-notch/pull/7">#7</a>), Wibu mode (<a href="https://github.com/dirgaastya/hesewake-notch/pull/47">#47</a>) and opening the app behind a notification when you click it (<a href="https://github.com/dirgaastya/hesewake-notch/pull/59">#59</a>).</p></li>
+      <li><div class="n"><a href="https://github.com/yourLogic01">@yourLogic01</a><span class="r">Contributor</span></div><p>The Settings window (<a href="https://github.com/dirgaastya/hesewake-notch/pull/51">#51</a>) and press feedback on the music buttons (<a href="https://github.com/dirgaastya/hesewake-notch/pull/65">#65</a>).</p></li>
+      <li><div class="n"><a href="https://github.com/klawcodes/poch">Poch</a> by Commonly Works<span class="r">Original project</span></div><p>The project this app grew from, released under the MIT License.</p></li>
+    </ul>
+    <p style="margin:0;color:var(--dim)">Want to help? <a href="https://github.com/dirgaastya/hesewake-notch/issues">Open an issue</a> or send a pull request. See all <a href="https://github.com/dirgaastya/hesewake-notch/graphs/contributors">contributors on GitHub</a>.</p>
+  </div>
+</section>
+
+<section id="privacy" class="band">
+  <div class="wrap">
+    <h2>Privacy</h2>
+    <p class="sub">Hesewake Notch keeps its data on your PC, in plain text files in <code>%APPDATA%\hesewake-notch</code>. There is no account, and the app has no telemetry or analytics. Every connection it makes is in this table, and only for the feature named:</p>
+    <div class="tw"><table>
+      <thead><tr><th>Feature</th><th>Who it talks to</th><th>What is sent</th></tr></thead>
+      <tbody>
+        <tr><td>Update check</td><td data-label="To">GitHub (releases)</td><td data-label="Sent">A request for the latest release, at startup and every 24 hours. Can be turned off. Pressing Install downloads the installer and its checksum file.</td></tr>
+        <tr><td>Synced lyrics</td><td data-label="To">LRCLIB, then lrc.red</td><td data-label="Sent">The title, artist and length of the track that is playing (lrc.red gets the title and artist as a search). The requests name the app, its project link and the project's contact address, not you.</td></tr>
+        <tr><td>Artwork fallback</td><td data-label="To">iTunes Search</td><td data-label="Sent">The track's artist and title, only when the media app gives no artwork. The cover is then downloaded from the address iTunes returns.</td></tr>
+        <tr><td>Weather</td><td data-label="To">Open-Meteo</td><td data-label="Sent">The coordinates of the city you set.</td></tr>
+        <tr><td>Calendar</td><td data-label="To">Your own calendar link</td><td data-label="Sent">A request to the secret link you paste, kept in Windows Credential Manager.</td></tr>
+        <tr><td>Link titles in Scrap</td><td data-label="To">The address you pasted</td><td data-label="Sent">One GET to read the page title. Can be turned off in Settings.</td></tr>
+        <tr><td>Japanese dictionary</td><td data-label="To">GitHub (Lindera releases)</td><td data-label="Sent">A download, only when you press Get.</td></tr>
+      </tbody>
+    </table></div>
+    <p class="sub" style="margin:18px 0 0">As with any web request, the server on the other end can see your IP address. The clipboard slide keeps its list in memory only and skips copies that password managers mark as private. The source code is public, so any of this can be checked.</p>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Hesewake Notch is released under the <a href="https://github.com/dirgaastya/hesewake-notch/blob/main/LICENSE">MIT License</a>. It is a personal fork of <a href="https://github.com/klawcodes/poch">Poch</a> by Commonly Works (MIT).</p>
+    <p>Lyrics: <a href="https://lrclib.net">LRCLIB</a> and <a href="https://lrc.red">lrc.red</a>. Romaji: Lindera (IPADIC) and WanaKana. Weather: <a href="https://open-meteo.com">Open-Meteo</a>. Font: Instrument Sans (SIL Open Font License).</p>
+    <p><a href="https://github.com/dirgaastya/hesewake-notch/issues">Report an issue</a> &middot; <a href="https://github.com/dirgaastya/hesewake-notch/blob/main/CHANGELOG.md">Changelog</a> &middot; <a href="https://github.com/dirgaastya/hesewake-notch/blob/main/docs/extensions.md">Extension protocol</a></p>
+  </div>
+</footer>
+</body>
+</html>

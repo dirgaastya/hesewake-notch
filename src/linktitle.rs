@@ -62,6 +62,14 @@ pub(crate) fn request(url: &str) {
     });
 }
 
+/// Tes: isi cache tanpa permintaan jaringan (gambar contoh untuk situs proyek, `snap_site_slides`).
+#[cfg(test)]
+pub(crate) fn seed(url: &str, st: LinkState) {
+    if let Ok(mut c) = cache().lock() {
+        c.insert(url.to_string(), (st, Instant::now() - std::time::Duration::from_secs(60)));
+    }
+}
+
 /// Alamat http/https di dalam teks, tanpa tanda baca di ujungnya.
 pub(crate) fn urls_in(text: &str) -> Vec<String> {
     text.split_whitespace()
