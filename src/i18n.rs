@@ -281,7 +281,6 @@ const ID_TEXT: &[(&str, &str)] = &[
     ("Do Not Disturb key", "Tombol Jangan ganggu"),
     ("Hold most toasts", "Tahan sebagian besar toast"),
     ("Ctrl+Alt+D, all apps", "Ctrl+Alt+D, semua app"),
-    ("Focus", "Fokus"),
     ("Unknown device", "Perangkat tak dikenal"),
     // Timer
     ("Focus", "Fokus"),
