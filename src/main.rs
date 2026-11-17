@@ -193,6 +193,8 @@ struct App {
     ext: extapp::ExtState,
     hover: bool,
     busy: bool,
+    /// A fullscreen app is open (Windows says so, or it covers the notch's monitor): drives game mode.
+    game_fs: bool,
     /// Mode "Minimal notch": garis tipis saat tidak ada musik, buka dengan hover.
     minimal: bool,
     toast: Option<Toast>,
@@ -405,7 +407,13 @@ impl App {
 
     /// Notch menyusut jadi garis tipis: app penuh layar/Adobe (busy) atau mode Minimal saat tidak ada musik.
     fn thin(&self) -> bool {
-        self.busy || self.dodging || (self.minimal && !self.now_playing_bar())
+        (self.busy && !self.game_lyrics()) || self.dodging || (self.minimal && !self.now_playing_bar())
+    }
+
+    /// Over a fullscreen app the small notch keeps showing the lyric line instead of turning into a thin line. It still
+    /// steps aside when the pointer comes near (`dodging`), so it does not sit on the game's own buttons.
+    fn game_lyrics(&self) -> bool {
+        self.cfg.game_lyrics && self.game_fs && self.busy && self.now_playing_bar() && self.lyric_synced()
     }
 
     fn ready(&self) -> bool {
@@ -633,6 +641,7 @@ fn main() -> Result<()> {
             ext: extapp::ExtState::default(),
             hover: false,
             busy: is_busy(hwnd, cfg.busy_on_maximized, &mon),
+            game_fs: false,
             minimal: cfg.minimal,
             toast: None,
             bt_shared: bt_shared.clone(),

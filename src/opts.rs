@@ -16,6 +16,10 @@ pub(crate) enum Rid {
     NotchSong,
     Minimal,
     ThinMaximized,
+    /// Game mode: no toasts over a fullscreen app.
+    GameMode,
+    /// The lyric line stays in the notch over a fullscreen app.
+    GameLyrics,
     Monitor,
     LyricTiming,
     NotchSize,
@@ -59,11 +63,13 @@ pub(crate) enum Rid {
 impl Rid {
     /// Every setting (a test checks each one has a row in the Settings window).
     #[cfg(test)]
-    pub(crate) const ALL: [Rid; 35] = [
+    pub(crate) const ALL: [Rid; 37] = [
         Rid::Minimal,
         Rid::Glow,
         Rid::NotchSong,
         Rid::ThinMaximized,
+        Rid::GameMode,
+        Rid::GameLyrics,
         Rid::Monitor,
         Rid::LyricTiming,
         Rid::NotchSize,
@@ -104,6 +110,8 @@ impl App {
         match r {
             Rid::Minimal => self.minimal,
             Rid::ThinMaximized => self.cfg.busy_on_maximized,
+            Rid::GameMode => self.cfg.game_mode,
+            Rid::GameLyrics => self.cfg.game_lyrics,
             Rid::Notifications => self.notif_on,
             Rid::ContactPhotos => self.cfg.notif_avatar,
             Rid::Autostart => self.sw.autostart,
@@ -152,6 +160,12 @@ impl App {
         match r {
             Rid::Minimal => self.minimal = !self.minimal,
             Rid::ThinMaximized => self.cfg.busy_on_maximized = !self.cfg.busy_on_maximized,
+            Rid::GameMode => {
+                self.cfg.game_mode = !self.cfg.game_mode;
+                // what was waiting for a quiet moment is dropped now, not shown after the game
+                self.drop_held_toasts();
+            }
+            Rid::GameLyrics => self.cfg.game_lyrics = !self.cfg.game_lyrics,
             Rid::Notifications => {
                 self.notif_on = !self.notif_on;
                 notif::set_enabled(self.notif_on);

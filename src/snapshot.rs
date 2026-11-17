@@ -47,6 +47,7 @@ fn test_app(s: f32) -> App {
         last_min: 0,
         hover: false,
         busy: false,
+        game_fs: false,
         minimal: false,
         toast: None,
         bt_shared: Arc::new(Mutex::new(Vec::new())),
@@ -3866,4 +3867,177 @@ fn a_task_raises_one_toast_when_it_comes_due() {
     a.todos[0].due = Some(now + 120);
     assert!(!a.todo_minute(now));
     assert!(a.todo_minute(now + 130));
+}
+
+// ---------------------------------------------------------------- game mode
+
+/// A song with synced lyrics is playing and its first line is showing.
+fn song_with_lyric_line(a: &mut App) {
+    a.media.playing = true;
+    a.media.title = "Eiyu".into();
+    a.lyrics = lyrics::Lyrics::Synced(
+        vec![lyrics::LyricLine { at_ms: 0, text: "kokorokara sou omotta".into(), roma: String::new() }],
+        lyrics::Source::Lrclib,
+    );
+    a.lyric_update();
+    a.lyric_t = Instant::now() - Duration::from_secs(2); // faded in
+    assert!(a.lyric_text().is_some(), "the line is showing");
+}
+
+/// A fullscreen app is open on the notch's monitor.
+fn fullscreen(a: &mut App) {
+    a.busy = true;
+    a.fg = 2;
+    a.game_fs = true;
+}
+
+#[test]
+fn fullscreen_keeps_the_lyric_line_in_the_small_notch() {
+    let mut a = test_app(1.0);
+    song_with_lyric_line(&mut a);
+    fullscreen(&mut a);
+    assert!(a.game_lyrics() && !a.thin(), "the line stays over the game");
+    assert!(anim::target(&a).0 > THIN.0 + 60.0, "as the playing notch, not a thin line");
+    // each condition on its own
+    a.cfg.game_lyrics = false;
+    assert!(a.thin() && anim::target(&a) == THIN, "setting off: the thin line as before");
+    a.cfg.game_lyrics = true;
+    a.game_fs = false;
+    assert!(a.thin(), "busy for another reason (an Adobe app, a maximized window): still thin");
+    a.game_fs = true;
+    a.media.playing = false;
+    assert!(a.thin(), "no song playing: thin");
+    a.media.playing = true;
+    a.lyrics = lyrics::Lyrics::None;
+    assert!(a.thin(), "no synced lyrics: thin");
+    song_with_lyric_line(&mut a);
+    a.cfg.notch_song = false;
+    assert!(a.thin(), "the song is not shown in the small notch at all");
+    a.cfg.notch_song = true;
+    // it does not change anything off a fullscreen app
+    a.busy = false;
+    a.game_fs = false;
+    a.fg = 0;
+    assert!(!a.thin() && !a.game_lyrics());
+}
+
+#[test]
+fn the_lyric_line_over_a_game_steps_aside_for_the_pointer() {
+    let mut a = test_app(1.0);
+    song_with_lyric_line(&mut a);
+    fullscreen(&mut a);
+    (a.w, a.h) = anim::target(&a);
+    assert!(a.h > THIN.1 + 10.0);
+    // the pointer at the bottom edge of the bar: the notch turns thin so the game's own buttons are reachable
+    assert!(a.pointer_step(CX, a.h - 4.0));
+    assert!(a.dodging && a.thin() && !a.expanded());
+    // away from it: back to the lyric line
+    a.pointer_step(CX, 400.0);
+    assert!(!a.dodging && !a.thin());
+    // far to the side: nothing happens
+    assert!(!a.pointer_step(CX + 300.0, 5.0));
+    assert!(!a.dodging);
+}
+
+#[test]
+fn game_mode_holds_toasts_over_a_fullscreen_app_but_not_the_important_ones() {
+    let mut a = test_app(1.0);
+    let held = [
+        ToastKind::Charging { pct: 50 },
+        ToastKind::Unplugged { pct: 50 },
+        ToastKind::Bluetooth { name: "Buds".into(), pct: None, connected: true },
+        ToastKind::Notification { id: 1 },
+        ToastKind::Downloaded { path: "C:/a.zip".into() },
+        ToastKind::Ext { id: "x".into(), title: "t".into(), sub: "s".into(), count: 1 },
+        ToastKind::Water,
+        ToastKind::Todo { text: "t".into(), due: 0, more: 0 },
+        ToastKind::Hud { kind: HudKind::Volume(40, false), on: true },
+        ToastKind::Hud { kind: HudKind::Brightness(40), on: true },
+        ToastKind::Hud { kind: HudKind::Caps, on: true },
+    ];
+    let through = [
+        ToastKind::LowBattery { pct: 10 },
+        ToastKind::NotifOpenFailed { app: "x".into() },
+        ToastKind::Privacy { cam: true, app: "x".into() },
+        ToastKind::Prayer { idx: 0, at: 300 },
+        ToastKind::Timer { title: "t".into(), label: "l".into() },
+        ToastKind::Meeting { title: "m".into(), at: 0, link: None },
+        ToastKind::Update(update::Note::UpToDate),
+        ToastKind::Hud { kind: HudKind::Mic(Some(true)), on: true },
+    ];
+    // no fullscreen app: nothing is held
+    for k in held.iter().chain(&through) {
+        assert!(!a.quiet_blocks(k), "{k:?} outside a fullscreen app");
+    }
+    a.game_fs = true;
+    for k in &held {
+        assert!(a.quiet_blocks(k), "{k:?} is held over a fullscreen app");
+    }
+    for k in &through {
+        assert!(!a.quiet_blocks(k), "{k:?} still shows");
+    }
+    // the setting turns it off
+    a.cfg.game_mode = false;
+    assert!(held.iter().all(|k| !a.quiet_blocks(k)));
+    a.cfg.game_mode = true;
+    // a held toast is not started and not queued; one that shows is
+    a.push_toast(ToastKind::Charging { pct: 50 });
+    assert!(a.toast.is_none() && a.toast_q.is_empty());
+    a.push_toast(ToastKind::LowBattery { pct: 10 });
+    assert!(a.toast.is_some());
+}
+
+#[test]
+fn queued_toasts_are_dropped_when_the_game_starts() {
+    let mut a = test_app(1.0);
+    a.toast_q = vec![ToastKind::Charging { pct: 50 }, ToastKind::Timer { title: "t".into(), label: "l".into() }, ToastKind::Water];
+    a.game_fs = true;
+    a.drop_held_toasts();
+    assert_eq!(a.toast_q.len(), 1);
+    assert!(matches!(a.toast_q[0], ToastKind::Timer { .. }));
+}
+
+#[test]
+fn a_held_reminder_is_not_counted_as_given() {
+    let mut a = test_app(1.0);
+    let now = notif::now_unix() as i64;
+    a.todos = vec![Todo { done: false, text: "call mom".into(), due: Some(now - 20) }];
+    a.game_fs = true;
+    assert!(!a.todo_minute(now), "held during the game");
+    assert!(a.todo_fired.is_empty() && a.toast.is_none(), "and not marked as shown");
+    a.game_fs = false;
+    assert!(a.todo_minute(now + 60), "it comes when the game is over");
+    assert!(matches!(a.toast.as_ref().map(|t| &t.kind), Some(ToastKind::Todo { .. })));
+}
+
+#[test]
+fn game_mode_settings_flip_in_the_settings_window() {
+    let mut a = test_app(1.0);
+    assert!(a.cfg.game_mode && a.cfg.game_lyrics, "both on by default");
+    a.opt_press(opts::Rid::GameMode);
+    a.opt_press(opts::Rid::GameLyrics);
+    assert!(!a.cfg.game_mode && !a.cfg.game_lyrics);
+    assert!(!a.opt_on(opts::Rid::GameMode) && !a.opt_on(opts::Rid::GameLyrics));
+    a.opt_press(opts::Rid::GameMode);
+    assert!(a.opt_on(opts::Rid::GameMode));
+}
+
+#[test]
+fn snap_game_lyrics() {
+    shot("game-lyrics", 1.0, |a| {
+        song_with_lyric_line(a);
+        fullscreen(a);
+    });
+    shot("game-lyrics-off", 1.0, |a| {
+        song_with_lyric_line(a);
+        fullscreen(a);
+        a.cfg.game_lyrics = false;
+    });
+    let _lang = i18n::restore_on_drop();
+    sw_shot("settingswin-screens", page(SCREENS));
+    sw_shot("id-settingswin-screens", |a| {
+        a.cfg.lang = i18n::ID;
+        i18n::set(i18n::ID);
+        a.sw_show_page(SCREENS);
+    });
 }

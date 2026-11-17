@@ -97,13 +97,18 @@ impl App {
             return false;
         }
         due.sort();
+        let (first_at, first_text) = due[0].clone();
+        let kind = ToastKind::Todo { text: first_text, due: first_at, more: due.len() as u32 - 1 };
+        // held by a quiet time: not marked as given, so it comes when the quiet time is over (within the window)
+        if self.quiet_blocks(&kind) {
+            return false;
+        }
         self.todo_fired.extend(due.iter().cloned());
         let n = self.todo_fired.len();
         if n > 64 {
             self.todo_fired.drain(..n - 64);
         }
-        let (at, text) = due[0].clone();
-        self.push_toast(ToastKind::Todo { text, due: at, more: due.len() as u32 - 1 });
+        self.push_toast(kind);
         true
     }
 

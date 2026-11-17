@@ -407,6 +407,13 @@ impl App {
             Sec::Screens => vec![
                 ("Monitor", vec![row(Rid::Monitor, "Monitor", tr("Follow = cursor"), Ctl::Stepper(monitors::mode_label(self.opt_choice(Rid::Monitor))))]),
                 (tr("Busy mode"), vec![toggle(Rid::ThinMaximized, tr("Thin on maximize"), tr("Off: only on fullscreen"))]),
+                (
+                    tr("Fullscreen apps"),
+                    vec![
+                        toggle(Rid::GameMode, "Game mode", tr("Hold toasts over fullscreen apps")),
+                        toggle(Rid::GameLyrics, tr("Lyrics in fullscreen"), tr("Keep the lyric line over games and video")),
+                    ],
+                ),
             ],
             Sec::Music => {
                 let mut rows = vec![
