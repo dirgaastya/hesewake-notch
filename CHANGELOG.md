@@ -4,6 +4,12 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/), versi mengikut
 
 ## [Unreleased]
 
+### Changed
+- **Music**: slider volume vertikal di atas tombol output dihapus. Volume tetap diatur dengan roda mouse di slide dan dengan klik pada bar volume yang muncul setelahnya.
+
+### Fixed
+- **Music**: indikator volume dan indikator perangkat output tidak lagi berkedip. Menyentuh salah satunya saat yang lain sedang tampil (roda mouse, klik bar, tombol volume, ganti perangkat) tidak lagi memulai ulang fade-in dari nol, yang sesaat membuka tombol di bawahnya. Perubahan volume dari aplikasi sendiri juga dicatat sebelum diterapkan, supaya gema dari Windows tidak memunculkan indikator kedua.
+
 ## [0.14.0] - 2026-11-16
 
 Rilis ini membawa penyegaran tampilan dan animasi notch, dipindahkan dari prototipe desain ke kode Rust.
