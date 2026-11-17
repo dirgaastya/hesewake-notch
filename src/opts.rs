@@ -37,6 +37,10 @@ pub(crate) enum Rid {
     PrivacyDot,
     UpdateCheck,
     MicMute,
+    /// Do Not Disturb: hold most toasts.
+    Dnd,
+    /// Ctrl+Alt+D toggles Do Not Disturb.
+    DndHotkey,
     Weather,
     City,
     Prayer,
@@ -63,7 +67,7 @@ pub(crate) enum Rid {
 impl Rid {
     /// Every setting (a test checks each one has a row in the Settings window).
     #[cfg(test)]
-    pub(crate) const ALL: [Rid; 37] = [
+    pub(crate) const ALL: [Rid; 39] = [
         Rid::Minimal,
         Rid::Glow,
         Rid::NotchSong,
@@ -86,6 +90,8 @@ impl Rid {
         Rid::PrivacyDot,
         Rid::UpdateCheck,
         Rid::MicMute,
+        Rid::Dnd,
+        Rid::DndHotkey,
         Rid::Weather,
         Rid::City,
         Rid::Prayer,
@@ -122,6 +128,8 @@ impl App {
             Rid::PrivacyDot => self.cfg.privacy_dot,
             Rid::UpdateCheck => self.cfg.update_check,
             Rid::MicMute => self.cfg.mic_hotkey,
+            Rid::Dnd => self.cfg.dnd,
+            Rid::DndHotkey => self.cfg.dnd_hotkey,
             Rid::Weather => self.cfg.weather_on,
             Rid::Prayer => self.cfg.prayer_on,
             Rid::Glow => self.cfg.glow,
@@ -206,6 +214,11 @@ impl App {
                 self.priv_t = Instant::now();
             }
             Rid::UpdateCheck => self.cfg.update_check = !self.cfg.update_check,
+            Rid::Dnd => self.set_dnd(!self.cfg.dnd),
+            Rid::DndHotkey => {
+                self.cfg.dnd_hotkey = !self.cfg.dnd_hotkey;
+                hotkeys::set_dnd_hotkey(self.hwnd, self.cfg.dnd_hotkey);
+            }
             Rid::MicMute => {
                 self.cfg.mic_hotkey = !self.cfg.mic_hotkey;
                 hotkeys::set_mic_hotkey(self.hwnd, self.cfg.mic_hotkey);

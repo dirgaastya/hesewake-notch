@@ -435,13 +435,22 @@ impl App {
                 }
                 vec![(tr("Lyrics"), rows)]
             }
-            Sec::Notifs => vec![(
-                tr("Notifications"),
-                vec![
-                    toggle(Rid::Notifications, tr("Notifications"), tr("Windows toasts + bell")),
-                    toggle(Rid::ContactPhotos, tr("Contact photos"), tr("In notifications")),
-                ],
-            )],
+            Sec::Notifs => vec![
+                (
+                    tr("Notifications"),
+                    vec![
+                        toggle(Rid::Notifications, tr("Notifications"), tr("Windows toasts + bell")),
+                        toggle(Rid::ContactPhotos, tr("Contact photos"), tr("In notifications")),
+                    ],
+                ),
+                (
+                    tr("Focus"),
+                    vec![
+                        toggle(Rid::Dnd, tr("Do Not Disturb"), tr("Hold most toasts")),
+                        toggle(Rid::DndHotkey, tr("Do Not Disturb key"), tr("Ctrl+Alt+D, all apps")),
+                    ],
+                ),
+            ],
             Sec::Alerts => vec![
                 (
                     "HUD",

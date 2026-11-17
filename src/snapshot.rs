@@ -2178,6 +2178,7 @@ const LOOK: usize = 1;
 const SLIDES: usize = 2;
 const SCREENS: usize = 3;
 const MUSIC: usize = 4;
+const NOTIFS: usize = 5;
 const ALERTS: usize = 6;
 const WEATHER: usize = 7;
 const CALENDAR: usize = 8;
@@ -4040,4 +4041,134 @@ fn snap_game_lyrics() {
         i18n::set(i18n::ID);
         a.sw_show_page(SCREENS);
     });
+}
+
+// ---------------------------------------------------------------- do not disturb
+
+#[test]
+fn do_not_disturb_holds_the_same_toasts_as_game_mode_but_not_its_own_hud() {
+    let mut a = test_app(1.0);
+    let held = [
+        ToastKind::Water,
+        ToastKind::Notification { id: 1 },
+        ToastKind::Charging { pct: 50 },
+        ToastKind::Bluetooth { name: "Buds".into(), pct: None, connected: false },
+        ToastKind::Todo { text: "t".into(), due: 0, more: 0 },
+        ToastKind::Hud { kind: HudKind::Caps, on: true },
+        ToastKind::Hud { kind: HudKind::Volume(10, false), on: true },
+    ];
+    let through = [
+        ToastKind::LowBattery { pct: 10 },
+        ToastKind::Privacy { cam: false, app: "x".into() },
+        ToastKind::Prayer { idx: 1, at: 700 },
+        ToastKind::Meeting { title: "m".into(), at: 0, link: None },
+        ToastKind::Timer { title: "t".into(), label: "l".into() },
+        ToastKind::Hud { kind: HudKind::Mic(Some(true)), on: true },
+        ToastKind::Hud { kind: HudKind::Dnd, on: true },
+        ToastKind::Hud { kind: HudKind::Dnd, on: false },
+    ];
+    assert!(held.iter().chain(&through).all(|k| !a.quiet_blocks(k)), "off: nothing is held");
+    a.cfg.dnd = true;
+    assert!(held.iter().all(|k| a.quiet_blocks(k)), "on: these are held, without any fullscreen app");
+    assert!(through.iter().all(|k| !a.quiet_blocks(k)), "on: these still show");
+    a.push_toast(ToastKind::Water);
+    assert!(a.toast.is_none() && a.toast_q.is_empty());
+    a.push_toast(ToastKind::Meeting { title: "Standup".into(), at: 0, link: None });
+    assert!(a.toast.is_some(), "a meeting still shows");
+}
+
+#[test]
+fn turning_do_not_disturb_on_clears_what_it_holds() {
+    let mut a = test_app(1.0);
+    a.push_toast(ToastKind::Charging { pct: 80 });
+    assert!(a.toast.is_some());
+    a.toast_q = vec![ToastKind::Water, ToastKind::Timer { title: "t".into(), label: "l".into() }];
+    a.set_dnd(true);
+    assert!(a.cfg.dnd);
+    assert!(a.toast.is_none(), "the charger toast that was showing is gone");
+    assert_eq!(a.toast_q.len(), 1, "and so is the water reminder that was waiting");
+    assert!(matches!(a.toast_q[0], ToastKind::Timer { .. }), "the timer stays");
+    // a toast that is not held keeps showing when it is turned on
+    a.toast_q.clear();
+    a.push_toast(ToastKind::LowBattery { pct: 10 });
+    a.set_dnd(true);
+    assert!(a.toast.is_some());
+    a.set_dnd(false);
+    assert!(!a.cfg.dnd);
+}
+
+#[test]
+fn the_hotkey_toggles_do_not_disturb_and_says_so() {
+    let mut a = test_app(1.0);
+    a.dnd_hotkey();
+    assert!(a.cfg.dnd);
+    assert!(matches!(a.toast.as_ref().map(|t| &t.kind), Some(ToastKind::Hud { kind: HudKind::Dnd, on: true })), "the HUD says on");
+    a.end_toast();
+    a.dnd_hotkey();
+    assert!(!a.cfg.dnd);
+    assert!(matches!(a.toast.as_ref().map(|t| &t.kind), Some(ToastKind::Hud { kind: HudKind::Dnd, on: false })), "and off");
+}
+
+#[test]
+fn a_task_that_comes_due_during_do_not_disturb_is_shown_after_it() {
+    let mut a = test_app(1.0);
+    let now = notif::now_unix() as i64;
+    a.todos = vec![Todo { done: false, text: "call mom".into(), due: Some(now - 60) }];
+    a.cfg.dnd = true;
+    assert!(!a.todo_minute(now));
+    assert!(a.todo_fired.is_empty() && a.toast.is_none());
+    a.cfg.dnd = false;
+    assert!(a.todo_minute(now + 60));
+}
+
+#[test]
+fn the_moon_shows_in_the_small_notch_while_do_not_disturb_is_on() {
+    let mut a = test_app(1.0);
+    assert!(!a.priv_marks().contains(&privacy::Mark::Dnd([176, 166, 255])));
+    assert_eq!(a.priv_extra(), 0.0);
+    a.cfg.dnd = true;
+    assert!(a.priv_marks().iter().any(|m| matches!(m, privacy::Mark::Dnd(_))));
+    assert!(a.priv_extra() > 0.0, "the notch makes room for it");
+    // the privacy dots stay at the edge: the moon comes after them
+    a.cfg.privacy_dot = true;
+    a.priv_cam = vec!["Zoom".into()];
+    let marks = a.priv_marks();
+    assert!(matches!(marks.first(), Some(privacy::Mark::Dot(_))) && matches!(marks.last(), Some(privacy::Mark::Dnd(_))));
+}
+
+#[test]
+fn snap_do_not_disturb() {
+    shot("dnd-moon", 1.0, |a| {
+        a.cfg.dnd = true;
+        a.priv_t = Instant::now() - Duration::from_secs(2);
+    });
+    shot("dnd-hud-on", 1.0, |a| show_toast(a, ToastKind::Hud { kind: HudKind::Dnd, on: true }));
+    shot("dnd-hud-off", 1.0, |a| show_toast(a, ToastKind::Hud { kind: HudKind::Dnd, on: false }));
+    sw_shot("settingswin-notifs-dnd", |a| {
+        a.cfg.dnd = true;
+        a.sw_show_page(NOTIFS);
+    });
+    let _lang = i18n::restore_on_drop();
+    shot("id-dnd-hud-on", 1.0, |a| {
+        a.cfg.lang = i18n::ID;
+        i18n::set(i18n::ID);
+        show_toast(a, ToastKind::Hud { kind: HudKind::Dnd, on: true });
+    });
+    sw_shot("id-settingswin-notifs-dnd", |a| {
+        a.cfg.lang = i18n::ID;
+        i18n::set(i18n::ID);
+        a.sw_show_page(NOTIFS);
+    });
+}
+
+#[test]
+fn do_not_disturb_settings_flip_in_the_settings_window() {
+    let mut a = test_app(1.0);
+    a.opt_press(opts::Rid::Dnd);
+    assert!(a.cfg.dnd && a.opt_on(opts::Rid::Dnd));
+    a.opt_press(opts::Rid::Dnd);
+    assert!(!a.cfg.dnd);
+    assert!(a.opt_on(opts::Rid::DndHotkey), "the key is on by default");
+    a.opt_press(opts::Rid::DndHotkey);
+    assert!(!a.opt_on(opts::Rid::DndHotkey));
 }

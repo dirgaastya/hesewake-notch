@@ -29,6 +29,7 @@ pub(crate) const CMD_NOTIF_ACCESS: i32 = 44;
 pub(crate) const CMD_SETTINGS: i32 = 45;
 pub(crate) const CMD_UPDATE_OPEN: i32 = 46;
 pub(crate) const CMD_UPDATE_CHECK: i32 = 47;
+pub(crate) const CMD_DND: i32 = 48;
 
 /// Mutex single instance. Mengembalikan false bila Hesewake Notch lain sudah jalan.
 pub(crate) fn single_instance() -> bool {
@@ -182,13 +183,14 @@ pub(crate) fn taskbar_created_msg() -> u32 {
     *MSG.get_or_init(|| unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) })
 }
 
-pub(crate) unsafe fn tray_menu(hwnd: HWND, autostart: bool, minimal: bool, notif_on: bool, update: Option<&str>) -> i32 {
+pub(crate) unsafe fn tray_menu(hwnd: HWND, autostart: bool, minimal: bool, notif_on: bool, dnd: bool, update: Option<&str>) -> i32 {
     let Ok(menu) = CreatePopupMenu() else { return 0 };
     let chk = |on: bool| if on { MF_STRING | MF_CHECKED } else { MF_STRING };
     let _ = AppendMenuW(menu, chk(autostart), CMD_AUTOSTART as usize, &HSTRING::from(tr("Start with Windows")));
     let _ = AppendMenuW(menu, chk(minimal), CMD_MINIMAL as usize, &HSTRING::from(tr("Minimal notch")));
     let _ = AppendMenuW(menu, chk(notif_on), CMD_NOTIF as usize, &HSTRING::from(tr("Windows notifications")));
     let _ = AppendMenuW(menu, MF_STRING, CMD_NOTIF_ACCESS as usize, &HSTRING::from(tr("Notification access...")));
+    let _ = AppendMenuW(menu, chk(dnd), CMD_DND as usize, &HSTRING::from(tr("Do Not Disturb")));
     let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
     if let Some(v) = update {
         let _ = AppendMenuW(menu, MF_STRING, CMD_UPDATE_OPEN as usize, &HSTRING::from(fill(tr("Update available ({})..."), &[&v])));

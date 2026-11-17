@@ -38,6 +38,10 @@ pub(crate) struct Settings {
     pub(crate) slide_hotkeys: bool,
     /// Ctrl+Alt+M mutes the default microphone for every app (mic.rs).
     pub(crate) mic_hotkey: bool,
+    /// Do Not Disturb is on: most toasts are held back (see `quiet_holds` in toast.rs). Kept across restarts.
+    pub(crate) dnd: bool,
+    /// Ctrl+Alt+D toggles Do Not Disturb from any app.
+    pub(crate) dnd_hotkey: bool,
     /// Running downloads in the Downloads folder: speed in the notch, list on Ledge, toast when done (downloads.rs).
     pub(crate) downloads: bool,
     /// Scrap: judul halaman untuk tautan yang ditempel (satu permintaan GET ke alamat itu, linktitle.rs).
@@ -117,6 +121,8 @@ impl Default for Settings {
             privacy_dot: true,
             slide_hotkeys: true,
             mic_hotkey: true,
+            dnd: false,
+            dnd_hotkey: true,
             downloads: true,
             link_titles: true,
             hud_volume: true,
@@ -167,6 +173,8 @@ impl Settings {
                 "privacy_dot" => s.privacy_dot = flag,
                 "slide_hotkeys" => s.slide_hotkeys = flag,
                 "mic_hotkey" => s.mic_hotkey = flag,
+                "dnd" => s.dnd = flag,
+                "dnd_hotkey" => s.dnd_hotkey = flag,
                 "downloads" => s.downloads = flag,
                 "link_titles" => s.link_titles = flag,
                 "hud_volume" => s.hud_volume = flag,
@@ -237,7 +245,7 @@ impl Settings {
 
     pub(crate) fn serialize(&self) -> String {
         format!(
-            "minimal={}\nnotifications={}\nbusy_on_maximized={}\ngame_mode={}\ngame_lyrics={}\nlyric_lead_ms={}\nromaji_lyrics={}\nnotif_avatar={}\nlock_toast={}\nprivacy_dot={}\nslide_hotkeys={}\nmic_hotkey={}\ndownloads={}\nlink_titles={}\nhud_volume={}\nhud_brightness={}\nweather={}\nweather_city={}\nglow={}\nnotch_song={}\nprayer={}\nimsak_terbit={}\nramadan={}\nadhan={}\nadhan_file={}\nwibu={}\nwibu_file={}\nwibu_dim={}\next_on={}\next_mute={}\nmonitor={}\nnotch_size={}\nidle_display={}\naccent={}\nlang={}\nupdate_check={}\nupdate_seen={}\nslides={}\n",
+            "minimal={}\nnotifications={}\nbusy_on_maximized={}\ngame_mode={}\ngame_lyrics={}\nlyric_lead_ms={}\nromaji_lyrics={}\nnotif_avatar={}\nlock_toast={}\nprivacy_dot={}\nslide_hotkeys={}\nmic_hotkey={}\ndnd={}\ndnd_hotkey={}\ndownloads={}\nlink_titles={}\nhud_volume={}\nhud_brightness={}\nweather={}\nweather_city={}\nglow={}\nnotch_song={}\nprayer={}\nimsak_terbit={}\nramadan={}\nadhan={}\nadhan_file={}\nwibu={}\nwibu_file={}\nwibu_dim={}\next_on={}\next_mute={}\nmonitor={}\nnotch_size={}\nidle_display={}\naccent={}\nlang={}\nupdate_check={}\nupdate_seen={}\nslides={}\n",
             self.minimal as u8,
             self.notifications as u8,
             self.busy_on_maximized as u8,
@@ -250,6 +258,8 @@ impl Settings {
             self.privacy_dot as u8,
             self.slide_hotkeys as u8,
             self.mic_hotkey as u8,
+            self.dnd as u8,
+            self.dnd_hotkey as u8,
             self.downloads as u8,
             self.link_titles as u8,
             self.hud_volume as u8,
@@ -471,6 +481,20 @@ mod tests {
         let many = (0..30).map(|i| format!("e{i}")).collect::<Vec<_>>().join(",");
         assert_eq!(Settings::parse(&format!("ext_on={many}
 ")).ext_on.len(), 16);
+    }
+
+    #[test]
+    fn do_not_disturb_is_off_by_default_keeps_its_state_and_its_key_is_on() {
+        let d = Settings::default();
+        assert!(!d.dnd && d.dnd_hotkey);
+        let old = Settings::parse("minimal=1\n");
+        assert!(!old.dnd && old.dnd_hotkey, "an old file: off, with the key");
+        let mut s = Settings::default();
+        s.dnd = true;
+        s.dnd_hotkey = false;
+        let back = Settings::parse(&s.serialize());
+        assert!(back.dnd && !back.dnd_hotkey);
+        assert_eq!(back, s);
     }
 
     #[test]

@@ -25,6 +25,8 @@ pub(crate) enum HudKind {
     Brightness(u8),
     /// Microphone mute from Ctrl+Alt+M: muted, on, or None when there is no microphone.
     Mic(Option<bool>),
+    /// Do Not Disturb was turned on or off.
+    Dnd,
 }
 
 impl HudKind {
@@ -38,6 +40,7 @@ impl HudKind {
             HudKind::Volume(..) => "Volume",
             HudKind::Brightness(..) => tr("Brightness"),
             HudKind::Mic(..) => tr("Microphone"),
+            HudKind::Dnd => tr("Do Not Disturb"),
             HudKind::Caps => "Caps Lock",
             HudKind::Num => "Num Lock",
             HudKind::Scroll => "Scroll Lock",
@@ -51,6 +54,7 @@ impl HudKind {
             HudKind::Volume(..) => "V",
             HudKind::Brightness(..) => "B",
             HudKind::Mic(..) => "M",
+            HudKind::Dnd => "D",
         }
     }
 }
@@ -107,9 +111,9 @@ pub(crate) fn pop(t: f32) -> f32 {
     1.0 - (-8.0 * t).exp() * (14.0 * t).cos()
 }
 
-/// Quiet times (game mode over a fullscreen app) hold back these toasts. What stays: low battery, the privacy warning,
-/// a failed app launch (the user just clicked), prayer and meeting reminders, timers, update results, and the
-/// microphone hotkey's own feedback.
+/// Quiet times (Do Not Disturb, game mode over a fullscreen app) hold back these toasts. What stays: low battery, the
+/// privacy warning, a failed app launch (the user just clicked), prayer and meeting reminders, timers, update results,
+/// and the feedback of the microphone and Do Not Disturb hotkeys.
 fn quiet_holds(kind: &ToastKind) -> bool {
     match kind {
         ToastKind::Charging { .. }
@@ -120,7 +124,7 @@ fn quiet_holds(kind: &ToastKind) -> bool {
         | ToastKind::Ext { .. }
         | ToastKind::Water
         | ToastKind::Todo { .. } => true,
-        ToastKind::Hud { kind, .. } => !matches!(kind, HudKind::Mic(..)),
+        ToastKind::Hud { kind, .. } => !matches!(kind, HudKind::Mic(..) | HudKind::Dnd),
         ToastKind::LowBattery { .. }
         | ToastKind::NotifOpenFailed { .. }
         | ToastKind::Privacy { .. }
@@ -132,10 +136,30 @@ fn quiet_holds(kind: &ToastKind) -> bool {
 }
 
 impl App {
-    /// Is this toast held back right now (game mode over a fullscreen app)? Whoever raises a reminder checks this before
-    /// it counts the reminder as given, so a held one is not lost.
+    /// Is this toast held back right now (Do Not Disturb, or game mode over a fullscreen app)? Whoever raises a reminder
+    /// checks this before it counts the reminder as given, so a held one is not lost.
     pub(crate) fn quiet_blocks(&self, kind: &ToastKind) -> bool {
-        self.cfg.game_mode && self.game_fs && quiet_holds(kind)
+        (self.cfg.dnd || (self.cfg.game_mode && self.game_fs)) && quiet_holds(kind)
+    }
+
+    /// Turn Do Not Disturb on or off (settings, tray menu or hotkey). Turning it on drops what is queued and what is
+    /// showing, if that is held. Saves.
+    pub(crate) fn set_dnd(&mut self, on: bool) {
+        self.cfg.dnd = on;
+        self.priv_t = Instant::now(); // the moon pops in
+        if on {
+            self.drop_held_toasts();
+            if self.toast.as_ref().is_some_and(|t| self.quiet_blocks(&t.kind)) {
+                self.end_toast();
+            }
+        }
+        self.save_settings();
+    }
+
+    /// Ctrl+Alt+D: toggle Do Not Disturb and say so (that HUD is never held back itself).
+    pub(crate) fn dnd_hotkey(&mut self) {
+        self.set_dnd(!self.cfg.dnd);
+        self.push_toast(ToastKind::Hud { kind: HudKind::Dnd, on: self.cfg.dnd });
     }
 
     /// Forget the queued toasts that a quiet time holds back (it just started).
@@ -465,7 +489,11 @@ impl App {
         let sweep = 1.0 - (1.0 - ((t - 0.05) / 0.35).clamp(0.0, 1.0)).powi(3);
         let frac = if on { sweep } else { 0.0 };
         g.ring(rcx, cy, r, frac, 3.0, &paint(col[0], col[1], col[2], 0.28 * al), &paint(col[0], col[1], col[2], al));
-        g.txt_c(kind.glyph(), rcx, cy - 7.0 * sc, 13.0 * sc, [255, 255, 255], al * if on { 1.0 } else { 0.55 }, 20.0, true);
+        if let HudKind::Dnd = kind {
+            g.icon_crescent(rcx, cy, 15.0 * sc, &paint(255, 255, 255, al * if on { 1.0 } else { 0.55 }));
+        } else {
+            g.txt_c(kind.glyph(), rcx, cy - 7.0 * sc, 13.0 * sc, [255, 255, 255], al * if on { 1.0 } else { 0.55 }, 20.0, true);
+        }
         let k = ss(0.08, 0.32, t);
         g.txtb(kind.label(), x0 + 54.0 + (1.0 - k) * 6.0, cy - 9.0, 14.0, [255, 255, 255], al * k, 120.0);
         let state = if on { tr("On") } else { tr("Off") };
