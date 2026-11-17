@@ -4,6 +4,9 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/), versi mengikut
 
 ## [Unreleased]
 
+### Added
+- **Clipboard**: item bisa disematkan (pin). Ikon pin muncul di kiri tanda x saat kursor di atas baris. Item yang disematkan tetap di atas, tidak tergeser oleh salinan baru atau batas 10 item, dan tidak ikut terhapus oleh Clear (maksimal 5 pin). Pin hanya disimpan di memori seperti riwayatnya, dan hilang saat aplikasi ditutup atau slide dimatikan.
+
 ### Changed
 - **Music**: slider volume vertikal di atas tombol output dihapus. Volume tetap diatur dengan roda mouse di slide dan dengan klik pada bar volume yang muncul setelahnya.
 

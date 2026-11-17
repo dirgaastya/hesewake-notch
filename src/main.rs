@@ -298,7 +298,8 @@ struct App {
     /// Clipboard slide: copied texts (newest first), scroll offset, and when an entry was last copied back.
     clips: clipboard::History,
     clip_scroll: usize,
-    clip_flash: Option<Instant>,
+    /// The row that was just copied back (its index) and when.
+    clip_flash: Option<(usize, Instant)>,
     /// Clipboard: baris yang baru dihapus (teks, baris tampak, waktu) untuk animasi keluar.
     clip_gone: Vec<(String, usize, Instant)>,
     /// Calendar (ICS link): the link, feed status, upcoming events, meetings already announced, the Settings row's
