@@ -3614,3 +3614,76 @@ fn no_overlay_is_left_over_the_buttons_after_it_ends() {
     a.vol_t = Instant::now() - Duration::from_millis(1600);
     assert!(!a.vol_overlay_active(), "the overlay is over after 1.5 s");
 }
+
+/// Pin zone of visible row `vi`: just left of the ×.
+fn clip_pin_x(a: &App) -> f32 {
+    LX + clipboard::row_w(a.clips.len()) - 28.0 - 12.0
+}
+
+#[test]
+fn snap_clipboard_pinned() {
+    shot("clipboard-pinned", 1.0, |a| {
+        with_clips(a, &CLIPS);
+        a.clips.toggle_pin(1);
+        a.clips.toggle_pin(3);
+        open_slide(a, SlideId::Clipboard);
+    });
+    let _lang = i18n::restore_on_drop();
+    shot("id-clipboard-pinned", 1.0, |a| {
+        a.cfg.lang = i18n::ID;
+        i18n::set(i18n::ID);
+        with_clips(a, &CLIPS);
+        a.clips.toggle_pin(2);
+        open_slide(a, SlideId::Clipboard);
+    });
+}
+
+#[test]
+fn the_pin_button_pins_and_unpins_a_row() {
+    let mut a = test_app(1.0);
+    with_clips(&mut a, &CLIPS); // rhezaardiansyah, Meeting notes, fn main, github
+    open_slide(&mut a, SlideId::Clipboard);
+    let hit = a.clip_hit(clip_pin_x(&a), clip_row_y(1)).expect("the pin of the second row");
+    assert_eq!(hit, clipboard::ClipHit::Pin(1));
+    assert_eq!(a.clip_apply(hit), None, "pinning copies nothing");
+    assert!(a.clips.items()[0].text.starts_with("Meeting notes") && a.clips.items()[0].pinned, "it moved to the top");
+    // the same button on that (now first) row unpins it again
+    let hit = a.clip_hit(clip_pin_x(&a), clip_row_y(0)).expect("the pin of the first row");
+    assert_eq!(hit, clipboard::ClipHit::Pin(0));
+    a.clip_apply(hit);
+    assert_eq!(a.clips.pinned_count(), 0);
+    // the × and the row itself still do what they did
+    assert_eq!(a.clip_hit(LX + clipboard::row_w(4) - 5.0, clip_row_y(0)), Some(clipboard::ClipHit::Remove(0)));
+    assert_eq!(a.clip_hit(LX + 60.0, clip_row_y(0)), Some(clipboard::ClipHit::Copy(0)));
+}
+
+#[test]
+fn clear_asks_twice_and_leaves_the_pins() {
+    let mut a = test_app(1.0);
+    with_clips(&mut a, &CLIPS);
+    open_slide(&mut a, SlideId::Clipboard);
+    a.clips.toggle_pin(2);
+    a.clip_apply(clipboard::ClipHit::Clear);
+    assert_eq!(a.clips.len(), 4, "the first click only asks");
+    a.clip_apply(clipboard::ClipHit::Clear);
+    assert_eq!(a.clips.len(), 1, "the second clears everything but the pin");
+    assert!(a.clips.items()[0].pinned);
+    a.clip_apply(clipboard::ClipHit::Clear);
+    assert!(a.clip_clear_t.is_none(), "with only pins left there is nothing to ask about");
+    // turning the slide off forgets the pins as well
+    set_slide(&mut a, SlideId::Clipboard, false);
+    a.on_clipboard(None, Instant::now());
+    assert!(a.clips.is_empty());
+}
+
+#[test]
+fn copying_a_pinned_row_flashes_that_row() {
+    let mut a = test_app(1.0);
+    with_clips(&mut a, &CLIPS);
+    open_slide(&mut a, SlideId::Clipboard);
+    a.clips.toggle_pin(3); // github is pinned and first
+    let text = a.clip_apply(clipboard::ClipHit::Copy(0)).expect("text");
+    assert!(text.contains("github.com"));
+    assert_eq!(a.clip_flash.map(|f| f.0), Some(0), "the pinned row keeps its place and shows \"Copied\"");
+    assert!(a.clips.items()[0].pinned);
+}
