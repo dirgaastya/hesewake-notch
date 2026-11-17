@@ -22,6 +22,9 @@ const PRIV_STEP: f32 = 10.0;
 const PRIV_PAD: f32 = 2.0;
 /// Width taken by the crossed-out mic (mic.rs) in the same row.
 const MIC_OFF_STEP: f32 = 16.0;
+/// The moon of Do Not Disturb.
+const DND_STEP: f32 = 16.0;
+const DND_RGB: [u8; 3] = [176, 166, 255];
 const CAM_RGB: [u8; 3] = [48, 209, 88];
 const MIC_RGB: [u8; 3] = [255, 159, 10];
 /// The crossed-out mic while no app uses the microphone.
@@ -33,6 +36,8 @@ pub(crate) enum Mark {
     Dot([u8; 3]),
     /// The microphone is muted: orange while an app uses it, grey otherwise.
     MicOff([u8; 3]),
+    /// Do Not Disturb is on: a small moon.
+    Dnd([u8; 3]),
 }
 
 impl Mark {
@@ -40,6 +45,7 @@ impl Mark {
         match self {
             Mark::Dot(_) => PRIV_STEP,
             Mark::MicOff(_) => MIC_OFF_STEP,
+            Mark::Dnd(_) => DND_STEP,
         }
     }
 }
@@ -190,7 +196,7 @@ impl App {
     }
 
     pub(crate) fn privacy_animating(&self) -> bool {
-        (self.cfg.privacy_dot || self.cfg.mic_hotkey) && self.priv_t.elapsed().as_secs_f32() < 0.5
+        (self.cfg.privacy_dot || self.cfg.mic_hotkey || self.cfg.dnd) && self.priv_t.elapsed().as_secs_f32() < 0.5
     }
 
     /// The marks from right to left: the camera dot, then the microphone (a dot while in use, a crossed-out mic
@@ -206,6 +212,10 @@ impl App {
             v.push(Mark::MicOff(if used { MIC_RGB } else { MUTED_RGB }));
         } else if used {
             v.push(Mark::Dot(MIC_RGB));
+        }
+        // the moon is the leftmost mark, so the privacy dots stay at the edge
+        if self.cfg.dnd {
+            v.push(Mark::Dnd(DND_RGB));
         }
         v
     }
@@ -236,6 +246,7 @@ impl App {
             match m {
                 Mark::Dot(c) => g.circle(x, h / 2.0, 3.6 * pop.min(1.15), &paint(c[0], c[1], c[2], ca)),
                 Mark::MicOff(c) => g.icon_mic_off(x, h / 2.0, 13.0 * pop.min(1.15), &paint(c[0], c[1], c[2], ca)),
+                Mark::Dnd(c) => g.icon_crescent(x, h / 2.0, 13.0 * pop.min(1.15), &paint(c[0], c[1], c[2], ca)),
             }
             right -= m.width();
         }

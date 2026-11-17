@@ -277,6 +277,11 @@ const ID_TEXT: &[(&str, &str)] = &[
     ("Not found", "Tidak ada"),
     ("Mic mute key", "Tombol bisu mic"),
     ("Ctrl+Alt+M, all apps", "Ctrl+Alt+M, semua app"),
+    ("Do Not Disturb", "Jangan ganggu"),
+    ("Do Not Disturb key", "Tombol Jangan ganggu"),
+    ("Hold most toasts", "Tahan sebagian besar toast"),
+    ("Ctrl+Alt+D, all apps", "Ctrl+Alt+D, semua app"),
+    ("Focus", "Fokus"),
     ("Unknown device", "Perangkat tak dikenal"),
     // Timer
     ("Focus", "Fokus"),

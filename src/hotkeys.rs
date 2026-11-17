@@ -11,6 +11,8 @@ pub(crate) const SLIDE_KEYS: usize = 10;
 const FIRST_ID: i32 = 10;
 /// Hotkey id of Ctrl+Alt+M, the microphone mute (mic.rs).
 pub(crate) const MIC_ID: i32 = 2;
+/// Hotkey id of Ctrl+Alt+D, Do Not Disturb.
+pub(crate) const DND_ID: i32 = 3;
 /// How long the notch stays open after a slide hotkey (longer while hovered).
 const PEEK_SECS: u64 = 8;
 
@@ -46,6 +48,22 @@ pub(crate) fn set_mic_hotkey(hwnd: isize, on: bool) {
     if !register_mic(HWND(hwnd as _), on) {
         perf::note("hotkey: Ctrl+Alt+M is already taken by another app; the mic mute hotkey is off");
     }
+}
+
+/// Register (or release) Ctrl+Alt+D, Do Not Disturb. A key another app already holds is noted in perf.log.
+pub(crate) fn set_dnd_hotkey(hwnd: isize, on: bool) {
+    if cfg!(test) {
+        return; // unit tests must not grab global hotkeys (the CI-only test below calls `register_dnd` itself)
+    }
+    if !register_dnd(HWND(hwnd as _), on) {
+        perf::note("hotkey: Ctrl+Alt+D is already taken by another app; the Do Not Disturb hotkey is off");
+    }
+}
+
+/// Release Ctrl+Alt+D for `hwnd`, then register it again if `on`. False if registering failed.
+fn register_dnd(hwnd: HWND, on: bool) -> bool {
+    let _ = unsafe { UnregisterHotKey(hwnd, DND_ID) };
+    !on || unsafe { RegisterHotKey(hwnd, DND_ID, ctrl_alt(), 'D' as u32) }.is_ok()
 }
 
 fn ctrl_alt() -> HOT_KEY_MODIFIERS {
@@ -198,6 +216,21 @@ mod tests {
         press_ctrl_alt_key(b'M');
         assert_eq!(next_hotkey(500), None, "with the setting off Ctrl+Alt+M is released");
         eprintln!("Ctrl+Alt+M -> mic mute, released when off");
+
+        assert!(register_dnd(none, true), "Ctrl+Alt+D registers");
+        press_ctrl_alt_key(b'D');
+        assert_eq!(next_hotkey(2000), Some(DND_ID), "Ctrl+Alt+D is the Do Not Disturb hotkey");
+        assert!(register_dnd(none, false));
+        press_ctrl_alt_key(b'D');
+        assert_eq!(next_hotkey(500), None, "with the setting off Ctrl+Alt+D is released");
+        eprintln!("Ctrl+Alt+D -> Do Not Disturb, released when off");
+    }
+
+    #[test]
+    fn hotkey_ids_do_not_clash() {
+        let ids = [crate::HOTKEY_ID, MIC_ID, DND_ID];
+        assert!(ids.iter().all(|&i| slide_of(i).is_none()), "none of them is a slide hotkey");
+        assert!(ids[0] != ids[1] && ids[1] != ids[2] && ids[0] != ids[2]);
     }
 
     #[test]

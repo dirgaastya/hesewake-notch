@@ -551,6 +551,7 @@ fn main() -> Result<()> {
         i18n::set(cfg0.lang);
         hotkeys::set_slide_hotkeys(hwnd.0 as isize, cfg0.slide_hotkeys);
         hotkeys::set_mic_hotkey(hwnd.0 as isize, cfg0.mic_hotkey);
+        hotkeys::set_dnd_hotkey(hwnd.0 as isize, cfg0.dnd_hotkey);
         clipboard::listen(hwnd.0 as isize);
         let cal_link = calendar::load_link();
         calendar::start(hwnd.0 as isize, cal_link.clone());
