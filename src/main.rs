@@ -66,6 +66,7 @@ mod data;
 mod dict;
 mod downloads;
 mod dragdrop;
+mod duedate;
 mod ext;
 mod extapp;
 mod extslide;
@@ -139,7 +140,7 @@ use nav::{NAV_L, NAV_R, dot_x, visible_slides};
 use note::{NOTE_H, NOTE_Y, NoteView, load_note, save_note};
 use render::present;
 use shelf::{SH_GAP, SH_H, SH_W, SH_Y, ShelfItem, load_shelf, open_path, save_shelf};
-use todo::{ROW_H, ROW_P, load_todos, rows_geom, save_todos};
+use todo::{ROW_H, ROW_P, Todo, load_todos, rows_geom, save_todos};
 use toast::{HudKind, Toast, ToastKind};
 use settings::Settings;
 use slides::SlideId;
@@ -251,7 +252,9 @@ struct App {
     icon: Option<Pixmap>,
     art_key: String,
     title_t0: f32,
-    todos: Vec<(bool, String)>,
+    todos: Vec<Todo>,
+    /// Tasks whose due time already raised a toast (due, text); kept to 64 entries.
+    todo_fired: Vec<(i64, String)>,
     todo_scroll: usize,
     edit_mode: bool,
     editing: bool,
@@ -691,6 +694,7 @@ fn main() -> Result<()> {
             art_key: String::new(),
             title_t0: 0.0,
             todos: load_todos(),
+            todo_fired: Vec::new(),
             todo_scroll: 0,
             edit_mode: false,
             editing: false,

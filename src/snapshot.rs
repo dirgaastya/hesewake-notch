@@ -106,7 +106,8 @@ fn test_app(s: f32) -> App {
         icon: None,
         art_key: String::new(),
         title_t0: 0.0,
-        todos: vec![(true, "Display DPI scaling".into()), (false, "Pomodoro mode".into()), (false, "Clipboard history".into())],
+        todos: vec![Todo::new(true, "Display DPI scaling"), Todo::new(false, "Pomodoro mode"), Todo::new(false, "Clipboard history")],
+        todo_fired: Vec::new(),
         todo_scroll: 0,
         edit_mode: false,
         editing: false,
@@ -3686,4 +3687,183 @@ fn copying_a_pinned_row_flashes_that_row() {
     assert!(text.contains("github.com"));
     assert_eq!(a.clip_flash.map(|f| f.0), Some(0), "the pinned row keeps its place and shows \"Copied\"");
     assert!(a.clips.items()[0].pinned);
+}
+
+// ---------------------------------------------------------------- to-do due times
+
+/// Tasks with due times spread around now, for the badges.
+fn todos_with_due(a: &mut App) {
+    let now = notif::now_unix() as i64;
+    let mk = |text: &str, due: Option<i64>| Todo { done: false, text: text.to_string(), due };
+    a.todos = vec![
+        mk("Send the invoice", Some(now - 3600)),
+        mk("Call the dentist about the appointment next week", Some(now + 1800)),
+        mk("Pick up the parcel", Some(now + 26 * 3600)),
+        mk("Renew the passport", Some(now + 4 * 86400)),
+        mk("Plan the holiday", Some(now + 40 * 86400)),
+        Todo { done: true, text: "Water the plants".into(), due: Some(now - 86400) },
+        mk("Read a book", None),
+    ];
+}
+
+#[test]
+fn snap_todo_due() {
+    for s in SCALES {
+        shot("todo-due", s, |a| {
+            todos_with_due(a);
+            open_slide(a, SlideId::Todo);
+        });
+    }
+    shot("todo-due-scrolled", 1.0, |a| {
+        todos_with_due(a);
+        open_slide(a, SlideId::Todo);
+        a.todo_scroll = 3;
+    });
+    shot("todo-due-edit-mode", 1.0, |a| {
+        todos_with_due(a);
+        open_slide(a, SlideId::Todo);
+        a.edit_mode = true;
+    });
+    shot("todo-editing-hint", 1.0, |a| {
+        open_slide(a, SlideId::Todo);
+        a.editing = true;
+        a.edit_start = Instant::now() - Duration::from_secs(1);
+    });
+    shot("todo-toast", 1.0, |a| {
+        open_slide(a, SlideId::Music);
+        let due = notif::now_unix() as i64;
+        show_toast(a, ToastKind::Todo { text: "Send the invoice to the client".into(), due, more: 0 });
+    });
+    shot("todo-toast-more", 1.0, |a| {
+        let due = notif::now_unix() as i64;
+        show_toast(a, ToastKind::Todo { text: "Send the invoice to the client and wait for the confirmation".into(), due, more: 2 });
+    });
+    let _lang = i18n::restore_on_drop();
+    let id = |a: &mut App| {
+        a.cfg.lang = i18n::ID;
+        i18n::set(i18n::ID);
+    };
+    shot("id-todo-due", 1.0, |a| {
+        id(a);
+        todos_with_due(a);
+        open_slide(a, SlideId::Todo);
+    });
+    shot("id-todo-editing-hint", 1.0, |a| {
+        id(a);
+        open_slide(a, SlideId::Todo);
+        a.editing = true;
+        a.edit_start = Instant::now() - Duration::from_secs(1);
+    });
+    shot("id-todo-toast", 1.0, |a| {
+        id(a);
+        let due = notif::now_unix() as i64;
+        show_toast(a, ToastKind::Todo { text: "Kirim faktur ke klien".into(), due, more: 1 });
+    });
+}
+
+#[test]
+fn due_times_survive_the_todo_file_and_old_lines_still_read() {
+    let todos = vec![
+        Todo { done: false, text: "buy milk".into(), due: Some(1_795_000_000) },
+        Todo { done: true, text: "a | b".into(), due: None },
+        Todo { done: false, text: "pay rent".into(), due: Some(-5) },
+    ];
+    let text = todo::format_todos(&todos);
+    assert_eq!(text, "0|buy milk\t@1795000000\n1|a | b\n0|pay rent\t@-5\n");
+    assert_eq!(todo::parse_todos(&text), todos, "what is saved is read back");
+    // a file from before due times: same lines, no due, a bar in the text is kept, a line without a bar is dropped
+    let old = "1|done thing\n0|has | a bar\nno bar here\n0|text with \t@ marker\n0|ends in \t@x\n";
+    let read = todo::parse_todos(old);
+    assert_eq!(read.len(), 4);
+    assert_eq!((read[0].done, read[0].text.as_str(), read[0].due), (true, "done thing", None));
+    assert_eq!(read[1].text, "has | a bar");
+    assert_eq!(read[2].text, "text with \t@ marker", "a mark that is not followed by a number is just text");
+    assert_eq!(read[3].text, "ends in \t@x");
+    assert!(read.iter().all(|t| t.due.is_none()));
+}
+
+#[test]
+fn open_tasks_are_ordered_by_due_time_and_done_ones_come_last() {
+    let mut a = test_app(1.0);
+    let mk = |text: &str, done: bool, due: Option<i64>| Todo { done, text: text.to_string(), due };
+    a.todos = vec![
+        mk("no due 1", false, None),
+        mk("later", false, Some(500)),
+        mk("done", true, Some(10)),
+        mk("soon", false, Some(100)),
+        mk("no due 2", false, None),
+        mk("same as soon", false, Some(100)),
+    ];
+    let names: Vec<&str> = a.todo_order().iter().map(|&i| a.todos[i].text.as_str()).collect();
+    assert_eq!(names, ["soon", "same as soon", "later", "no due 1", "no due 2", "done"]);
+    a.todos.iter_mut().for_each(|t| t.due = None);
+    let plain: Vec<usize> = a.todo_order();
+    assert_eq!(plain, [0, 1, 3, 4, 5, 2], "without due times the order is the old one: open first, then done");
+}
+
+#[test]
+fn a_due_phrase_typed_at_the_end_becomes_the_due_time() {
+    let mut a = test_app(1.0);
+    a.todos.clear();
+    a.editing = true;
+    a.input = "call mom tomorrow 14:00".into();
+    unsafe { a.finish_edit(true, false) };
+    assert_eq!(a.todos.len(), 1);
+    assert_eq!(a.todos[0].text, "call mom");
+    let due = a.todos[0].due.expect("a due time");
+    let now = notif::now_unix() as i64;
+    assert_eq!(duedate::when(due, now, calendar::local_offset()), duedate::When::Tomorrow);
+    // a plain task keeps its text exactly (inner spaces too) and has no due time
+    a.editing = true;
+    a.input = "  buy   milk ".into();
+    unsafe { a.finish_edit(true, false) };
+    assert_eq!((a.todos[1].text.as_str(), a.todos[1].due), ("buy   milk", None));
+    // editing a task replaces both its text and its due time
+    a.editing = true;
+    a.edit_idx = Some(1);
+    a.input = "buy oat milk besok".into();
+    unsafe { a.finish_edit(true, false) };
+    assert_eq!(a.todos[1].text, "buy oat milk");
+    assert!(a.todos[1].due.is_some());
+    a.editing = true;
+    a.edit_idx = Some(1);
+    a.input = "buy oat milk".into();
+    unsafe { a.finish_edit(true, false) };
+    assert_eq!(a.todos[1].due, None, "removing the phrase removes the due time");
+}
+
+#[test]
+fn a_task_raises_one_toast_when_it_comes_due() {
+    let mut a = test_app(1.0);
+    let now = notif::now_unix() as i64;
+    let mk = |text: &str, due: i64| Todo { done: false, text: text.to_string(), due: Some(due) };
+    a.todos = vec![mk("future", now + 600), mk("now", now - 30)];
+    assert!(a.todo_minute(now), "the one that came due raises a toast");
+    assert!(matches!(&a.toast.as_ref().expect("toast").kind, ToastKind::Todo { text, more: 0, .. } if text == "now"));
+    a.toast = None;
+    assert!(!a.todo_minute(now + 60), "and only once");
+    assert!(a.todo_minute(now + 601), "the other when its time comes");
+    a.toast = None;
+    // several at once: one summary toast
+    a.todos = vec![mk("a", now - 100), mk("b", now - 90), mk("c", now - 80)];
+    a.todo_fired.clear();
+    assert!(a.todo_minute(now));
+    assert!(matches!(&a.toast.as_ref().expect("toast").kind, ToastKind::Todo { text, more: 2, .. } if text == "a"));
+    a.toast = None;
+    // done tasks, tasks without a due time and tasks long overdue stay quiet
+    a.todo_fired.clear();
+    a.todos = vec![
+        Todo { done: true, text: "done".into(), due: Some(now - 10) },
+        Todo { done: false, text: "no due".into(), due: None },
+        mk("long gone", now - 3 * 3600),
+    ];
+    assert!(!a.todo_minute(now));
+    assert!(a.toast.is_none());
+    // editing the due time of a task that already fired makes it fire again at the new time
+    a.todos = vec![mk("moved", now - 10)];
+    assert!(a.todo_minute(now));
+    a.toast = None;
+    a.todos[0].due = Some(now + 120);
+    assert!(!a.todo_minute(now));
+    assert!(a.todo_minute(now + 130));
 }

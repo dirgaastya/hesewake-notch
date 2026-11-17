@@ -322,7 +322,10 @@ const ID_TEXT: &[(&str, &str)] = &[
     // To-do
     ("Tap Add Task to create a task", "Ketuk Tambah untuk membuat tugas"),
     ("Todo|List", "Daftar |Tugas"),
-    ("Type a task, Enter to save, Esc to cancel", "Ketik tugas, Enter simpan, Esc batal"),
+    ("Type a task. Add \"fri 14:00\" for a reminder", "Ketik tugas. Tambah \"jum 14:00\" untuk pengingat"),
+    ("Late", "Telat"),
+    ("Tomorrow", "Besok"),
+    ("Due \u{b7} {}", "Jatuh tempo \u{b7} {}"),
     ("Tasks done today", "Tugas selesai hari ini"),
     ("Add Task", "Tambah"),
     ("Done", "Selesai"),

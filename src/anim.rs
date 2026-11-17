@@ -334,7 +334,8 @@ unsafe fn poll(a: &mut App) {
     if st.wMinute != a.last_min {
         a.prayer_minute();
         a.meeting_minute(notif::now_unix() as i64);
-        if a.countdown_on() || a.toast.is_some() || (expanded && a.is_slide(SlideId::Agenda)) {
+        a.todo_minute(notif::now_unix() as i64);
+        if a.countdown_on() || a.toast.is_some() || (expanded && (a.is_slide(SlideId::Agenda) || a.is_slide(SlideId::Todo))) {
             redraw = true;
         }
     }

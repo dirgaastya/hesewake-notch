@@ -364,7 +364,7 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                     }
                     c if c >= 32 => {
                         if let Some(ch) = char::from_u32(c) {
-                            if a.input.chars().count() < 60 {
+                            if a.input.chars().count() < 80 {
                                 a.input.push(ch);
                             }
                         }
