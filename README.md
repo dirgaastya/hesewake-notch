@@ -6,71 +6,96 @@
 
 *Personal fork of [Poch](https://github.com/klawcodes/poch) by Commonly Works (MIT).*
 
-**A tiny notch for the top of your Windows screen. Music, clock, water, to-do, file shelf and notes, all in one place.**
+**A tiny notch for the top of your Windows screen. Music, timer, calendar, prayer times, notes and more, in one small overlay.**
 
-![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4?logo=windows&logoColor=white)
-![Language](https://img.shields.io/badge/built%20with-Rust-DEA584?logo=rust&logoColor=black)
-![License](https://img.shields.io/badge/license-MIT-green)
+[Website](https://notch.hesewake.ai.id) · [Download](https://github.com/dirgaastya/hesewake-notch/releases/latest) · [Changelog](CHANGELOG.md)
+
+![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-1f6ad1?labelColor=0e1016&logo=windows&logoColor=white)
+![Language](https://img.shields.io/badge/built%20with-Rust-1f6ad1?labelColor=0e1016&logo=rust&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-1f6ad1?labelColor=0e1016)
+
+<img src="site/img/slides/music.png" alt="The Music slide of Hesewake Notch" width="540">
 
 </div>
 
 ---
 
-## <img src="https://api.iconify.design/lucide/info.svg?color=%23ff453a" width="20" align="top"> About
+## <img src="https://api.iconify.design/lucide/info.svg?color=%235a96ff" width="20" align="top"> About
 
 Hesewake Notch sits flush against the top edge of your screen as a small black notch. Hover over it and it expands into a carousel of mini apps. Move away and it shrinks back down. It is a single, lightweight `.exe` with no runtime to install.
 
 - Layered per-pixel alpha window, software rendered with `tiny-skia`
 - Small memory footprint: embedded fonts, bounded glyph cache, working set trimmed when idle
-- Your data stays local in `%APPDATA%\hesewake-notch`
+- Your data stays local in `%APPDATA%\hesewake-notch`. No account, no telemetry. The [privacy table](https://notch.hesewake.ai.id/#privacy) on the website lists every connection the app can make.
 
 ---
 
-## <img src="https://api.iconify.design/lucide/plus.svg?color=%23ff453a" width="20" align="top"> What this fork adds to Poch
+## <img src="https://api.iconify.design/lucide/plus.svg?color=%235a96ff" width="20" align="top"> What this fork adds to Poch
 
-Synced lyrics (with a scrolling lyrics mode), cover art in the notch, a redesigned Water slide, Windows notifications with contact photos that open their app on click, toasts (charger, Bluetooth, Caps/Num/Scroll Lock, microphone/camera in use), volume control by scrolling, a **Settings** window (a sidebar of categories: show/hide/reorder slides, appearance, screens, music, alerts, weather and calendar), a tray menu, a blue theme, and an installer. See [CHANGELOG.md](CHANGELOG.md) for details.
+Synced lyrics (with a scrolling lyrics mode and romaji), cover art in the notch, a redesigned Water slide, Timer with Pomodoro, Windows notifications with contact photos that open their app on click, calendar and prayer times, a clipboard history, a system monitor, toasts (charger, Bluetooth, Caps/Num/Scroll Lock, microphone/camera in use, downloads), volume and sound output control, a **Settings** window with its own sidebar of categories, accent colors, English and Indonesian, **extensions** that add slides from outside programs, livelier animation across the carousel, a tray menu, and an installer. See [CHANGELOG.md](CHANGELOG.md) for every release.
 
 ---
 
-## <img src="https://api.iconify.design/lucide/layout-grid.svg?color=%23ff453a" width="20" align="top"> Slides
+## <img src="https://api.iconify.design/lucide/layout-grid.svg?color=%235a96ff" width="20" align="top"> Slides
 
 Swipe, scroll, drag, use the arrow buttons or click the dots to move through an endless carousel.
 
-|                                           Icon                                            | Slide     | What it does                                                                                                                                                      |
-| :---------------------------------------------------------------------------------------: | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-|    <img src="https://api.iconify.design/lucide/music.svg?color=%23ff453a" width="22">     | **Music** | Now Playing from Spotify, browsers and other media apps, with artwork, progress bar and playback controls. The clock and date sit on the right of the same slide. |
-|   <img src="https://api.iconify.design/lucide/droplets.svg?color=%23ff453a" width="22">   | **Water** | Daily water tracker with quick add buttons, a daily goal (1.5 to 3.0 L) and optional reminders.                                                                   |
-| <img src="https://api.iconify.design/lucide/list-checks.svg?color=%23ff453a" width="22">  | **To-do** | Simple checklist with add, edit and delete. Scrolls when the list gets long.                                                                                      |
-| <img src="https://api.iconify.design/lucide/folder-open.svg?color=%23ff453a" width="22">  | **Ledge** | A shelf for up to 5 files or folders. Drop them in, click to open, drag them back out (copy by default, hold `Shift` to move).                                    |
-| <img src="https://api.iconify.design/lucide/notebook-pen.svg?color=%23ff453a" width="22"> | **Scrap** | Mini notepad, up to 3,333 characters, with caret, selection, clipboard and a live character counter.                                                              |
-| <img src="https://api.iconify.design/lucide/clipboard-list.svg?color=%23ff453a" width="22"> | **Clipboard** | Optional (turn it on in Settings > Slides). The last 10 texts you copied in any app; click one to copy it again. Kept in memory only, and copies that password managers mark as private are skipped. |
-| <img src="https://api.iconify.design/lucide/calendar-days.svg?color=%23ff453a" width="22"> | **Agenda** | Optional. What is left on today's calendar, with a **Join** button for Meet / Zoom / Teams links. Needs the calendar link (see Calendar below). |
+| Icon | Slide | What it does |
+| :---: | --- | --- |
+| <img src="https://api.iconify.design/lucide/music.svg?color=%235a96ff" width="22"> | **Music** | Now Playing from Spotify, browsers and other media apps, with artwork, progress bar, synced lyrics and playback controls. The clock and date sit on the right of the same slide. |
+| <img src="https://api.iconify.design/lucide/droplets.svg?color=%235a96ff" width="22"> | **Water** | Daily water tracker with quick add buttons, a daily goal (1.5 to 3.0 L) and optional reminders. |
+| <img src="https://api.iconify.design/lucide/list-checks.svg?color=%235a96ff" width="22"> | **To-do** | Simple checklist with add, edit and delete. Scrolls when the list gets long. |
+| <img src="https://api.iconify.design/lucide/folder-open.svg?color=%235a96ff" width="22"> | **Shelf** | A shelf for up to 5 files or folders (called Ledge in earlier versions). Drop them in, click to open, drag them back out (copy by default, hold `Shift` to move). |
+| <img src="https://api.iconify.design/lucide/notebook-pen.svg?color=%235a96ff" width="22"> | **Scrap** | Mini notepad, up to 3,333 characters, with caret, selection, clipboard and a live character counter. Links show as badges with the page title. |
+| <img src="https://api.iconify.design/lucide/bell.svg?color=%235a96ff" width="22"> | **Notifications** | Windows notifications with contact photos. Click one to open the app it came from. A badge on the dots counts the unread ones. |
+| <img src="https://api.iconify.design/lucide/timer.svg?color=%235a96ff" width="22"> | **Timer** | Optional. Stopwatch, countdown and a Pomodoro mode with focus and break sessions. Turn it on in Settings > Slides. |
+| <img src="https://api.iconify.design/lucide/clipboard-list.svg?color=%235a96ff" width="22"> | **Clipboard** | Optional. The last 10 texts you copied in any app; click one to copy it again. Kept in memory only, and copies that password managers mark as private are skipped. |
+| <img src="https://api.iconify.design/lucide/calendar-days.svg?color=%235a96ff" width="22"> | **Agenda** | Optional. What is left on today's calendar, with a **Join** button for Meet / Zoom / Teams links. Needs the calendar link (see Calendar below). |
+| <img src="https://api.iconify.design/lucide/moon.svg?color=%235a96ff" width="22"> | **Prayer** | Today's prayer times with an arc counting down to the next one. Shown while Prayer times is on (see below). |
+| <img src="https://api.iconify.design/lucide/cpu.svg?color=%235a96ff" width="22"> | **System** | Optional. CPU, memory, network and battery at a glance. |
+
+Extensions can add slides of their own (see Extensions below).
+
+---------------------------------------------------------------------------------------: | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|    <img src="https://api.iconify.design/lucide/music.svg?color=%235a96ff" width="22">     | **Music** | Now Playing from Spotify, browsers and other media apps, with artwork, progress bar and playback controls. The clock and date sit on the right of the same slide. |
+|   <img src="https://api.iconify.design/lucide/droplets.svg?color=%235a96ff" width="22">   | **Water** | Daily water tracker with quick add buttons, a daily goal (1.5 to 3.0 L) and optional reminders.                                                                   |
+| <img src="https://api.iconify.design/lucide/list-checks.svg?color=%235a96ff" width="22">  | **To-do** | Simple checklist with add, edit and delete. Scrolls when the list gets long.                                                                                      |
+| <img src="https://api.iconify.design/lucide/folder-open.svg?color=%235a96ff" width="22">  | **Ledge** | A shelf for up to 5 files or folders. Drop them in, click to open, drag them back out (copy by default, hold `Shift` to move).                                    |
+| <img src="https://api.iconify.design/lucide/notebook-pen.svg?color=%235a96ff" width="22"> | **Scrap** | Mini notepad, up to 3,333 characters, with caret, selection, clipboard and a live character counter.                                                              |
+| <img src="https://api.iconify.design/lucide/clipboard-list.svg?color=%235a96ff" width="22"> | **Clipboard** | Optional (turn it on in Settings > Slides). The last 10 texts you copied in any app; click one to copy it again. Kept in memory only, and copies that password managers mark as private are skipped. |
+| <img src="https://api.iconify.design/lucide/calendar-days.svg?color=%235a96ff" width="22"> | **Agenda** | Optional. What is left on today's calendar, with a **Join** button for Meet / Zoom / Teams links. Needs the calendar link (see Calendar below). |
 
 ---
 
-## <img src="https://api.iconify.design/lucide/sparkles.svg?color=%23ff453a" width="20" align="top"> Features
+## <img src="https://api.iconify.design/lucide/sparkles.svg?color=%235a96ff" width="20" align="top"> Features
 
 |                                          Icon                                           | Feature        | Details                                                                                                             |
 | :-------------------------------------------------------------------------------------: | -------------- | ------------------------------------------------------------------------------------------------------------------- |
-|   <img src="https://api.iconify.design/lucide/music.svg?color=%23ff453a" width="22">    | Media control  | Reads Windows media sessions (GSMTC). Artwork comes from the session, with a fallback to the iTunes Search API.     |
-|   <img src="https://api.iconify.design/lucide/clock.svg?color=%23ff453a" width="22">    | Idle clock     | When nothing is playing, the notch shows the time, then switches to a blinking eye with a red glow, then loops.     |
-| <img src="https://api.iconify.design/lucide/minimize-2.svg?color=%23ff453a" width="22"> | Busy mode      | With a maximized or fullscreen window (or Adobe apps in front), the notch shrinks to a thin line. Hover to open it. |
-|  <img src="https://api.iconify.design/lucide/keyboard.svg?color=%23ff453a" width="22">  | Hotkey         | `Ctrl` + `Alt` + `H` toggles between the clock and the eye.                                                         |
-| <img src="https://api.iconify.design/lucide/mic-off.svg?color=%23ff453a" width="22"> | Mic mute       | `Ctrl` + `Alt` + `M` mutes the default microphone for every app, and again to unmute. While muted, a crossed-out mic stays in the notch, also when the mute was made elsewhere. Turn the key off in Settings > HUD & alerts > Mic mute key. |
-|   <img src="https://api.iconify.design/lucide/waves.svg?color=%23ff453a" width="22">    | Drop animation | Dropping a file onto the notch makes its bottom edge ripple like water.                                             |
-|  <img src="https://api.iconify.design/lucide/palette.svg?color=%23ff453a" width="22">   | Artwork tint   | The Music slide picks up colors from the album cover for a soft glow.                                               |
-| <img src="https://api.iconify.design/lucide/headphones.svg?color=%23ff453a" width="22"> | Sound output   | The speaker / headphone button left of the playback controls lists the playback devices; a click on one makes it the Windows default for every app, including calls. The mouse wheel on the button moves to the next device. If Windows refuses, the sound settings open. |
-| <img src="https://api.iconify.design/lucide/languages.svg?color=%23ff453a" width="22"> | Romanize lyrics | Optional (Settings > Music & lyrics): Japanese lyrics shown in romaji (Lindera IPADIC and WanaKana) and Korean lyrics in Revised Romanization (no dictionary needed). |
-| <img src="https://api.iconify.design/lucide/globe.svg?color=%23ff453a" width="22"> | Language       | English or Indonesian (Settings > General > Language). Applies right away, including the right-click menu.     |
-| <img src="https://api.iconify.design/lucide/image.svg?color=%23ff453a" width="22"> | Wibu mode      | Optional (Settings > Appearance): a JPG, PNG, or WebP file you pick shows behind the expanded notch, darkened so the text stays readable (Image dim). The file stays where it is; only its path is saved. |
-| <img src="https://api.iconify.design/lucide/download.svg?color=%23ff453a" width="22"> | Update check   | At startup and every 24 hours the app asks GitHub for the latest release and shows a toast once per new version, with **Download** to open the release page. Nothing is installed automatically. Right-click menu: **Check for updates**. Turn it off in Settings > General > Update notice. |
-| <img src="https://api.iconify.design/lucide/download.svg?color=%23ff453a" width="22"> | Downloads      | While a browser downloads into your Downloads folder, the notch shows the speed (↓ 4.1 MB/s) and Ledge lists the running downloads with size and speed. When one is done, a toast offers **Open** and **Show in folder**. Turn it off in Settings > HUD & alerts > Download progress. |
-| <img src="https://api.iconify.design/lucide/calendar-clock.svg?color=%23ff453a" width="22"> | Calendar       | Settings > Calendar: copy your calendar's secret ICS address (Google: "Secret address in iCal format", Outlook: "Publish calendar"), then press **Paste**. The notch counts down the last 10 minutes before a meeting and shows a toast with **Join** when it starts. The link is kept in Windows Credential Manager (not in a file) and the feed is refreshed every 10 minutes. |
-| <img src="https://api.iconify.design/lucide/moon.svg?color=%23ff453a" width="22"> | Prayer times   | Computed on the PC with the Kemenag parameters for the city in Settings > Weather & prayer: a countdown in the last 15 minutes, a toast when a prayer starts, and a **Prayer** slide with the day (Imsak, Subuh, Terbit, Dzuhur, Ashar, Maghrib, Isya). **Ramadan mode** (turned on by hand) adds the Imsak countdown and toast and an Iftar toast at Maghrib. An optional **adhan** (off by default) plays the system sound or an .mp3 / .wav file you pick. |
+|   <img src="https://api.iconify.design/lucide/music.svg?color=%235a96ff" width="22">    | Media control  | Reads Windows media sessions (GSMTC). Artwork comes from the session, with a fallback to the iTunes Search API.     |
+|   <img src="https://api.iconify.design/lucide/clock.svg?color=%235a96ff" width="22">    | Idle clock     | When nothing is playing, the notch shows the time, then switches to a blinking eye with a soft glow, then loops.     |
+| <img src="https://api.iconify.design/lucide/minimize-2.svg?color=%235a96ff" width="22"> | Busy mode      | With a maximized or fullscreen window (or Adobe apps in front), the notch shrinks to a thin line. Hover to open it. |
+|  <img src="https://api.iconify.design/lucide/keyboard.svg?color=%235a96ff" width="22">  | Hotkey         | `Ctrl` + `Alt` + `H` toggles between the clock and the eye. `Ctrl` + `Alt` + `1`, `2`, ... jump straight to a slide.   |
+| <img src="https://api.iconify.design/lucide/mic-off.svg?color=%235a96ff" width="22"> | Mic mute       | `Ctrl` + `Alt` + `M` mutes the default microphone for every app, and again to unmute. While muted, a crossed-out mic stays in the notch, also when the mute was made elsewhere. Turn the key off in Settings > HUD & alerts > Mic mute key. |
+|   <img src="https://api.iconify.design/lucide/waves.svg?color=%235a96ff" width="22">    | Drop animation | Dropping a file onto the notch makes its bottom edge ripple like water.                                             |
+|  <img src="https://api.iconify.design/lucide/palette.svg?color=%235a96ff" width="22">   | Artwork tint   | The Music slide picks up colors from the album cover for a soft glow.                                               |
+| <img src="https://api.iconify.design/lucide/headphones.svg?color=%235a96ff" width="22"> | Sound output   | The speaker / headphone button left of the playback controls lists the playback devices; a click on one makes it the Windows default for every app, including calls. The mouse wheel on the button moves to the next device. If Windows refuses, the sound settings open. |
+| <img src="https://api.iconify.design/lucide/languages.svg?color=%235a96ff" width="22"> | Romanize lyrics | Optional (Settings > Music & lyrics): Japanese lyrics shown in romaji (Lindera IPADIC and WanaKana) and Korean lyrics in Revised Romanization (no dictionary needed). |
+| <img src="https://api.iconify.design/lucide/globe.svg?color=%235a96ff" width="22"> | Language       | English or Indonesian (Settings > General > Language). Applies right away, including the right-click menu.     |
+| <img src="https://api.iconify.design/lucide/image.svg?color=%235a96ff" width="22"> | Wibu mode      | Optional (Settings > Appearance): a JPG, PNG, or WebP file you pick shows behind the expanded notch, darkened so the text stays readable (Image dim). The file stays where it is; only its path is saved. |
+| <img src="https://api.iconify.design/lucide/download.svg?color=%235a96ff" width="22"> | Update check   | At startup and every 24 hours the app asks GitHub for the latest release and shows a toast once per new version, with **Download** to open the release page. Nothing is installed automatically. Right-click menu: **Check for updates**. Turn it off in Settings > General > Update notice. |
+| <img src="https://api.iconify.design/lucide/download.svg?color=%235a96ff" width="22"> | Downloads      | While a browser downloads into your Downloads folder, the notch shows the speed (↓ 4.1 MB/s) and Ledge lists the running downloads with size and speed. When one is done, a toast offers **Open** and **Show in folder**. Turn it off in Settings > HUD & alerts > Download progress. |
+| <img src="https://api.iconify.design/lucide/calendar-clock.svg?color=%235a96ff" width="22"> | Calendar       | Settings > Calendar: copy your calendar's secret ICS address (Google: "Secret address in iCal format", Outlook: "Publish calendar"), then press **Paste**. The notch counts down the last 10 minutes before a meeting and shows a toast with **Join** when it starts. The link is kept in Windows Credential Manager (not in a file) and the feed is refreshed every 10 minutes. |
+| <img src="https://api.iconify.design/lucide/moon.svg?color=%235a96ff" width="22"> | Prayer times   | Computed on the PC with the Kemenag parameters for the city in Settings > Weather & prayer: a countdown in the last 15 minutes, a toast when a prayer starts, and a **Prayer** slide with the day (Imsak, Subuh, Terbit, Dzuhur, Ashar, Maghrib, Isya). **Ramadan mode** (turned on by hand) adds the Imsak countdown and toast and an Iftar toast at Maghrib. An optional **adhan** (off by default) plays the system sound or an .mp3 / .wav file you pick. |
 
 ---
 
-## <img src="https://api.iconify.design/lucide/download.svg?color=%23ff453a" width="20" align="top"> Install
+## <img src="https://api.iconify.design/lucide/download.svg?color=%235a96ff" width="20" align="top"> Install
+
+1. Download `HesewakeNotch-Setup-X.Y.Z.exe` from the [latest release](https://github.com/dirgaastya/hesewake-notch/releases/latest), together with `SHA256SUMS`.
+2. Check the file: in PowerShell, `Get-FileHash .\HesewakeNotch-Setup-X.Y.Z.exe` must print the same hash as the matching line in `SHA256SUMS`.
+3. Run the installer. Windows may show a SmartScreen warning because the installer is not code signed yet (signing is in preparation); choose **More info** > **Run anyway** only if the hash matched.
+
+The app checks for new releases on its own and, when you press **Install** in the update toast, verifies the download against `SHA256SUMS` before it starts the installer.
 
 | Requirement                             | Version                                                           |
 | --------------------------------------- | ----------------------------------------------------------------- |
@@ -78,9 +103,14 @@ Swipe, scroll, drag, use the arrow buttons or click the dots to move through an 
 | Build tools (only to build from source) | [Rust](https://www.rust-lang.org/tools/install) (stable)          |
 | Installer (optional)                    | [Inno Setup](https://jrsoftware.org/isinfo.php), using `hesewake-notch.iss` |
 
+--------------------------------------- | ----------------------------------------------------------------- |
+| Operating system                        | Windows 10 or Windows 11                                          |
+| Build tools (only to build from source) | [Rust](https://www.rust-lang.org/tools/install) (stable)          |
+| Installer (optional)                    | [Inno Setup](https://jrsoftware.org/isinfo.php), using `hesewake-notch.iss` |
+
 ---
 
-## <img src="https://api.iconify.design/lucide/hammer.svg?color=%23ff453a" width="20" align="top"> Build from source
+## <img src="https://api.iconify.design/lucide/hammer.svg?color=%235a96ff" width="20" align="top"> Build from source
 
 ```powershell
 git clone <your-repo-url>
@@ -92,7 +122,7 @@ The executable is created at `target\release\hesewake-notch.exe`. Japanese romaj
 
 ---
 
-## <img src="https://api.iconify.design/lucide/folder-tree.svg?color=%23ff453a" width="20" align="top"> Project layout
+## <img src="https://api.iconify.design/lucide/folder-tree.svg?color=%235a96ff" width="20" align="top"> Project layout
 
 | File                                         | Purpose                                                            |
 | -------------------------------------------- | ------------------------------------------------------------------ |
@@ -108,7 +138,11 @@ The executable is created at `target\release\hesewake-notch.exe`. Japanese romaj
 | `extproto.rs`, `ext.rs`, `extapp.rs`, `extslide.rs` | Extensions: protocol rules, the pipe, the extension list and the slide |
 | `notif.rs`, `notif_img.rs`, `notifview.rs`, `notifopen.rs` | Windows notifications: reading them, contact photos, the slide, opening the app on click |
 | `clock.rs`                                   | Clock and date helpers                                             |
-| `water.rs`, `todo.rs`, `shelf.rs`, `note.rs` | Water, To-do, Ledge and Scrap slides                               |
+| `water.rs`, `todo.rs`, `shelf.rs`, `note.rs` | Water, To-do, Shelf and Scrap slides                               |
+| `timer.rs`                                   | Timer slide: stopwatch, countdown, Pomodoro                        |
+| `sysview.rs`                                 | System slide: CPU, memory, network, battery                        |
+| `accent.rs`, `slides.rs`                     | Accent colors; the slide list, order and visibility                |
+| `linktitle.rs`                               | Page titles for links pasted into Scrap                            |
 | `i18n.rs`                                    | UI language: English text as the key, Indonesian table             |
 | `clipboard.rs`                               | Clipboard history slide and clipboard listener                     |
 | `ics.rs`, `calendar.rs`                      | iCalendar reader (time zones, recurring events), calendar feed, Agenda slide |
@@ -120,7 +154,7 @@ The executable is created at `target\release\hesewake-notch.exe`. Japanese romaj
 
 ---
 
-## <img src="https://api.iconify.design/lucide/plug.svg?color=%23ff453a" width="20" align="top"> Extensions
+## <img src="https://api.iconify.design/lucide/plug.svg?color=%235a96ff" width="20" align="top"> Extensions
 
 Extensions are small programs that run next to the notch and add a slide, toasts or a status. They talk to the notch over a
 local pipe that only your Windows user can open, and the notch draws everything they show. They are off until you switch
@@ -129,7 +163,7 @@ them on in *Settings > Extensions*. The protocol is in [`docs/extensions.md`](do
 
 ---
 
-## <img src="https://api.iconify.design/lucide/database.svg?color=%23ff453a" width="20" align="top"> Your data
+## <img src="https://api.iconify.design/lucide/database.svg?color=%235a96ff" width="20" align="top"> Your data
 
 Everything is saved as plain text in `%APPDATA%\hesewake-notch`:
 
@@ -137,14 +171,14 @@ Everything is saved as plain text in `%APPDATA%\hesewake-notch`:
 | ------------- | ---------------------------------------- |
 | `todo.txt`    | To-do items                              |
 | `water.txt`   | Water intake, goal and reminder settings |
-| `shelf.txt`   | Files on the Ledge                       |
+| `shelf.txt`   | Files on the Shelf                       |
 | `notepad.txt` | Scrap note                               |
 
 Right click the notch for water options and to exit the app.
 
 ---
 
-## <img src="https://api.iconify.design/lucide/scale.svg?color=%23ff453a" width="20" align="top"> License
+## <img src="https://api.iconify.design/lucide/scale.svg?color=%235a96ff" width="20" align="top"> License
 
 Released under the [MIT License](LICENSE).
 
@@ -160,6 +194,6 @@ The embedded font is **Instrument Sans**, used under its own open font license.
 
 <div align="center">
 
-Made by **Commonly Works**
+A fork of Poch by **Commonly Works**, maintained by [dirga](https://github.com/dirgaastya)
 
 </div>
