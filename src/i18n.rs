@@ -322,6 +322,10 @@ const ID_TEXT: &[(&str, &str)] = &[
     // To-do
     ("Tap Add Task to create a task", "Ketuk Tambah untuk membuat tugas"),
     ("Todo|List", "Daftar |Tugas"),
+    ("Fullscreen apps", "Aplikasi layar penuh"),
+    ("Hold toasts over fullscreen apps", "Tahan toast di atas aplikasi layar penuh"),
+    ("Lyrics in fullscreen", "Lirik di layar penuh"),
+    ("Keep the lyric line over games and video", "Tetap tampilkan lirik di atas game dan video"),
     ("Type a task. Add \"fri 14:00\" for a reminder", "Ketik tugas. Tambah \"jum 14:00\" untuk pengingat"),
     ("Late", "Telat"),
     ("Tomorrow", "Besok"),

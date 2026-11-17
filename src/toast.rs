@@ -107,9 +107,45 @@ pub(crate) fn pop(t: f32) -> f32 {
     1.0 - (-8.0 * t).exp() * (14.0 * t).cos()
 }
 
+/// Quiet times (game mode over a fullscreen app) hold back these toasts. What stays: low battery, the privacy warning,
+/// a failed app launch (the user just clicked), prayer and meeting reminders, timers, update results, and the
+/// microphone hotkey's own feedback.
+fn quiet_holds(kind: &ToastKind) -> bool {
+    match kind {
+        ToastKind::Charging { .. }
+        | ToastKind::Unplugged { .. }
+        | ToastKind::Bluetooth { .. }
+        | ToastKind::Notification { .. }
+        | ToastKind::Downloaded { .. }
+        | ToastKind::Ext { .. }
+        | ToastKind::Water
+        | ToastKind::Todo { .. } => true,
+        ToastKind::Hud { kind, .. } => !matches!(kind, HudKind::Mic(..)),
+        ToastKind::LowBattery { .. }
+        | ToastKind::NotifOpenFailed { .. }
+        | ToastKind::Privacy { .. }
+        | ToastKind::Prayer { .. }
+        | ToastKind::Timer { .. }
+        | ToastKind::Meeting { .. }
+        | ToastKind::Update(_) => false,
+    }
+}
+
 impl App {
+    /// Is this toast held back right now (game mode over a fullscreen app)? Whoever raises a reminder checks this before
+    /// it counts the reminder as given, so a held one is not lost.
+    pub(crate) fn quiet_blocks(&self, kind: &ToastKind) -> bool {
+        self.cfg.game_mode && self.game_fs && quiet_holds(kind)
+    }
+
+    /// Forget the queued toasts that a quiet time holds back (it just started).
+    pub(crate) fn drop_held_toasts(&mut self) {
+        let queued = std::mem::take(&mut self.toast_q);
+        self.toast_q = queued.into_iter().filter(|k| !self.quiet_blocks(k)).collect();
+    }
+
     pub(crate) fn push_toast(&mut self, kind: ToastKind) {
-        if self.display_off {
+        if self.display_off || self.quiet_blocks(&kind) {
             return;
         }
         // HUD beruntun (mis. Caps Lock ditekan dua kali) menggantikan HUD yang sedang tampil, tanpa antre.

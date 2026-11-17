@@ -56,6 +56,8 @@ pub(crate) unsafe fn schedule(a: &mut App) {
         16 // artwork colour cross-fade on the Music slide
     } else if a.now_playing_bar() && !a.expanded() && !a.busy {
         33
+    } else if a.game_lyrics() && !a.expanded() {
+        66 // the lyric line over a fullscreen app: light on the game
     } else if a.splash_t().is_some() && !a.now_playing_bar() {
         a.eye.frame_ms(0.0)
     } else if a.idle() && a.idle_phase() == IdlePhase::Eye {
@@ -285,6 +287,14 @@ unsafe fn poll(a: &mut App) {
             a.fg = f;
             changed = true;
         }
+        // game mode: a fullscreen app on the notch's monitor, or one Windows reports as fullscreen / presenting
+        let gfs = (a.cfg.game_mode || a.cfg.game_lyrics) && (f == 2 || sys::user_fullscreen());
+        if gfs != a.game_fs {
+            a.game_fs = gfs;
+            // toasts that were waiting while the game started are dropped, not shown over it
+            a.drop_held_toasts();
+            changed = true;
+        }
     }
     // Window TOPMOST bisa "tenggelam" (Start menu, taskbar, app fullscreen, explorer restart, dll).
     // Cek tiap ~1 detik; kalau flag topmost hilang, pasang lagi tanpa merebut fokus.
@@ -485,7 +495,13 @@ impl App {
                 return true;
             }
             // the area of the notch as it is without the pointer (the thin line when it is already thin)
-            let fresh = if a.busy { (a.w.max(THIN.0) + 60.0, 10.0) } else { (a.w.max(IDLE.0) + 12.0, a.h.max(IDLE.1) + 6.0) };
+            let fresh = if a.game_lyrics() {
+                (a.w.max(THIN.0) + 12.0, a.h.max(THIN.1) + 6.0)
+            } else if a.busy {
+                (a.w.max(THIN.0) + 60.0, 10.0)
+            } else {
+                (a.w.max(IDLE.0) + 12.0, a.h.max(IDLE.1) + 6.0)
+            };
             let (zw, zh) = if a.dodging { a.dodge_zone } else { fresh };
             let inside = (x - CX).abs() <= zw / 2.0 && y >= 0.0 && y <= zh;
             if inside != a.dodging {
