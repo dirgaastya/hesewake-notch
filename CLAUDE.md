@@ -89,6 +89,8 @@ Versi: `0.MINOR.PATCH`. Satu rilis = satu cabang rilis → satu PR → merge com
    siapa pun). Tes tulisan interleaved di `snapshot.rs` sering konflik: pisahkan menjadi fungsi tes terpisah.
 3. Naikkan versi (`Cargo.toml`, `Cargo.lock`), tulis entri `## [X.Y.Z] - tanggal` di `CHANGELOG.md` (Indonesia, kredit kontributor dengan `@nama` dan nomor PR;
    workflow rilis mengambil catatan dari heading ini), jalankan tes lengkap, commit.
+   Untuk rilis yang terlihat pengguna, perbarui juga bagian **What's new** di `site/index.html` (bahasa Inggris, ringkas, tanpa janji yang belum ada) dan, bila ada kontributor baru,
+   bagian Contributors; kalau tampilan slide berubah, buat ulang gambar slide (lihat `site/README.md`). Situs dipublikasikan otomatis oleh workflow Pages saat `site/**` berubah di `main`.
 4. `git push -u origin <cabang>`, `gh pr create` (isi PR bahasa Inggris, jelaskan apa yang ditambahkan di atas PR kontributor), tunggu CI hijau (pakai Monitor, lihat §7).
 5. Untuk perubahan yang terlihat pengguna: bangun exe, jalankan sebagai **trial** untuk dicoba pemilik (lihat §6), lalu **tanya dulu**.
 6. Setelah pemilik menulis **"merge #N"**: `gh pr merge N -R dirgaastya/hesewake-notch --merge` (merge commit, **bukan squash**, supaya commit kontributor tetap atas
