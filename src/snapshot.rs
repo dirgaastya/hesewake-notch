@@ -3560,3 +3560,57 @@ fn notch_song_off_keeps_the_small_notch_idle() {
         a.cfg.notch_song = false;
     });
 }
+
+#[test]
+fn touching_the_volume_overlay_again_does_not_restart_its_fade_in() {
+    let mut a = test_app(1.0);
+    music_with_outputs(&mut a);
+    a.vol_state = (30, false);
+    // nothing showing: the first overlay fades in from zero
+    a.vol_touch();
+    assert!(a.vol_overlay_alpha() < 0.5, "a fresh overlay fades in");
+    // showing at full opacity: another wheel notch, click or WM_VOLUME must not drop it back to zero
+    a.vol_t = Instant::now() - Duration::from_millis(400);
+    let before = a.vol_overlay_alpha();
+    assert!(before > 0.99, "the overlay is fully shown after 0.4 s");
+    a.vol_state = (32, false);
+    a.vol_touch();
+    assert!(a.vol_overlay_alpha() > 0.99, "touching it again keeps it at full opacity (was {before})");
+    assert!(a.vol_t.elapsed() < Duration::from_millis(300), "and it lives about as long as a new one");
+}
+
+#[test]
+fn the_volume_overlay_takes_over_from_the_device_overlay_without_a_gap() {
+    let mut a = test_app(1.0);
+    music_with_outputs(&mut a);
+    a.out_pick("hp");
+    a.out_t = Instant::now() - Duration::from_millis(400);
+    assert!(a.overlay_showing());
+    a.vol_state = (40, false);
+    a.vol_touch();
+    assert!(a.vol_t > a.out_t, "the volume overlay is the newer one");
+    assert!(a.vol_overlay_alpha() > 0.99, "it replaces the device overlay at full opacity");
+    // and the other way round
+    a.out_touch();
+    assert!(a.out_t > a.vol_t);
+    assert!(music::overlay_alpha(a.out_t.elapsed().as_secs_f32()) > 0.99);
+}
+
+#[test]
+fn overlay_alpha_fades_in_then_out_and_ends() {
+    assert_eq!(music::overlay_alpha(0.0), 0.0);
+    assert!(music::overlay_alpha(0.05) > 0.4 && music::overlay_alpha(0.05) < 0.6);
+    assert_eq!(music::overlay_alpha(0.5), 1.0);
+    assert!(music::overlay_alpha(1.35) < 0.6);
+    assert_eq!(music::overlay_alpha(1.5), 0.0);
+    assert!(!test_app(1.0).overlay_showing(), "nothing is showing at the start");
+}
+
+#[test]
+fn no_overlay_is_left_over_the_buttons_after_it_ends() {
+    let mut a = test_app(1.0);
+    music_with_outputs(&mut a);
+    a.vol_state = (64, false);
+    a.vol_t = Instant::now() - Duration::from_millis(1600);
+    assert!(!a.vol_overlay_active(), "the overlay is over after 1.5 s");
+}

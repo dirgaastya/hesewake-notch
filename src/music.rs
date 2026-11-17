@@ -773,15 +773,27 @@ impl App {
 
     /// 0..1: seberapa terlihat indikator volume (muncul cepat, memudar di akhir); 0 bila tidak aktif.
     pub(crate) fn vol_overlay_alpha(&self) -> f32 {
-        let e = self.vol_t.elapsed().as_secs_f32();
-        if e >= 1.5 {
-            return 0.0;
-        }
-        (e / 0.1).min(1.0) * (1.0 - ((e - 1.2) / 0.3).clamp(0.0, 1.0))
+        overlay_alpha(self.vol_t.elapsed().as_secs_f32())
+    }
+
+    /// Is one of the two overlays over the controls row (volume, or the output device) still showing?
+    pub(crate) fn overlay_showing(&self) -> bool {
+        self.vol_t.elapsed().min(self.out_t.elapsed()).as_secs_f32() < OVERLAY_LIFE
+    }
+
+    /// Start (or extend) the volume overlay. When an overlay is already showing, the new one takes over at full opacity:
+    /// restarting the fade-in from zero would uncover the buttons below for a moment, and that was the flicker.
+    pub(crate) fn vol_touch(&mut self) {
+        self.vol_t = overlay_stamp(self.overlay_showing());
+    }
+
+    /// The same for the output-device overlay.
+    pub(crate) fn out_touch(&mut self) {
+        self.out_t = overlay_stamp(self.overlay_showing());
     }
 
     pub(crate) fn vol_overlay_active(&self) -> bool {
-        self.expanded() && self.is_slide(SlideId::Music) && self.vol_t.elapsed().min(self.out_t.elapsed()).as_secs_f32() < 1.5
+        self.expanded() && self.is_slide(SlideId::Music) && self.overlay_showing()
     }
 
     /// Indikator volume yang menimpa baris kontrol: ikon speaker, bar, persen.
@@ -869,66 +881,12 @@ impl App {
         if let Some((cur, _)) = audio::get() {
             if let Some((vol, muted)) = audio::adjust(target - cur) {
                 self.vol_state = ((vol * 100.0).round() as u8, muted);
-                self.vol_t = Instant::now();
+                self.vol_touch();
             }
         }
     }
 
-    /// Popover volume vertikal di atas tombol output: x, y, lebar, tinggi.
-    fn vol_pop_rect() -> (f32, f32, f32, f32) {
-        (output::BTN.0 - 13.0, 54.0, 26.0, 52.0)
-    }
-
-    /// Tampil saat kursor di tombol output atau di popover itu sendiri (dan daftar perangkat tidak terbuka).
-    pub(crate) fn vol_pop_visible(&self) -> bool {
-        if !(self.expanded() && self.is_slide(SlideId::Music)) || self.lyric_mode || self.out_list_shown() || self.outs.list.is_empty() {
-            return false;
-        }
-        let (px, py, pw, _) = Self::vol_pop_rect();
-        self.cursor_canvas().is_some_and(|(x, y)| {
-            in_rect(x, y, px - 4.0, py - 4.0, pw + 8.0, (output::BTN.1 - 10.0) - (py - 4.0))
-                || ((x - output::BTN.0).powi(2) + (y - output::BTN.1).powi(2)).sqrt() <= 18.0
-        })
-    }
-
-    pub(crate) fn vol_pop_hit(&self, x: f32, y: f32) -> bool {
-        let (px, py, pw, ph) = Self::vol_pop_rect();
-        self.vol_pop_visible() && in_rect(x, y, px, py, pw, ph)
-    }
-
-    /// Klik di popover: atur volume master sesuai tinggi klik.
-    pub(crate) fn vol_pop_set(&mut self, y: f32) {
-        let (_, py, _, ph) = Self::vol_pop_rect();
-        let target = (((py + ph - 8.0) - y) / (ph - 16.0)).clamp(0.0, 1.0);
-        if let Some((cur, _)) = audio::get() {
-            if let Some((vol, muted)) = audio::adjust(target - cur) {
-                self.vol_state = ((vol * 100.0).round() as u8, muted);
-                self.vol_t = Instant::now();
-            }
-        }
-    }
-
-    fn draw_vol_pop(&self, g: &mut Gfx, ox: f32, al: f32) {
-        if !self.vol_pop_visible() {
-            return;
-        }
-        let (px, py, pw, ph) = Self::vol_pop_rect();
-        let (vol, muted) = audio::get().unwrap_or((0.0, false));
-        let x = px + ox;
-        g.fill(&rrect(x, py, pw, ph, 13.0), &paint(14, 20, 40, 0.96 * al));
-        g.stroke(&rrect(x + 0.5, py + 0.5, pw - 1.0, ph - 1.0, 12.5), &paint(255, 255, 255, 0.14 * al), 1.0);
-        let (cx, top, bot) = (x + pw / 2.0, py + 8.0, py + ph - 8.0);
-        g.fill(&rrect(cx - 2.0, top, 4.0, bot - top, 2.0), &paint(255, 255, 255, 0.18 * al));
-        let lvl = if muted { 0.0 } else { vol.clamp(0.0, 1.0) };
-        let fy = bot - (bot - top) * lvl;
-        if lvl > 0.0 {
-            let c = g.acc.main;
-            g.fill(&rrect(cx - 2.0, fy, 4.0, bot - fy, 2.0), &paint(c[0], c[1], c[2], al));
-        }
-        g.circle(cx, fy, 5.0, &paint(255, 255, 255, al));
-    }
-
-    /// Tombol, bar progres, dan popover di slide Music yang bisa diklik (kursor tangan).
+    /// Tombol, bar progres, dan bar volume di slide Music yang bisa diklik (kursor tangan).
     pub(crate) fn music_hand(&self, x: f32, y: f32) -> bool {
         if self.lyric_mode {
             return false;
@@ -938,7 +896,6 @@ impl App {
             || (self.media.dur > 0 && in_rect(x, y, MX, 88.0, MW, 16.0))
             || d(MCX + 92.0, MCY) < 14.0
             || d(output::BTN.0, output::BTN.1) < 14.0
-            || self.vol_pop_hit(x, y)
             || self.vol_bar_hit(x, y)
     }
 
@@ -1087,7 +1044,6 @@ impl App {
             g.poly(&[(cx - 4.0 * k, cy - 8.0 * k), (cx - 4.0 * k, cy + 8.0 * k), (cx + 8.0 * k, cy)], &blk);
         }
         self.draw_out_button(g, ox, al);
-        self.draw_vol_pop(g, ox, al);
         // the newer of the two overlays (volume, or the output device after a switch)
         if self.out_t > self.vol_t {
             self.draw_out_overlay(g, ox, al);
@@ -1123,5 +1079,29 @@ mod source_tests {
         assert_eq!(friendly_source("Chrome"), "Chrome");
         assert_eq!(friendly_source("Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic"), "ZuneMusic");
         assert_eq!(friendly_source(""), "");
+    }
+}
+
+/// How long an overlay over the controls row stays (seconds).
+pub(crate) const OVERLAY_LIFE: f32 = 1.5;
+/// Fade-in time of an overlay that appears over a bare controls row (seconds).
+const OVERLAY_FADE_IN: f32 = 0.1;
+
+/// 0..1: opacity of an overlay `e` seconds after its timestamp (quick fade-in, fade-out in the last 0.3 s).
+pub(crate) fn overlay_alpha(e: f32) -> f32 {
+    if e >= OVERLAY_LIFE {
+        return 0.0;
+    }
+    (e / OVERLAY_FADE_IN).min(1.0) * (1.0 - ((e - (OVERLAY_LIFE - 0.3)) / 0.3).clamp(0.0, 1.0))
+}
+
+/// Timestamp for an overlay that is shown now. With another overlay already showing it is backdated past the fade-in,
+/// so it starts at full opacity.
+pub(crate) fn overlay_stamp(already_showing: bool) -> Instant {
+    let now = Instant::now();
+    if already_showing {
+        now.checked_sub(Duration::from_secs_f32(OVERLAY_FADE_IN)).unwrap_or(now)
+    } else {
+        now
     }
 }

@@ -250,7 +250,7 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                             if let Some((vol, muted)) = audio::adjust(audio::wheel_step(d)) {
                                 // Notch sedang terbuka: indikator di dalam slide (toast dibatalkan saat hover).
                                 a.vol_state = ((vol * 100.0).round() as u8, muted);
-                                a.vol_t = Instant::now();
+                                a.vol_touch();
                                 a.last = Instant::now();
                                 present(a);
                                 schedule(a);
@@ -470,7 +470,7 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
             with_app(|a| {
                 // indikator di slide Music (bila terbuka) + HUD di notch kecil
                 a.vol_state = (pct, muted);
-                a.vol_t = Instant::now();
+                a.vol_touch();
                 if a.cfg.hud_volume {
                     a.push_toast(ToastKind::Hud { kind: HudKind::Volume(pct, muted), on: true });
                 }
