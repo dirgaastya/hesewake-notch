@@ -77,6 +77,8 @@ pub(crate) enum ToastKind {
     Timer { title: String, label: String },
     /// A meeting starts now: title, start (unix seconds) and its Join link.
     Meeting { title: String, at: i64, link: Option<String> },
+    /// A task with a due time came due: its text, the due time (unix seconds) and how many more came due with it.
+    Todo { text: String, due: i64, more: u32 },
     /// A newer release is out, or the answer to "Check for updates".
     Update(update::Note),
     /// A download finished: full path of the file, with Open / Show in folder (downloads.rs).
@@ -146,6 +148,7 @@ impl App {
             ToastKind::Water => 12.0,
             ToastKind::Timer { .. } => 6.0,
             ToastKind::Meeting { .. } => 15.0,
+            ToastKind::Todo { .. } => 8.0,
             ToastKind::Update(update::Note::Available(_)) => 10.0,
             ToastKind::Update(update::Note::Downloading(_)) => 20.0,
             ToastKind::Update(update::Note::DownloadFailed(_)) => 12.0,
@@ -268,6 +271,10 @@ impl App {
             ToastKind::LowBattery { pct } => (ACCENT, tr("Battery low").to_string(), tr("Plug in your charger").to_string(), *pct as f32 / 100.0, Some(format!("{}%", pct))),
             ToastKind::Timer { title, label } => ([255, 170, 60], title.clone(), label.clone(), 1.0, None),
             ToastKind::Ext { title, sub, count, .. } => (g.acc.bright, title.clone(), sub.clone(), 1.0, (*count > 1).then(|| count.to_string())),
+            ToastKind::Todo { text, due, more } => {
+                let sub = fill(tr("Due \u{b7} {}"), &[&calendar::hhmm(*due, calendar::local_offset())]);
+                (g.acc.bright, text.clone(), sub, 1.0, (*more > 0).then(|| format!("+{more}")))
+            }
             ToastKind::NotifOpenFailed { app } => (GREY, tr("Couldn't open app").to_string(), app.clone(), 1.0, None),
             ToastKind::Bluetooth { name, pct, connected } => {
                 let s = match (connected, pct) {
@@ -311,6 +318,11 @@ impl App {
             ToastKind::Prayer { .. } => g.icon_crescent(rcx, cy, 18.0 * sc, &ic),
             ToastKind::Timer { .. } => g.icon_bell(rcx, cy, 17.0 * sc, (t * 22.0).sin() * (1.0 - t / 1.5).max(0.0), &ic),
             ToastKind::Ext { .. } => g.slide_icon(SlideId::Ext(0), rcx, cy, 17.0 * sc, &ic),
+            ToastKind::Todo { .. } => {
+                // a check mark
+                g.line(rcx - 5.5 * sc, cy + 0.5 * sc, rcx - 1.5 * sc, cy + 4.2 * sc, 2.3, &ic);
+                g.line(rcx - 1.5 * sc, cy + 4.2 * sc, rcx + 5.8 * sc, cy - 4.2 * sc, 2.3, &ic);
+            }
             ToastKind::NotifOpenFailed { .. } => g.icon_bell(rcx, cy, 17.0 * sc, 0.0, &ic),
             ToastKind::Notification { .. } | ToastKind::Hud { .. } | ToastKind::Privacy { .. } | ToastKind::Water | ToastKind::Meeting { .. } | ToastKind::Update(_) | ToastKind::Downloaded { .. } => {}
         }

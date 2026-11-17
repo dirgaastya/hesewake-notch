@@ -105,10 +105,10 @@ pub(crate) unsafe fn click(x: f32, y: f32) {
                                     schedule(a);
                                 }
                             } else {
-                                a.todos[ri].0 = !a.todos[ri].0;
-                                if a.todos[ri].0 {
+                                a.todos[ri].done = !a.todos[ri].done;
+                                if a.todos[ri].done {
                                     a.todo_pop = Some((ri, Instant::now()));
-                                    if a.todos.iter().all(|t| t.0) {
+                                    if a.todos.iter().all(|t| t.done) {
                                         a.todo_all = Some(Instant::now());
                                     }
                                     schedule(a);
