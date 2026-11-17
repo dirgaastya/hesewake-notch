@@ -820,7 +820,9 @@ fn slide_hotkey_opens_and_closes() {
 fn with_clips(a: &mut App, clips: &[(&str, u64)]) {
     let now = Instant::now();
     for (s, ago) in clips {
-        a.clips.push(s, now - Duration::from_secs(*ago));
+        // `Instant` counts from boot: on a freshly started PC `now - 3 days` underflows and panics.
+        let at = now.checked_sub(Duration::from_secs(*ago)).unwrap_or(now);
+        a.clips.push(s, at);
     }
 }
 
