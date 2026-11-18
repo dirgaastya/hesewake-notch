@@ -41,6 +41,8 @@ pub(crate) enum Rid {
     Dnd,
     /// Ctrl+Alt+D toggles Do Not Disturb.
     DndHotkey,
+    /// Ctrl+Alt+Space: the quick launcher.
+    Launcher,
     Weather,
     City,
     Prayer,
@@ -67,7 +69,7 @@ pub(crate) enum Rid {
 impl Rid {
     /// Every setting (a test checks each one has a row in the Settings window).
     #[cfg(test)]
-    pub(crate) const ALL: [Rid; 39] = [
+    pub(crate) const ALL: [Rid; 40] = [
         Rid::Minimal,
         Rid::Glow,
         Rid::NotchSong,
@@ -92,6 +94,7 @@ impl Rid {
         Rid::MicMute,
         Rid::Dnd,
         Rid::DndHotkey,
+        Rid::Launcher,
         Rid::Weather,
         Rid::City,
         Rid::Prayer,
@@ -130,6 +133,7 @@ impl App {
             Rid::MicMute => self.cfg.mic_hotkey,
             Rid::Dnd => self.cfg.dnd,
             Rid::DndHotkey => self.cfg.dnd_hotkey,
+            Rid::Launcher => self.cfg.launcher,
             Rid::Weather => self.cfg.weather_on,
             Rid::Prayer => self.cfg.prayer_on,
             Rid::Glow => self.cfg.glow,
@@ -215,6 +219,13 @@ impl App {
             }
             Rid::UpdateCheck => self.cfg.update_check = !self.cfg.update_check,
             Rid::Dnd => self.set_dnd(!self.cfg.dnd),
+            Rid::Launcher => {
+                self.cfg.launcher = !self.cfg.launcher;
+                hotkeys::set_launcher_hotkey(self.hwnd, self.cfg.launcher);
+                if !self.cfg.launcher {
+                    self.launcher_close(true);
+                }
+            }
             Rid::DndHotkey => {
                 self.cfg.dnd_hotkey = !self.cfg.dnd_hotkey;
                 hotkeys::set_dnd_hotkey(self.hwnd, self.cfg.dnd_hotkey);

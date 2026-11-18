@@ -47,6 +47,8 @@ fn test_app(s: f32) -> App {
         last_min: 0,
         hover: false,
         busy: false,
+        launcher: None,
+        launcher_freq: launcher::Frecency::default(),
         game_fs: false,
         minimal: false,
         toast: None,
@@ -4171,4 +4173,194 @@ fn do_not_disturb_settings_flip_in_the_settings_window() {
     assert!(a.opt_on(opts::Rid::DndHotkey), "the key is on by default");
     a.opt_press(opts::Rid::DndHotkey);
     assert!(!a.opt_on(opts::Rid::DndHotkey));
+}
+
+// ---------------------------------------------------------------- quick launcher
+fn launcher_apps() {
+    let app = |n: &str| (n.to_string(), format!("C:/Start/{n}.lnk"));
+    launcher::set_test_apps(vec![
+        app("Notepad"),
+        app("Notes"),
+        app("Visual Studio Code"),
+        app("Google Chrome"),
+        app("Calculator"),
+        app("A very long application name that cannot possibly fit in one row of the launcher"),
+    ]);
+}
+
+fn type_in(a: &mut App, s: &str) {
+    for c in s.chars() {
+        a.launcher_char(c as u32);
+    }
+}
+
+#[test]
+fn snap_launcher() {
+    for s in SCALES {
+        shot("launcher-empty", s, |a| {
+            launcher_apps();
+            a.launcher_open_now();
+        });
+        shot("launcher-results", s, |a| {
+            launcher_apps();
+            a.launcher_open_now();
+            type_in(a, "note");
+            a.launcher_key(0x28);
+        });
+        shot("launcher-calc", s, |a| {
+            launcher_apps();
+            a.launcher_open_now();
+            type_in(a, "12*(3+4)");
+        });
+        shot("launcher-long", s, |a| {
+            launcher_apps();
+            a.launcher_open_now();
+            type_in(a, "a very long");
+            a.launcher_key(0x28);
+        });
+        shot("launcher-long-query", s, |a| {
+            launcher_apps();
+            a.launcher_open_now();
+            type_in(a, "how to center a div in css when the parent is a flex container and more");
+        });
+    }
+    let _lang = i18n::restore_on_drop();
+    shot("id-launcher-results", 1.0, |a| {
+        a.cfg.lang = i18n::ID;
+        i18n::set(i18n::ID);
+        launcher_apps();
+        a.launcher_open_now();
+        type_in(a, "not");
+    });
+    shot("id-launcher-empty", 1.0, |a| {
+        a.cfg.lang = i18n::ID;
+        i18n::set(i18n::ID);
+        launcher_apps();
+        a.launcher_open_now();
+    });
+}
+
+#[test]
+fn the_launcher_keeps_the_notch_open_and_closes_on_escape() {
+    let mut a = test_app(1.0);
+    launcher_apps();
+    assert!(!a.expanded());
+    a.launcher_toggle();
+    assert!(a.launcher.is_some() && a.expanded(), "open, without the pointer");
+    a.launcher_toggle();
+    assert!(a.launcher.is_none(), "the hotkey again closes it");
+    a.launcher_toggle();
+    type_in(&mut a, "abc");
+    a.launcher_char(27);
+    assert!(a.launcher.is_none(), "Esc closes it");
+    a.cfg.launcher = false;
+    a.launcher_toggle();
+    assert!(a.launcher.is_none(), "off in Settings: the hotkey does nothing");
+}
+
+#[test]
+fn enter_opens_the_chosen_app_and_remembers_it() {
+    let mut a = test_app(1.0);
+    launcher_apps();
+    launcher::done();
+    a.launcher_toggle();
+    type_in(&mut a, "note");
+    assert_eq!(a.launcher.as_ref().unwrap().hits[0].title, "Notes");
+    a.launcher_key(0x28); // down: Notepad
+    a.launcher_char(13);
+    assert_eq!(launcher::done(), ["open:C:/Start/Notepad.lnk"]);
+    assert!(a.launcher.is_none(), "it closes after running");
+    assert_eq!(a.launcher_freq.count("Notepad"), 1);
+    // next time, with no text, it is offered first
+    a.launcher_toggle();
+    assert_eq!(a.launcher.as_ref().unwrap().hits[0].title, "Notepad");
+    type_in(&mut a, "no");
+    assert_eq!(a.launcher.as_ref().unwrap().hits[0].title, "Notepad", "and ahead of Notes");
+}
+
+#[test]
+fn the_arrows_move_the_selection_and_the_list_scrolls_with_it() {
+    let mut a = test_app(1.0);
+    launcher::set_test_apps((0..9).map(|i| (format!("App {i}"), format!("{i}.lnk"))).collect());
+    a.launcher_toggle();
+    type_in(&mut a, "app");
+    let n = a.launcher.as_ref().unwrap().hits.len();
+    assert_eq!(n, 8);
+    assert_eq!(a.launcher.as_ref().unwrap().first(), 0);
+    for _ in 0..20 {
+        a.launcher_key(0x28);
+    }
+    let l = a.launcher.as_ref().unwrap();
+    assert_eq!(l.sel, n - 1, "stops at the last one");
+    assert_eq!(l.first(), n - launcher::VISIBLE, "the selected row is on the canvas");
+    for _ in 0..20 {
+        a.launcher_key(0x26);
+    }
+    assert_eq!(a.launcher.as_ref().unwrap().sel, 0);
+    assert!(!a.launcher_key(0x41), "other keys are not used");
+    // editing keys
+    a.launcher_key(0x24); // Home
+    a.launcher_key(0x2E); // Delete the first letter
+    assert_eq!(a.launcher.as_ref().unwrap().field.text(), "pp");
+    a.launcher_char(8); // Backspace at the start: nothing
+    assert_eq!(a.launcher.as_ref().unwrap().field.text(), "pp");
+}
+
+#[test]
+fn a_calculation_is_copied_and_the_web_row_opens_a_search() {
+    let mut a = test_app(1.0);
+    launcher_apps();
+    launcher::done();
+    sys::opened();
+    a.launcher_toggle();
+    type_in(&mut a, "2+2*3");
+    a.launcher_char(13);
+    assert_eq!(launcher::done(), ["copy:8"]);
+    assert_eq!(a.launcher_freq.count("= 8"), 0, "results are not remembered");
+    a.launcher_toggle();
+    type_in(&mut a, "rust lang");
+    let n = a.launcher.as_ref().unwrap().hits.len();
+    a.launcher_key(0x28);
+    assert_eq!(a.launcher.as_ref().unwrap().sel, n - 1.min(n), "the web row is the only result");
+    a.launcher_char(13);
+    assert_eq!(sys::opened(), ["https://www.google.com/search?q=rust+lang"]);
+    // a typed address is opened as it is
+    a.launcher_toggle();
+    type_in(&mut a, "example.com");
+    a.launcher_char(13);
+    assert_eq!(sys::opened(), ["https://example.com"]);
+}
+
+#[test]
+fn clicking_a_result_runs_it_and_a_click_elsewhere_does_nothing() {
+    let mut a = test_app(1.0);
+    launcher_apps();
+    launcher::done();
+    a.launcher_toggle();
+    type_in(&mut a, "calc");
+    a.launcher_click(LX + 40.0, launcher::IN_Y + 5.0);
+    assert!(a.launcher.is_some() && launcher::done().is_empty(), "a click on the input does not run anything");
+    a.launcher_click(LX + 40.0, launcher::ROW_Y + 5.0);
+    assert_eq!(launcher::done(), ["open:C:/Start/Calculator.lnk"]);
+    assert!(a.launcher.is_none());
+}
+
+#[test]
+fn commands_run_from_the_launcher() {
+    let mut a = test_app(1.0);
+    launcher_apps();
+    a.launcher_toggle();
+    type_in(&mut a, "do not dist");
+    assert_eq!(a.launcher.as_ref().unwrap().hits[0].act, launcher::Act::Cmd(launcher::Cmd::Dnd));
+    assert!(!a.cfg.dnd);
+    a.launcher_char(13);
+    assert!(a.cfg.dnd, "Do Not Disturb is on");
+    a.cfg.dnd = false;
+    // a slide by name
+    a.launcher_toggle();
+    type_in(&mut a, "water");
+    a.launcher_char(13);
+    assert_eq!(a.cur_id(), SlideId::Water);
+    assert!(a.expanded(), "the slide is shown for a while");
+    assert!(a.launcher.is_none());
 }

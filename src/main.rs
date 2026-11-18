@@ -82,6 +82,7 @@ mod icon;
 mod icons;
 mod input;
 mod keys;
+mod launcher;
 mod lyricview;
 mod korean;
 mod lyrics;
@@ -193,6 +194,9 @@ struct App {
     ext: extapp::ExtState,
     hover: bool,
     busy: bool,
+    /// The quick launcher while it is open (it replaces the slides), and what was opened from it most.
+    launcher: Option<launcher::Launcher>,
+    launcher_freq: launcher::Frecency,
     /// A fullscreen app is open (Windows says so, or it covers the notch's monitor): drives game mode.
     game_fs: bool,
     /// Mode "Minimal notch": garis tipis saat tidak ada musik, buka dengan hover.
@@ -385,6 +389,7 @@ impl App {
     /// Open for a reason other than the pointer: typing, a drag, a peek (hotkey, notification) or the pinned lyrics.
     fn held_open(&self) -> bool {
         self.editing
+            || self.launcher.is_some()
             // menekan tombol di toast Water (Snooze/Drank) bukan gestur geser: toast tidak boleh dibatalkan sebelum klik selesai
             || (self.drag.is_some() && !self.toast_has_button())
             || self.pinned_open()
@@ -552,6 +557,7 @@ fn main() -> Result<()> {
         hotkeys::set_slide_hotkeys(hwnd.0 as isize, cfg0.slide_hotkeys);
         hotkeys::set_mic_hotkey(hwnd.0 as isize, cfg0.mic_hotkey);
         hotkeys::set_dnd_hotkey(hwnd.0 as isize, cfg0.dnd_hotkey);
+        hotkeys::set_launcher_hotkey(hwnd.0 as isize, cfg0.launcher);
         clipboard::listen(hwnd.0 as isize);
         let cal_link = calendar::load_link();
         calendar::start(hwnd.0 as isize, cal_link.clone());
@@ -642,6 +648,8 @@ fn main() -> Result<()> {
             ext: extapp::ExtState::default(),
             hover: false,
             busy: is_busy(hwnd, cfg.busy_on_maximized, &mon),
+            launcher: None,
+            launcher_freq: launcher::Frecency::load(),
             game_fs: false,
             minimal: cfg.minimal,
             toast: None,
