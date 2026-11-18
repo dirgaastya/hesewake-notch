@@ -110,20 +110,6 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
             let k = scale::current();
             let x = (lp.0 & 0xffff) as i16 as f32 / k;
             let y = ((lp.0 >> 16) & 0xffff) as i16 as f32 / k;
-            // the launcher takes the click itself: no swipe, no slide underneath
-            let mut taken = false;
-            with_app(|a| {
-                if a.launcher.is_some() && a.ready() {
-                    a.launcher_click(x, y);
-                    a.last = Instant::now();
-                    present(a);
-                    schedule(a);
-                    taken = true;
-                }
-            });
-            if taken {
-                return LRESULT(0);
-            }
             let _ = SetCapture(hwnd);
 
             // Press inside the note card while editing: caret placement / drag-selection,
@@ -347,14 +333,7 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
             let ctrl = (GetKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) != 0;
             let mut handled = false;
             with_app(|a| {
-                if a.launcher.is_some() {
-                    handled = a.launcher_key(vk, ctrl);
-                    if handled {
-                        a.last = Instant::now();
-                        present(a);
-                        schedule(a);
-                    }
-                } else if a.editing && a.note_mode {
+                if a.editing && a.note_mode {
                     handled = a.note_key(vk, shift, ctrl);
                 }
             });
@@ -367,13 +346,6 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
         WM_CHAR => {
             let c = wp.0 as u32;
             with_app(|a| {
-                if a.launcher.is_some() {
-                    a.launcher_char(c);
-                    a.last = Instant::now();
-                    present(a);
-                    schedule(a);
-                    return;
-                }
                 if !a.editing {
                     if c == 'h' as u32 || c == 'H' as u32 {
                         toggle_idle_phase(a);
@@ -410,13 +382,6 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
         WM_KILLFOCUS => {
             with_app(|a| {
                 a.nv.sel_drag = false;
-                if a.launcher.is_some() {
-                    // the keyboard went elsewhere (a click outside, Alt+Tab): the launcher has nothing to type into
-                    a.launcher_close(false);
-                    a.last = Instant::now();
-                    present(a);
-                    schedule(a);
-                }
                 if a.editing {
                     a.finish_edit(false, false);
                     a.last = Instant::now();

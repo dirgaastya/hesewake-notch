@@ -391,7 +391,6 @@ impl App {
     /// Open for a reason other than the pointer: typing, a drag, a peek (hotkey, notification) or the pinned lyrics.
     fn held_open(&self) -> bool {
         self.editing
-            || self.launcher.is_some()
             // menekan tombol di toast Water (Snooze/Drank) bukan gestur geser: toast tidak boleh dibatalkan sebelum klik selesai
             || (self.drag.is_some() && !self.toast_has_button())
             || self.pinned_open()

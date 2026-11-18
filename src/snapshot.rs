@@ -4195,64 +4195,70 @@ fn type_in(a: &mut App, s: &str) {
     }
 }
 
-#[test]
-fn snap_launcher() {
-    for s in SCALES {
-        shot("launcher-empty", s, |a| {
-            launcher_apps();
-            a.launcher_open_now();
-        });
-        shot("launcher-results", s, |a| {
-            launcher_apps();
-            a.launcher_open_now();
-            type_in(a, "note");
-            a.launcher_key(0x28, false);
-        });
-        shot("launcher-commands", s, |a| {
-            launcher_apps();
-            a.launcher_open_now();
-            type_in(a, "s");
-        });
-        shot("launcher-calc", s, |a| {
-            launcher_apps();
-            a.launcher_open_now();
-            type_in(a, "12*(3+4)");
-        });
-        shot("launcher-long", s, |a| {
-            launcher_apps();
-            a.launcher_open_now();
-            type_in(a, "a very long");
-            a.launcher_key(0x28, false);
-        });
-        shot("launcher-long-query", s, |a| {
-            launcher_apps();
-            a.launcher_open_now();
-            type_in(a, "how to center a div in css when the parent is a flex container and more");
-        });
-    }
-    let _lang = i18n::restore_on_drop();
-    shot("id-launcher-results", 1.0, |a| {
-        a.cfg.lang = i18n::ID;
-        i18n::set(i18n::ID);
-        launcher_apps();
-        a.launcher_open_now();
-        type_in(a, "not");
-    });
-    shot("id-launcher-empty", 1.0, |a| {
-        a.cfg.lang = i18n::ID;
-        i18n::set(i18n::ID);
-        launcher_apps();
-        a.launcher_open_now();
-    });
+/// Draw the open launcher at scale `s`, check it has content, and save it as `<name>@<percent>.png` when asked.
+fn launcher_shot(name: &str, s: f32, setup: impl FnOnce(&mut App)) {
+    let mut a = test_app(s);
+    launcher_apps();
+    a.launcher_open_now();
+    a.launcher.as_mut().unwrap().scale = s;
+    setup(&mut a);
+    launcher::launcher_render(&mut a);
+    let g = a.launcher.as_ref().unwrap().gfx.as_ref().expect("launcher canvas");
+    let opaque = g.pm.data().chunks_exact(4).filter(|p| p[3] == 255).count();
+    assert!(opaque as f32 > (g.pm.width() * g.pm.height()) as f32 * 0.98, "{name}: the window is drawn ({opaque} opaque pixels)");
+    let Some(dir) = std::env::var_os("SNAPSHOT_DIR") else { return };
+    std::fs::create_dir_all(&dir).expect("create snapshot folder");
+    let file = std::path::Path::new(&dir).join(format!("{name}@{}.png", (s * 100.0).round() as u32));
+    g.pm.save_png(&file).expect("save png");
 }
 
 #[test]
-fn the_launcher_keeps_the_notch_open_and_closes_on_escape() {
+fn snap_launcher() {
+    for s in SCALES {
+        launcher_shot("launcher-empty", s, |_| {});
+        launcher_shot("launcher-results", s, |a| {
+            type_in(a, "note");
+            a.launcher_key(0x28, false, false);
+        });
+        launcher_shot("launcher-commands", s, |a| type_in(a, "s"));
+        launcher_shot("launcher-calc", s, |a| type_in(a, "12*(3+4)"));
+        launcher_shot("launcher-long", s, |a| {
+            type_in(a, "a very long");
+            a.launcher_key(0x28, false, false);
+        });
+        launcher_shot("launcher-long-query", s, |a| {
+            type_in(a, "how to center a div in css when the parent is a flex container and more");
+        });
+        launcher_shot("launcher-apps-only", s, |a| {
+            type_in(a, "no");
+            a.launcher_key(0x09, false, false);
+        });
+        launcher_shot("launcher-no-results", s, |a| {
+            type_in(a, "zzz");
+            a.launcher_key(0x09, false, false);
+            a.launcher_key(0x09, false, false);
+        });
+    }
+    let _lang = i18n::restore_on_drop();
+    let id = |a: &mut App| {
+        a.cfg.lang = i18n::ID;
+        i18n::set(i18n::ID);
+    };
+    // the language is set before the window is built, so the labels are Indonesian
+    let mut a = test_app(1.0);
+    id(&mut a);
+    launcher_shot("id-launcher-results", 1.0, |a| type_in(a, "not"));
+    launcher_shot("id-launcher-empty", 1.0, |_| {});
+}
+
+#[test]
+fn the_launcher_is_its_own_window_and_closes_on_escape() {
     let mut a = test_app(1.0);
     launcher_apps();
     assert!(!a.expanded());
     a.launcher_toggle();
-    assert!(a.launcher.is_some() && a.expanded(), "open, without the pointer");
+    assert!(a.launcher.is_some());
+    assert!(!a.expanded(), "the notch does not open for it");
     a.launcher_toggle();
     assert!(a.launcher.is_none(), "the hotkey again closes it");
     a.launcher_toggle();
@@ -4265,6 +4271,51 @@ fn the_launcher_keeps_the_notch_open_and_closes_on_escape() {
 }
 
 #[test]
+fn the_window_is_just_the_input_until_there_is_something_to_show() {
+    let mut a = test_app(1.0);
+    launcher_apps();
+    a.launcher_toggle();
+    assert_eq!(a.launcher.as_ref().unwrap().hits.len(), 0);
+    launcher::launcher_render(&mut a);
+    let h = |a: &App| a.launcher.as_ref().unwrap().gfx.as_ref().unwrap().pm.height();
+    assert_eq!(h(&a), launcher::BAR_H as u32, "only the input");
+    type_in(&mut a, "note");
+    launcher::launcher_render(&mut a);
+    let rows = a.launcher.as_ref().unwrap().hits.len();
+    assert!(h(&a) > launcher::BAR_H as u32 + 100, "chips and {rows} results");
+    type_in(&mut a, "zzzz");
+    launcher::launcher_render(&mut a);
+    assert!(h(&a) > launcher::BAR_H as u32, "the chips stay while there is text");
+}
+
+#[test]
+fn the_chips_filter_the_results_and_tab_goes_through_them() {
+    use launcher::{Act, Filter};
+    let mut a = test_app(1.0);
+    launcher_apps();
+    a.launcher_toggle();
+    type_in(&mut a, "s");
+    let kinds = |a: &App| a.launcher.as_ref().unwrap().hits.iter().map(|h| std::mem::discriminant(&h.act)).collect::<std::collections::HashSet<_>>().len();
+    assert!(kinds(&a) >= 2, "all: commands and the web row at least");
+    a.launcher_key(0x09, false, false); // Tab: Apps
+    assert_eq!(a.launcher.as_ref().unwrap().filter, Filter::Apps);
+    assert!(a.launcher.as_ref().unwrap().hits.iter().all(|h| matches!(h.act, Act::Open(_))));
+    a.launcher_key(0x09, false, false); // Commands
+    assert!(a.launcher.as_ref().unwrap().hits.iter().all(|h| matches!(h.act, Act::Cmd(_))));
+    a.launcher_key(0x09, false, false); // Web
+    assert!(a.launcher.as_ref().unwrap().hits.iter().all(|h| matches!(h.act, Act::Url(_) | Act::Copy(_))));
+    a.launcher_key(0x09, false, false); // around to All
+    assert_eq!(a.launcher.as_ref().unwrap().filter, Filter::All);
+    a.launcher_key(0x09, false, true); // Shift+Tab: back to Web
+    assert_eq!(a.launcher.as_ref().unwrap().filter, Filter::Web);
+    // a click on a chip does the same
+    launcher::launcher_render(&mut a);
+    let (cx, cw) = a.launcher.as_ref().unwrap().chip_rects()[1];
+    a.launcher_click(cx + cw / 2.0, launcher::CHIP_Y + 5.0);
+    assert_eq!(a.launcher.as_ref().unwrap().filter, Filter::Apps);
+}
+
+#[test]
 fn enter_opens_the_chosen_app_and_remembers_it() {
     let mut a = test_app(1.0);
     launcher_apps();
@@ -4272,7 +4323,7 @@ fn enter_opens_the_chosen_app_and_remembers_it() {
     a.launcher_toggle();
     type_in(&mut a, "note");
     assert_eq!(a.launcher.as_ref().unwrap().hits[0].title, "Notes");
-    a.launcher_key(0x28, false); // down: Notepad
+    a.launcher_key(0x28, false, false); // down: Notepad
     a.launcher_char(13);
     assert_eq!(launcher::done(), ["open:C:/Start/Notepad.lnk"]);
     assert!(a.launcher.is_none(), "it closes after running");
@@ -4294,30 +4345,30 @@ fn the_arrows_move_the_selection_and_the_list_scrolls_with_it() {
     assert_eq!(n, 8);
     assert_eq!(a.launcher.as_ref().unwrap().first(), 0);
     for _ in 0..20 {
-        a.launcher_key(0x28, false);
+        a.launcher_key(0x28, false, false);
     }
     let l = a.launcher.as_ref().unwrap();
     assert_eq!(l.sel, n - 1, "stops at the last one");
     assert_eq!(l.first(), n - launcher::VISIBLE, "the selected row is on the canvas");
     for _ in 0..20 {
-        a.launcher_key(0x26, false);
+        a.launcher_key(0x26, false, false);
     }
     assert_eq!(a.launcher.as_ref().unwrap().sel, 0);
-    assert!(!a.launcher_key(0x41, false), "other keys are not used");
+    assert!(!a.launcher_key(0x41, false, false), "other keys are not used");
     // editing keys
-    a.launcher_key(0x24, false); // Home
-    a.launcher_key(0x2E, false); // Delete the first letter
+    a.launcher_key(0x24, false, false); // Home
+    a.launcher_key(0x2E, false, false); // Delete the first letter
     assert_eq!(a.launcher.as_ref().unwrap().field.text(), "pp");
     a.launcher_char(8); // Backspace at the start: nothing
     assert_eq!(a.launcher.as_ref().unwrap().field.text(), "pp");
     // Ctrl+Backspace (127) and Ctrl+Delete remove whole words
-    a.launcher_key(0x23, false); // End
+    a.launcher_key(0x23, false, false); // End
     a.launcher_char(' ' as u32);
     type_in(&mut a, "one two");
     a.launcher_char(127);
     assert_eq!(a.launcher.as_ref().unwrap().field.text(), "pp one ");
-    a.launcher_key(0x24, false);
-    a.launcher_key(0x2E, true);
+    a.launcher_key(0x24, false, false);
+    a.launcher_key(0x2E, true, false);
     assert_eq!(a.launcher.as_ref().unwrap().field.text(), " one ");
 }
 
@@ -4335,7 +4386,7 @@ fn a_calculation_is_copied_and_the_web_row_opens_a_search() {
     a.launcher_toggle();
     type_in(&mut a, "rust lang");
     let n = a.launcher.as_ref().unwrap().hits.len();
-    a.launcher_key(0x28, false);
+    a.launcher_key(0x28, false, false);
     assert_eq!(a.launcher.as_ref().unwrap().sel, n - 1.min(n), "the web row is the only result");
     a.launcher_char(13);
     assert_eq!(sys::opened(), ["https://www.google.com/search?q=rust+lang"]);
@@ -4353,9 +4404,11 @@ fn clicking_a_result_runs_it_and_a_click_elsewhere_does_nothing() {
     launcher::done();
     a.launcher_toggle();
     type_in(&mut a, "calc");
-    a.launcher_click(LX + 40.0, launcher::IN_Y + 5.0);
+    a.launcher_click(100.0, 20.0);
     assert!(a.launcher.is_some() && launcher::done().is_empty(), "a click on the input does not run anything");
-    a.launcher_click(LX + 40.0, launcher::ROW_Y + 5.0);
+    assert_eq!(a.launcher_cursor(100.0, 20.0), 2, "an I-beam over the input");
+    assert_eq!(a.launcher_cursor(100.0, launcher::ROWS_Y + 5.0), 1, "a hand over a result");
+    a.launcher_click(100.0, launcher::ROWS_Y + 5.0);
     assert_eq!(launcher::done(), ["open:C:/Start/Calculator.lnk"]);
     assert!(a.launcher.is_none());
 }

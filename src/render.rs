@@ -171,10 +171,7 @@ pub(crate) fn draw(a: &mut App) {
         let rise = (1.0 - pc) * 8.0;
         g.ts = Transform::from_scale(g.s, g.s).pre_translate(0.0, rise);
         g.text_dy = rise;
-        if a.launcher.is_some() {
-            a.draw_launcher(&mut g, pc);
-        }
-        for &(i, ox, al) in vis.iter().filter(|_| a.launcher.is_none()) {
+        for &(i, ox, al) in &vis {
             match a.order[i] {
                 SlideId::Music => a.slide_music(&mut g, ox, al),
                 SlideId::Water => a.slide_water(&mut g, ox, al),
@@ -192,7 +189,7 @@ pub(crate) fn draw(a: &mut App) {
         }
         g.ts = Transform::from_scale(g.s, g.s);
         g.text_dy = 0.0;
-        if !a.lyric_screen() && a.launcher.is_none() {
+        if !a.lyric_screen() {
             a.draw_nav(&mut g, pc);
             a.draw_dots(&mut g, pos, pc);
         }
