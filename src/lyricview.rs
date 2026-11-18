@@ -225,6 +225,18 @@ impl App {
     }
 
     /// Klik pada slide Music saat mode lirik aktif. Mengembalikan true bila klik ditangani.
+    /// Is (x, y) on something the lyrics view reacts to as a button (the hand cursor)? The same places `lyric_click` uses.
+    pub(crate) fn lyric_hand(&self, x: f32, y: f32) -> bool {
+        let d = |px: f32, py: f32| ((x - px).powi(2) + (y - py).powi(2)).sqrt();
+        d(X_BUBBLE, LM_CY) < 16.0
+            || d(X_PIN, Y_PIN) < 12.0
+            || d(X_PREV, LM_CY) < 16.0
+            || d(X_PLAY, LM_CY) < 18.0
+            || d(X_NEXT, LM_CY) < 16.0
+            || (matches!(self.lyrics, Lyrics::Synced(..)) && in_rect(x, y, RX - CREDIT_W, CREDIT_Y - 3.0, CREDIT_W, 16.0))
+            || (self.media.dur > 0 && in_rect(x, y, BAR.0, BAR.1 - 8.0, BAR.2, 20.0))
+    }
+
     pub(crate) fn lyric_click(&mut self, x: f32, y: f32) -> bool {
         let d = |px: f32, py: f32| ((x - px).powi(2) + (y - py).powi(2)).sqrt();
         if d(X_BUBBLE, LM_CY) < 16.0 {

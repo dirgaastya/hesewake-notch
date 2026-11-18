@@ -889,7 +889,7 @@ impl App {
     /// Tombol, bar progres, dan bar volume di slide Music yang bisa diklik (kursor tangan).
     pub(crate) fn music_hand(&self, x: f32, y: f32) -> bool {
         if self.lyric_mode {
-            return false;
+            return self.lyric_hand(x, y);
         }
         let d = |px: f32, py: f32| ((x - px).powi(2) + (y - py).powi(2)).sqrt();
         Self::media_btn_at(x, y).is_some()

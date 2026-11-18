@@ -4379,3 +4379,27 @@ fn commands_run_from_the_launcher() {
     assert!(a.expanded(), "the slide is shown for a while");
     assert!(a.launcher.is_none());
 }
+
+#[test]
+fn the_lyrics_view_shows_a_hand_over_its_buttons() {
+    let mut a = test_app(1.0);
+    open_slide(&mut a, SlideId::Music);
+    a.lyric_mode = true;
+    a.media.title = "Song".into();
+    a.media.dur = 200;
+    let hand = |a: &App, x: f32, y: f32| a.cursor_kind(x, y) == 1;
+    assert!(hand(&a, lyricview::X_PIN, lyricview::Y_PIN), "the pin");
+    assert!(hand(&a, LX + 14.0, lyricview::LM_CY), "the lyrics button");
+    assert!(hand(&a, LX + 100.0, lyricview::LM_CY), "play");
+    assert!(!hand(&a, LX + 60.0, 4.0), "empty space is an arrow");
+}
+
+#[test]
+fn the_same_text_with_other_line_endings_is_one_entry() {
+    let mut h = clipboard::History::default();
+    let t0 = Instant::now();
+    assert!(h.push("one\r\ntwo", t0));
+    assert!(!h.push("one\ntwo", t0), "copied back with other line ends: nothing new");
+    assert!(!h.push("one\r\ntwo", t0));
+    assert_eq!(h.len(), 1);
+}

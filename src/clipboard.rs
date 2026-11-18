@@ -60,7 +60,7 @@ impl History {
             return false;
         }
         let p = self.pinned_count();
-        match self.items.iter().position(|c| c.text == text) {
+        match self.items.iter().position(|c| same_text(&c.text, text)) {
             Some(i) if self.items[i].pinned => self.items[i].at = now,
             Some(i) if i == p => return false,
             Some(i) => {
@@ -114,6 +114,12 @@ impl History {
     pub(crate) fn clear_all(&mut self) {
         self.items.clear();
     }
+}
+
+/// The same text, ignoring CRLF against LF (copying an entry back may change the line ends).
+fn same_text(a: &str, b: &str) -> bool {
+    let lf = |s: &str| s.replace("\r\n", "\n");
+    a == b || lf(a) == lf(b)
 }
 
 /// One row of text: every run of whitespace (newlines, tabs) becomes one space.
