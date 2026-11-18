@@ -4456,3 +4456,10 @@ fn the_same_text_with_other_line_endings_is_one_entry() {
     assert!(!h.push("one\r\ntwo", t0));
     assert_eq!(h.len(), 1);
 }
+
+#[test]
+fn snap_launcher_do_not_disturb_icon() {
+    for s in SCALES {
+        launcher_shot("launcher-dnd-icon", s, |a| type_in(a, "do not"));
+    }
+}

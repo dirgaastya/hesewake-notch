@@ -411,12 +411,37 @@ fn app_icon(path: &str) -> Option<Pixmap> {
     shelf::load_file_icon(path)
 }
 
+/// Points of an arc of the circle (cx, cy, r) from angle `from` to `to`, going the way that passes `through`.
+fn arc_pts(cx: f32, cy: f32, r: f32, from: f32, to: f32, through: f32, n: usize) -> Vec<(f32, f32)> {
+    let tau = std::f32::consts::TAU;
+    let ccw = (to - from).rem_euclid(tau);
+    let sweep = if (through - from).rem_euclid(tau) <= ccw { ccw } else { ccw - tau };
+    (0..=n).map(|i| from + sweep * i as f32 / n as f32).map(|a| (cx + r * a.cos(), cy + r * a.sin())).collect()
+}
+
+/// A crescent moon as one shape (a circle with a bite out of it), so it needs no background color behind it.
+fn crescent(g: &mut Gfx, cx: f32, cy: f32, s: f32, p: &Paint) {
+    let (ra, rb) = (s * 0.42, s * 0.36);
+    let (bx, by) = (s * 0.22, -s * 0.12);
+    let d = (bx * bx + by * by).sqrt();
+    let (ux, uy) = (bx / d, by / d);
+    let a = (ra * ra - rb * rb + d * d) / (2.0 * d);
+    let h = (ra * ra - a * a).max(0.0).sqrt();
+    // the two points where the circles cross
+    let (p1, p2) = ((a * ux - h * uy, a * uy + h * ux), (a * ux + h * uy, a * uy - h * ux));
+    let toward_a = (-uy).atan2(-ux); // the side of A away from the bite, and of B facing A
+    let mut pts = arc_pts(cx, cy, ra, p1.1.atan2(p1.0), p2.1.atan2(p2.0), toward_a, 24);
+    let inner = arc_pts(cx + bx, cy + by, rb, (p2.1 - by).atan2(p2.0 - bx), (p1.1 - by).atan2(p1.0 - bx), toward_a, 24);
+    pts.extend(inner);
+    g.poly(&pts, p);
+}
+
 /// The small picture of a result that is not an app: what it does, drawn with lines.
 fn row_icon(g: &mut Gfx, act: &Act, cx: f32, cy: f32, s: f32, p: &Paint) {
     let lw = (s * 0.14).max(1.3);
     match act {
         Act::Cmd(Cmd::Settings) => g.icon_gear(cx, cy, s, p),
-        Act::Cmd(Cmd::Dnd) => g.icon_crescent(cx, cy, s, p),
+        Act::Cmd(Cmd::Dnd) => crescent(g, cx, cy, s, p),
         Act::Cmd(Cmd::Mic) => g.icon_mic_off(cx, cy, s, p),
         Act::Cmd(Cmd::Slide(id)) => g.slide_icon(*id, cx, cy, s, p),
         Act::Cmd(Cmd::Update) => {
