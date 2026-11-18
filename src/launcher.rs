@@ -881,11 +881,13 @@ impl App {
 }
 
 // ---------------------------------------------------------------- drawing
-const BG: [u8; 3] = [27, 28, 34];
+/// Nearly black, like the notch (pure black would blend into a dark desktop with no edge at all).
+const BG: [u8; 3] = [8, 8, 10];
 
 /// Draw the launcher into its canvas (`Launcher::gfx`) and remember where the chips are.
 pub(crate) fn launcher_render(a: &mut App) {
     let acc = accent::get(a.cfg.accent);
+    let glow_on = a.cfg.glow;
     let Some(l) = a.launcher.as_mut() else { return };
     let h = if l.h > 0.0 { l.h } else { BAR_H };
     let mut g = match l.gfx.take() {
@@ -894,6 +896,13 @@ pub(crate) fn launcher_render(a: &mut App) {
     };
     g.acc = acc;
     g.pm.fill(Color::from_rgba8(BG[0], BG[1], BG[2], 255));
+    // the same accent glow as the notch (rising from the bottom edge), unless "Background glow" is off
+    if glow_on && l.wants_chips() {
+        if let Some(r) = Rect::from_xywh(0.0, 0.0, WIN_W, h) {
+            let c = g.acc.glow;
+            render::glow(&mut g, &PathBuilder::from_rect(r), h, (c[0], c[1], c[2]), 0.40);
+        }
+    }
 
     // the input: a magnifier, then the text (its end, when it is long) and the caret
     let (mx, my) = (PAD + 22.0, BAR_H / 2.0 - 1.0);
