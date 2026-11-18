@@ -68,7 +68,8 @@ pub(crate) const EYE_SLEEPY_AFTER_SECS: f32 = 120.0;
 const EYE_SURPRISE_SECS: f32 = 1.2;
 const EYE_HAPPY_SECS: f32 = 2.6;
 const EYE_LOOK_Y_MAX: f32 = 0.8; // vertical glance range in px
-const EYE_FOLLOW_Y: f32 = 1.4; // vertical range while following the cursor
+const EYE_FOLLOW_X: f32 = 4.0; // glance range while following the cursor (wider than the random glances)
+const EYE_FOLLOW_Y: f32 = 1.6;
 const EYE_SLEEPY_HOLD: f32 = 0.30; // a sleepy blink stays closed longer
 const EYE_ARC_W: f32 = 2.8; // stroke of the happy "^ ^" eyes
 const EYE_BOX: f32 = 34.0; // logical box around one eye for the lid cut
@@ -137,7 +138,8 @@ pub(crate) fn follow_look(x: f32, y: f32, h: f32) -> Option<(f32, f32)> {
     if !(0.0..W as f32).contains(&x) || !(0.0..H as f32).contains(&y) {
         return None;
     }
-    Some((((x - CX) / 60.0).clamp(-1.0, 1.0) * EYE_LOOK_MAX, ((y - h / 2.0) / 40.0).clamp(-1.0, 1.0) * EYE_FOLLOW_Y))
+    // tanh: the eyes turn quickly while the cursor is close and ease into the end of their range, with no hard stop
+    Some((((x - CX) / 70.0).tanh() * EYE_FOLLOW_X, ((y - h / 2.0) / 45.0).tanh() * EYE_FOLLOW_Y))
 }
 
 /// Which mood wins: a short event (surprise, then happy) over a lasting state (focus work, then away).
@@ -222,7 +224,10 @@ pub(crate) struct EyeAnim {
     /// A toast is showing: whether it is good news. When it ends the eye reacts (surprised or happy for a moment).
     pending_toast: Option<bool>,
     pub(crate) surprised_until: Option<Instant>,
-    happy_until: Option<Instant>,
+    pub(crate) happy_until: Option<Instant>,
+    /// The daily water goal was just reached: the eye turns happy once the notch is small again (`seen_goal`: the one already counted).
+    pending_goal: bool,
+    seen_goal: Option<Instant>,
 }
 
 impl EyeAnim {
@@ -254,6 +259,8 @@ impl EyeAnim {
             pending_toast: None,
             surprised_until: None,
             happy_until: None,
+            pending_goal: false,
+            seen_goal: None,
         };
         e.set_pose(EYE_CLOSED_SY);
         e
@@ -686,6 +693,16 @@ impl App {
                 }
             }
         }
+        // The water goal is reached with the Water slide open; the eye cheers once the notch has closed again.
+        let goal = self.water_goal_t.filter(|t| t.elapsed().as_secs() < 30);
+        if goal.is_some() && goal != self.eye.seen_goal {
+            self.eye.seen_goal = goal;
+            self.eye.pending_goal = true;
+        }
+        if self.eye.pending_goal && !self.expanded() && self.toast.is_none() {
+            self.eye.pending_goal = false;
+            self.eye.happy_until = Some(now + Duration::from_secs_f32(EYE_HAPPY_SECS));
+        }
         let live = |u: Option<Instant>| u.is_some_and(|t| now < t);
         let (surprised, happy) = (live(self.eye.surprised_until), live(self.eye.happy_until));
         let focus = self.tm.mode == timer::TMode::Pomodoro && self.tm.running() && self.tm.phase == timer::Phase::Focus;
@@ -817,9 +834,13 @@ mod tests {
         assert_eq!(follow_look(-5.0, 10.0, 32.0), None);
         assert_eq!(follow_look(100.0, H as f32 + 1.0, 32.0), None);
         let (x, y) = follow_look(CX + 200.0, 16.0, 32.0).unwrap();
-        assert!((x - EYE_LOOK_MAX).abs() < 1e-4 && y.abs() < 1e-4, "far right, level: all the way right ({x}, {y})");
+        assert!((x - EYE_FOLLOW_X).abs() < 0.05 && y.abs() < 1e-4, "far right, level: all the way right ({x}, {y})");
         let (x, y) = follow_look(CX - 30.0, 100.0, 32.0).unwrap();
-        assert!(x < 0.0 && x > -EYE_LOOK_MAX && (y - EYE_FOLLOW_Y).abs() < 1e-4, "left and below ({x}, {y})");
+        assert!(x < 0.0 && x > -EYE_FOLLOW_X && y > 0.9 * EYE_FOLLOW_Y && y < EYE_FOLLOW_Y, "left and below ({x}, {y})");
+        // the range grows smoothly with the distance: no hard stop
+        let step = |d: f32| follow_look(CX + d, 16.0, 32.0).unwrap().0;
+        assert!(step(20.0) < step(60.0) && step(60.0) < step(120.0) && step(120.0) < step(240.0));
+        assert!(step(20.0) > 0.0 && step(240.0) > EYE_LOOK_MAX, "reaches further than a random glance");
     }
 
     #[test]

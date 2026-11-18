@@ -369,6 +369,24 @@ fn typing_in_the_todo_input_does_not_restart_its_fade() {
 }
 
 #[test]
+fn the_eye_cheers_when_the_water_goal_is_reached() {
+    use eye::EyeMood;
+    let mut a = test_app(1.0);
+    open_slide(&mut a, SlideId::Water);
+    a.water_goal_t = Some(Instant::now());
+    a.eye_mood_step();
+    assert!(a.eye.happy_until.is_none(), "not while the Water slide is still open");
+    a.hover = false;
+    a.eye_mood_step();
+    assert_eq!(a.eye.mood, EyeMood::Happy, "happy once the notch is small again");
+    // a goal reached long ago (a new eye phase) does not cheer again
+    let mut b = test_app(1.0);
+    b.water_goal_t = Some(Instant::now() - Duration::from_secs(120));
+    b.eye_mood_step();
+    assert!(b.eye.happy_until.is_none());
+}
+
+#[test]
 fn snap_playing() {
     shot("playing", 1.0, |a| {
         a.media = Media { title: "Almost Easy".into(), artist: "Avenged Sevenfold".into(), playing: true, pos: 60, dur: 240, pos_ms: 60_000, source: "Demo".into(), sources: 1 };
