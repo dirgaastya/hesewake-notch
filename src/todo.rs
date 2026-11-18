@@ -14,30 +14,102 @@ pub(crate) fn rows_geom(editing: bool) -> (f32, f32, f32, usize) {
     }
 }
 
-pub(crate) fn load_todos() -> Vec<(bool, String)> {
+/// One task. `due` is when it is due (unix seconds), set by typing "tomorrow 14:00" and the like (duedate.rs).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Todo {
+    pub(crate) done: bool,
+    pub(crate) text: String,
+    pub(crate) due: Option<i64>,
+}
+
+impl Todo {
+    pub(crate) fn new(done: bool, text: &str) -> Todo {
+        Todo { done, text: text.to_string(), due: None }
+    }
+}
+
+/// In todo.txt a task is `1|text` or `0|text`; a due time follows the text as a tab and `@seconds`. An older version
+/// that reads such a line shows the extra characters as part of the text and loses nothing else.
+const DUE_MARK: &str = "\t@";
+
+pub(crate) fn parse_todos(s: &str) -> Vec<Todo> {
+    s.lines()
+        .filter_map(|l| {
+            let (d, rest) = l.split_once('|')?;
+            let (text, due) = match rest.rsplit_once(DUE_MARK) {
+                Some((t, n)) => match n.parse::<i64>() {
+                    Ok(v) => (t, Some(v)),
+                    Err(_) => (rest, None),
+                },
+                None => (rest, None),
+            };
+            Some(Todo { done: d == "1", text: text.to_string(), due })
+        })
+        .collect()
+}
+
+pub(crate) fn format_todos(t: &[Todo]) -> String {
+    t.iter()
+        .map(|x| format!("{}|{}{}\n", if x.done { 1 } else { 0 }, x.text, x.due.map(|d| format!("{DUE_MARK}{d}")).unwrap_or_default()))
+        .collect()
+}
+
+pub(crate) fn load_todos() -> Vec<Todo> {
     match std::fs::read_to_string(data_path("todo.txt")) {
-        Ok(s) => s
-            .lines()
-            .filter_map(|l| l.split_once('|').map(|(d, t)| (d == "1", t.to_string())))
-            .collect(),
+        Ok(s) => parse_todos(&s),
         Err(_) => {
-            let d = vec![(false, tr("Tap Add Task to create a task").to_string())];
+            let d = vec![Todo::new(false, tr("Tap Add Task to create a task"))];
             save_todos(&d);
             d
         }
     }
 }
 
-pub(crate) fn save_todos(t: &[(bool, String)]) {
-    let s: String = t.iter().map(|(d, x)| format!("{}|{}\n", if *d { 1 } else { 0 }, x)).collect();
-    write_data("todo.txt", s);
+pub(crate) fn save_todos(t: &[Todo]) {
+    write_data("todo.txt", format_todos(t));
 }
 
+/// How long after its due time a task still raises a toast (a PC that was asleep at the time catches up).
+const REMIND_WINDOW: i64 = 2 * 3600;
+
 impl App {
+    /// Open tasks first, the soonest due first (tasks without a due time after those, in the order they were added), then
+    /// the done ones.
     pub(crate) fn todo_order(&self) -> Vec<usize> {
-        let mut v: Vec<usize> = (0..self.todos.len()).filter(|&i| !self.todos[i].0).collect();
-        v.extend((0..self.todos.len()).filter(|&i| self.todos[i].0));
+        let mut v: Vec<usize> = (0..self.todos.len()).filter(|&i| !self.todos[i].done).collect();
+        v.sort_by_key(|&i| (self.todos[i].due.is_none(), self.todos[i].due.unwrap_or(0)));
+        v.extend((0..self.todos.len()).filter(|&i| self.todos[i].done));
         v
+    }
+
+    /// Called every minute: one toast when a task comes due (a single summary toast when several come due together).
+    /// True if a toast was started.
+    pub(crate) fn todo_minute(&mut self, now: i64) -> bool {
+        let mut due: Vec<(i64, String)> = self
+            .todos
+            .iter()
+            .filter(|t| !t.done)
+            .filter_map(|t| t.due.map(|d| (d, t.text.clone())))
+            .filter(|(d, _)| *d <= now && now - *d < REMIND_WINDOW)
+            .filter(|k| !self.todo_fired.contains(k))
+            .collect();
+        if due.is_empty() {
+            return false;
+        }
+        due.sort();
+        let (first_at, first_text) = due[0].clone();
+        let kind = ToastKind::Todo { text: first_text, due: first_at, more: due.len() as u32 - 1 };
+        // held by a quiet time: not marked as given, so it comes when the quiet time is over (within the window)
+        if self.quiet_blocks(&kind) {
+            return false;
+        }
+        self.todo_fired.extend(due.iter().cloned());
+        let n = self.todo_fired.len();
+        if n > 64 {
+            self.todo_fired.drain(..n - 64);
+        }
+        self.push_toast(kind);
+        true
     }
 
     /// Tombol dan baris di slide To-do yang bisa diklik (kursor tangan).
@@ -56,7 +128,7 @@ impl App {
     pub(crate) fn todo_animating(&self) -> bool {
         self.expanded() && self.is_slide(SlideId::Todo) && (self.todo_pop.is_some_and(|p| p.1.elapsed().as_secs_f32() < 0.75) || self.todo_edit_end.is_some_and(|t| t.elapsed().as_secs_f32() < 0.25) || self.todo_all.is_some_and(|t| t.elapsed().as_secs_f32() < 0.95) || (self.editing && self.edit_start.elapsed().as_secs_f32() < 0.25) || self.todo_cnt.get().2.is_some_and(|t| t.elapsed().as_secs_f32() < 0.35) || (self.edit_mode && !self.todos.is_empty()) || self.todo_ring.get() >= 0.0 && {
             let tot = self.todos.len();
-            let f = if tot > 0 { self.todos.iter().filter(|t| t.0).count() as f32 / tot as f32 } else { 0.0 };
+            let f = if tot > 0 { self.todos.iter().filter(|t| t.done).count() as f32 / tot as f32 } else { 0.0 };
             (self.todo_ring.get() - f).abs() > 0.002
         })
     }
@@ -69,7 +141,13 @@ impl App {
     pub(crate) unsafe fn begin_edit(&mut self, idx: Option<usize>) {
         self.editing = true;
         self.edit_idx = idx;
-        self.input = idx.map(|i| self.todos[i].1.clone()).unwrap_or_default();
+        // a task with a due time shows it after the text, so editing keeps it (and the phrase can be changed or removed)
+        self.input = idx
+            .map(|i| match self.todos[i].due {
+                Some(due) => format!("{} {}", self.todos[i].text, duedate::format_due(due, calendar::local_offset())),
+                None => self.todos[i].text.clone(),
+            })
+            .unwrap_or_default();
         self.caret_on = true;
         self.edit_start = Instant::now();
         self.prev_fg = GetForegroundWindow().0 as isize;
@@ -91,11 +169,16 @@ impl App {
             return;
         }
         if commit {
-            let t = self.input.trim().to_string();
+            let (title, due) = duedate::split_due(&self.input, notif::now_unix() as i64, calendar::local_offset());
+            // the text is only rewritten when a due phrase was cut off it
+            let t = if due.is_some() { title } else { self.input.trim().to_string() };
             if !t.is_empty() {
                 match self.edit_idx {
-                    Some(i) if i < self.todos.len() => self.todos[i].1 = t,
-                    _ => self.todos.push((false, t)),
+                    Some(i) if i < self.todos.len() => {
+                        self.todos[i].text = t;
+                        self.todos[i].due = due;
+                    }
+                    _ => self.todos.push(Todo { done: false, text: t, due }),
                 }
                 save_todos(&self.todos);
             }
@@ -110,7 +193,7 @@ impl App {
     }
 
     fn todo_row(&self, g: &mut Gfx, x: f32, y: f32, w: f32, ri: usize, al: f32) {
-        let (dn, s) = (self.todos[ri].0, &self.todos[ri].1);
+        let (dn, s) = (self.todos[ri].done, &self.todos[ri].text);
         if dn {
             g.fill(&rrect(x, y, w, ROW_H, 10.0), &g.sacc(0.20 * al));
         } else {
@@ -155,8 +238,18 @@ impl App {
         }
         let col = if dn { [172, 174, 180] } else { [242, 242, 242] };
         let tx = x + 33.0;
-        let maxw = w - 33.0 - 10.0 - if self.edit_mode { 24.0 } else { 0.0 };
-        g.txt(s, tx, y + ty(ROW_H, 13.0), 13.0, col, al, maxw);
+        let right = x + w - 8.0 - if self.edit_mode { 24.0 } else { 0.0 };
+        // the due badge sits at the right end of an open task
+        let badge = self.todos[ri].due.filter(|_| !dn).map(|due| self.due_badge(g, due));
+        let badge_w = badge.as_ref().map_or(0.0, |b| g.width(&b.0, 10.5) + 12.0);
+        let maxw = w - 33.0 - 10.0 - if self.edit_mode { 24.0 } else { 0.0 } - if badge_w > 0.0 { badge_w + 4.0 } else { 0.0 };
+        if let Some((label, c)) = &badge {
+            g.fill(&rrect(right - badge_w, y + (ROW_H - 17.0) / 2.0, badge_w, 17.0, 8.5), &paint(c[0], c[1], c[2], 0.20 * al));
+            g.txt(label, right - badge_w + 6.0, y + (ROW_H - 17.0) / 2.0 + ty(17.0, 10.5), 10.5, *c, al, badge_w);
+        }
+        // with a badge the title has little room: cut it with "…" so it is clear that it goes on
+        let shown = if badge_w > 0.0 && g.width(s, 13.0) > maxw { gfx::ellipsize(g, s, 13.0, maxw) } else { s.to_string() };
+        g.txt(&shown, tx, y + ty(ROW_H, 13.0), 13.0, col, al, maxw);
         if dn {
             let k = pop.map_or(1.0, |e| (e / 0.3).clamp(0.0, 1.0));
             let tw = g.width(s, 13.0).min(maxw) * k;
@@ -169,6 +262,18 @@ impl App {
             let wh = paint(255, 255, 255, al);
             g.line(bx - 2.8, by - 2.8, bx + 2.8, by + 2.8, 1.6, &wh);
             g.line(bx - 2.8, by + 2.8, bx + 2.8, by - 2.8, 1.6, &wh);
+        }
+    }
+
+    /// The text and colour of the badge for a task due at `due`.
+    fn due_badge(&self, g: &Gfx, due: i64) -> (String, [u8; 3]) {
+        let (now, off) = (notif::now_unix() as i64, calendar::local_offset());
+        match duedate::when(due, now, off) {
+            duedate::When::Overdue => (tr("Late").to_string(), [235, 87, 87]),
+            duedate::When::Today(m) => (format!("{:02}:{:02}", m / 60, m % 60), g.acc.bright),
+            duedate::When::Tomorrow => (tr("Tomorrow").to_string(), [200, 204, 214]),
+            duedate::When::Weekday(i) => (clock::day_short(i).to_string(), [200, 204, 214]),
+            duedate::When::Date(d, m) => (format!("{} {}", d, clock::month(m)), [200, 204, 214]),
         }
     }
 
@@ -212,7 +317,7 @@ impl App {
         let dx = tx - 12.0 - datew;
         g.txt(&date, dx, 14.0, 13.0, [235, 235, 235], al, 200.0);
         g.txtb(&time, tx, 14.0, 13.0, [255, 255, 255], al, 80.0);
-        let done = self.todos.iter().filter(|t| t.0).count();
+        let done = self.todos.iter().filter(|t| t.done).count();
         let total = self.todos.len();
         let frac = if total > 0 { done as f32 / total as f32 } else { 0.0 };
         let all_done = total > 0 && done == total;
@@ -229,7 +334,7 @@ impl App {
             let (eal, eo) = (al * ek, (1.0 - ek) * -8.0);
             g.fill(&rrect(LX - 1.0 + ox, 39.0 + eo, CW + 2.0, 32.0, 11.0), &g.sacc(0.55 * eal));
             g.fill(&rrect(LX + ox, 40.0 + eo, CW, 30.0, 10.0), &paint(26, 26, 29, eal));
-            let shown: &str = if self.input.is_empty() { tr("Type a task, Enter to save, Esc to cancel") } else { &self.input };
+            let shown: &str = if self.input.is_empty() { tr("Type a task. Add \"fri 14:00\" for a reminder") } else { &self.input };
             let col = if self.input.is_empty() { TEXT_FAINT } else { [255, 255, 255] };
             g.txt(shown, LX + 12.0 + ox, 40.0 + eo + ty(30.0, 13.0), 13.0, col, eal, CW - 30.0);
             if self.caret_on {

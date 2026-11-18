@@ -142,12 +142,16 @@ pub(crate) fn adjust(delta: f32) -> Option<(f32, bool)> {
     unsafe {
         let cur = ep.GetMasterVolumeLevelScalar().ok()?;
         let new = (cur + delta).clamp(0.0, 1.0);
+        let was_muted = ep.GetMute().ok()?.as_bool();
+        let unmute = delta > 0.0 && was_muted;
+        // perubahan dari kita sendiri tidak perlu dilaporkan ulang oleh callback; catat hasilnya SEBELUM mengubah,
+        // karena callback bisa tiba selagi kita masih di dalam Set*
+        LAST.store(pack((new * 100.0).round() as u8, was_muted && !unmute), Ordering::Relaxed);
         ep.SetMasterVolumeLevelScalar(new, std::ptr::null()).ok()?;
-        if delta > 0.0 && ep.GetMute().ok()?.as_bool() {
+        if unmute {
             ep.SetMute(false, std::ptr::null()).ok()?;
         }
         let muted = ep.GetMute().ok()?.as_bool();
-        // perubahan dari kita sendiri tidak perlu dilaporkan ulang oleh callback
         LAST.store(pack((new * 100.0).round() as u8, muted), Ordering::Relaxed);
         Some((new, muted))
     }

@@ -66,6 +66,7 @@ mod data;
 mod dict;
 mod downloads;
 mod dragdrop;
+mod duedate;
 mod ext;
 mod extapp;
 mod extslide;
@@ -81,6 +82,7 @@ mod icon;
 mod icons;
 mod input;
 mod keys;
+mod launcher;
 mod lyricview;
 mod korean;
 mod lyrics;
@@ -139,7 +141,7 @@ use nav::{NAV_L, NAV_R, dot_x, visible_slides};
 use note::{NOTE_H, NOTE_Y, NoteView, load_note, save_note};
 use render::present;
 use shelf::{SH_GAP, SH_H, SH_W, SH_Y, ShelfItem, load_shelf, open_path, save_shelf};
-use todo::{ROW_H, ROW_P, load_todos, rows_geom, save_todos};
+use todo::{ROW_H, ROW_P, Todo, load_todos, rows_geom, save_todos};
 use toast::{HudKind, Toast, ToastKind};
 use settings::Settings;
 use slides::SlideId;
@@ -192,6 +194,13 @@ struct App {
     ext: extapp::ExtState,
     hover: bool,
     busy: bool,
+    /// The quick launcher while it is open (it replaces the slides), and what was opened from it most.
+    launcher: Option<launcher::Launcher>,
+    launcher_freq: launcher::Frecency,
+    /// App icons seen in the launcher, by shortcut path (None: Windows had none).
+    launcher_icons: HashMap<String, Option<Pixmap>>,
+    /// A fullscreen app is open (Windows says so, or it covers the notch's monitor): drives game mode.
+    game_fs: bool,
     /// Mode "Minimal notch": garis tipis saat tidak ada musik, buka dengan hover.
     minimal: bool,
     toast: Option<Toast>,
@@ -251,7 +260,9 @@ struct App {
     icon: Option<Pixmap>,
     art_key: String,
     title_t0: f32,
-    todos: Vec<(bool, String)>,
+    todos: Vec<Todo>,
+    /// Tasks whose due time already raised a toast (due, text); kept to 64 entries.
+    todo_fired: Vec<(i64, String)>,
     todo_scroll: usize,
     edit_mode: bool,
     editing: bool,
@@ -298,7 +309,8 @@ struct App {
     /// Clipboard slide: copied texts (newest first), scroll offset, and when an entry was last copied back.
     clips: clipboard::History,
     clip_scroll: usize,
-    clip_flash: Option<Instant>,
+    /// The row that was just copied back (its index) and when.
+    clip_flash: Option<(usize, Instant)>,
     /// Clipboard: baris yang baru dihapus (teks, baris tampak, waktu) untuk animasi keluar.
     clip_gone: Vec<(String, usize, Instant)>,
     /// Calendar (ICS link): the link, feed status, upcoming events, meetings already announced, the Settings row's
@@ -401,7 +413,13 @@ impl App {
 
     /// Notch menyusut jadi garis tipis: app penuh layar/Adobe (busy) atau mode Minimal saat tidak ada musik.
     fn thin(&self) -> bool {
-        self.busy || self.dodging || (self.minimal && !self.now_playing_bar())
+        (self.busy && !self.game_lyrics()) || self.dodging || (self.minimal && !self.now_playing_bar())
+    }
+
+    /// Over a fullscreen app the small notch keeps showing the lyric line instead of turning into a thin line. It still
+    /// steps aside when the pointer comes near (`dodging`), so it does not sit on the game's own buttons.
+    fn game_lyrics(&self) -> bool {
+        self.cfg.game_lyrics && self.game_fs && self.busy && self.now_playing_bar() && self.lyric_synced()
     }
 
     fn ready(&self) -> bool {
@@ -539,6 +557,8 @@ fn main() -> Result<()> {
         i18n::set(cfg0.lang);
         hotkeys::set_slide_hotkeys(hwnd.0 as isize, cfg0.slide_hotkeys);
         hotkeys::set_mic_hotkey(hwnd.0 as isize, cfg0.mic_hotkey);
+        hotkeys::set_dnd_hotkey(hwnd.0 as isize, cfg0.dnd_hotkey);
+        hotkeys::set_launcher_hotkey(hwnd.0 as isize, cfg0.launcher);
         clipboard::listen(hwnd.0 as isize);
         let cal_link = calendar::load_link();
         calendar::start(hwnd.0 as isize, cal_link.clone());
@@ -629,6 +649,10 @@ fn main() -> Result<()> {
             ext: extapp::ExtState::default(),
             hover: false,
             busy: is_busy(hwnd, cfg.busy_on_maximized, &mon),
+            launcher: None,
+            launcher_freq: launcher::Frecency::load(),
+            launcher_icons: HashMap::new(),
+            game_fs: false,
             minimal: cfg.minimal,
             toast: None,
             bt_shared: bt_shared.clone(),
@@ -690,6 +714,7 @@ fn main() -> Result<()> {
             art_key: String::new(),
             title_t0: 0.0,
             todos: load_todos(),
+            todo_fired: Vec::new(),
             todo_scroll: 0,
             edit_mode: false,
             editing: false,

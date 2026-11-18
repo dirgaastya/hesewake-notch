@@ -255,7 +255,7 @@ pub(crate) fn check_reminder(a: &mut App) -> bool {
     }
     a.water.reset_timer();
     let st = now_tm();
-    if !a.water.in_window(st.wHour as u32) || a.water.ml >= a.water.goal || sys::user_fullscreen() {
+    if !a.water.in_window(st.wHour as u32) || a.water.ml >= a.water.goal || sys::user_fullscreen() || a.quiet_blocks(&toast::ToastKind::Water) {
         return false;
     }
     a.water.reminders += 1;

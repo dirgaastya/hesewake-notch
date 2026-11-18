@@ -37,6 +37,9 @@ pub(crate) fn trim_memory() {
 }
 
 pub(crate) fn write_data(name: &str, s: String) {
+    if cfg!(test) {
+        return; // tests must never overwrite the user's own data in %APPDATA%
+    }
     let p = data_path(name);
     if let Some(dir) = p.parent() {
         let _ = std::fs::create_dir_all(dir);

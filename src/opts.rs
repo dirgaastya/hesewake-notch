@@ -16,6 +16,10 @@ pub(crate) enum Rid {
     NotchSong,
     Minimal,
     ThinMaximized,
+    /// Game mode: no toasts over a fullscreen app.
+    GameMode,
+    /// The lyric line stays in the notch over a fullscreen app.
+    GameLyrics,
     Monitor,
     LyricTiming,
     NotchSize,
@@ -33,6 +37,12 @@ pub(crate) enum Rid {
     PrivacyDot,
     UpdateCheck,
     MicMute,
+    /// Do Not Disturb: hold most toasts.
+    Dnd,
+    /// Ctrl+Alt+D toggles Do Not Disturb.
+    DndHotkey,
+    /// Ctrl+Alt+Space: the quick launcher.
+    Launcher,
     Weather,
     City,
     Prayer,
@@ -59,11 +69,13 @@ pub(crate) enum Rid {
 impl Rid {
     /// Every setting (a test checks each one has a row in the Settings window).
     #[cfg(test)]
-    pub(crate) const ALL: [Rid; 35] = [
+    pub(crate) const ALL: [Rid; 40] = [
         Rid::Minimal,
         Rid::Glow,
         Rid::NotchSong,
         Rid::ThinMaximized,
+        Rid::GameMode,
+        Rid::GameLyrics,
         Rid::Monitor,
         Rid::LyricTiming,
         Rid::NotchSize,
@@ -80,6 +92,9 @@ impl Rid {
         Rid::PrivacyDot,
         Rid::UpdateCheck,
         Rid::MicMute,
+        Rid::Dnd,
+        Rid::DndHotkey,
+        Rid::Launcher,
         Rid::Weather,
         Rid::City,
         Rid::Prayer,
@@ -104,6 +119,8 @@ impl App {
         match r {
             Rid::Minimal => self.minimal,
             Rid::ThinMaximized => self.cfg.busy_on_maximized,
+            Rid::GameMode => self.cfg.game_mode,
+            Rid::GameLyrics => self.cfg.game_lyrics,
             Rid::Notifications => self.notif_on,
             Rid::ContactPhotos => self.cfg.notif_avatar,
             Rid::Autostart => self.sw.autostart,
@@ -114,6 +131,9 @@ impl App {
             Rid::PrivacyDot => self.cfg.privacy_dot,
             Rid::UpdateCheck => self.cfg.update_check,
             Rid::MicMute => self.cfg.mic_hotkey,
+            Rid::Dnd => self.cfg.dnd,
+            Rid::DndHotkey => self.cfg.dnd_hotkey,
+            Rid::Launcher => self.cfg.launcher,
             Rid::Weather => self.cfg.weather_on,
             Rid::Prayer => self.cfg.prayer_on,
             Rid::Glow => self.cfg.glow,
@@ -152,6 +172,12 @@ impl App {
         match r {
             Rid::Minimal => self.minimal = !self.minimal,
             Rid::ThinMaximized => self.cfg.busy_on_maximized = !self.cfg.busy_on_maximized,
+            Rid::GameMode => {
+                self.cfg.game_mode = !self.cfg.game_mode;
+                // what was waiting for a quiet moment is dropped now, not shown after the game
+                self.drop_held_toasts();
+            }
+            Rid::GameLyrics => self.cfg.game_lyrics = !self.cfg.game_lyrics,
             Rid::Notifications => {
                 self.notif_on = !self.notif_on;
                 notif::set_enabled(self.notif_on);
@@ -192,6 +218,18 @@ impl App {
                 self.priv_t = Instant::now();
             }
             Rid::UpdateCheck => self.cfg.update_check = !self.cfg.update_check,
+            Rid::Dnd => self.set_dnd(!self.cfg.dnd),
+            Rid::Launcher => {
+                self.cfg.launcher = !self.cfg.launcher;
+                hotkeys::set_launcher_hotkey(self.hwnd, self.cfg.launcher);
+                if !self.cfg.launcher {
+                    self.launcher_close(true);
+                }
+            }
+            Rid::DndHotkey => {
+                self.cfg.dnd_hotkey = !self.cfg.dnd_hotkey;
+                hotkeys::set_dnd_hotkey(self.hwnd, self.cfg.dnd_hotkey);
+            }
             Rid::MicMute => {
                 self.cfg.mic_hotkey = !self.cfg.mic_hotkey;
                 hotkeys::set_mic_hotkey(self.hwnd, self.cfg.mic_hotkey);

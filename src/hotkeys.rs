@@ -11,6 +11,10 @@ pub(crate) const SLIDE_KEYS: usize = 10;
 const FIRST_ID: i32 = 10;
 /// Hotkey id of Ctrl+Alt+M, the microphone mute (mic.rs).
 pub(crate) const MIC_ID: i32 = 2;
+/// Hotkey id of Ctrl+Alt+D, Do Not Disturb.
+pub(crate) const DND_ID: i32 = 3;
+/// Hotkey id of Ctrl+Alt+Space, the quick launcher.
+pub(crate) const LAUNCHER_ID: i32 = 4;
 /// How long the notch stays open after a slide hotkey (longer while hovered).
 const PEEK_SECS: u64 = 8;
 
@@ -46,6 +50,38 @@ pub(crate) fn set_mic_hotkey(hwnd: isize, on: bool) {
     if !register_mic(HWND(hwnd as _), on) {
         perf::note("hotkey: Ctrl+Alt+M is already taken by another app; the mic mute hotkey is off");
     }
+}
+
+/// Register (or release) Ctrl+Alt+D, Do Not Disturb. A key another app already holds is noted in perf.log.
+pub(crate) fn set_dnd_hotkey(hwnd: isize, on: bool) {
+    if cfg!(test) {
+        return; // unit tests must not grab global hotkeys (the CI-only test below calls `register_dnd` itself)
+    }
+    if !register_dnd(HWND(hwnd as _), on) {
+        perf::note("hotkey: Ctrl+Alt+D is already taken by another app; the Do Not Disturb hotkey is off");
+    }
+}
+
+/// Register (or release) Ctrl+Alt+Space, the quick launcher. A key another app already holds is noted in perf.log.
+pub(crate) fn set_launcher_hotkey(hwnd: isize, on: bool) {
+    if cfg!(test) {
+        return; // unit tests must not grab global hotkeys (the CI-only test below calls `register_launcher` itself)
+    }
+    if !register_launcher(HWND(hwnd as _), on) {
+        perf::note("hotkey: Ctrl+Alt+Space is already taken by another app; the quick launcher hotkey is off");
+    }
+}
+
+/// Release Ctrl+Alt+Space for `hwnd`, then register it again if `on`. False if registering failed.
+fn register_launcher(hwnd: HWND, on: bool) -> bool {
+    let _ = unsafe { UnregisterHotKey(hwnd, LAUNCHER_ID) };
+    !on || unsafe { RegisterHotKey(hwnd, LAUNCHER_ID, ctrl_alt(), 0x20) }.is_ok()
+}
+
+/// Release Ctrl+Alt+D for `hwnd`, then register it again if `on`. False if registering failed.
+fn register_dnd(hwnd: HWND, on: bool) -> bool {
+    let _ = unsafe { UnregisterHotKey(hwnd, DND_ID) };
+    !on || unsafe { RegisterHotKey(hwnd, DND_ID, ctrl_alt(), 'D' as u32) }.is_ok()
 }
 
 fn ctrl_alt() -> HOT_KEY_MODIFIERS {
@@ -198,6 +234,31 @@ mod tests {
         press_ctrl_alt_key(b'M');
         assert_eq!(next_hotkey(500), None, "with the setting off Ctrl+Alt+M is released");
         eprintln!("Ctrl+Alt+M -> mic mute, released when off");
+
+        assert!(register_dnd(none, true), "Ctrl+Alt+D registers");
+        press_ctrl_alt_key(b'D');
+        assert_eq!(next_hotkey(2000), Some(DND_ID), "Ctrl+Alt+D is the Do Not Disturb hotkey");
+        assert!(register_dnd(none, false));
+        press_ctrl_alt_key(b'D');
+        assert_eq!(next_hotkey(500), None, "with the setting off Ctrl+Alt+D is released");
+        eprintln!("Ctrl+Alt+D -> Do Not Disturb, released when off");
+
+        assert!(register_launcher(none, true), "Ctrl+Alt+Space registers");
+        press_ctrl_alt_key(0x20);
+        assert_eq!(next_hotkey(2000), Some(LAUNCHER_ID), "Ctrl+Alt+Space is the launcher hotkey");
+        assert!(register_launcher(none, false));
+        press_ctrl_alt_key(0x20);
+        assert_eq!(next_hotkey(500), None, "with the setting off Ctrl+Alt+Space is released");
+        eprintln!("Ctrl+Alt+Space -> launcher, released when off");
+    }
+
+    #[test]
+    fn hotkey_ids_do_not_clash() {
+        let ids = [crate::HOTKEY_ID, MIC_ID, DND_ID, LAUNCHER_ID];
+        assert!(ids.iter().all(|&i| slide_of(i).is_none()), "none of them is a slide hotkey");
+        for (i, a) in ids.iter().enumerate() {
+            assert!(ids.iter().skip(i + 1).all(|b| a != b), "ids are unique");
+        }
     }
 
     #[test]

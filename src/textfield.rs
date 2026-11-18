@@ -83,6 +83,56 @@ impl TextField {
     pub(crate) fn end(&mut self) {
         self.cursor = self.chars.len();
     }
+
+    fn is_word(c: char) -> bool {
+        c.is_alphanumeric() || c == '_'
+    }
+
+    /// Where the word before the caret starts (spaces and signs between are skipped first), like Ctrl+Left.
+    fn word_before(&self) -> usize {
+        let mut i = self.cursor;
+        while i > 0 && !Self::is_word(self.chars[i - 1]) {
+            i -= 1;
+        }
+        while i > 0 && Self::is_word(self.chars[i - 1]) {
+            i -= 1;
+        }
+        i
+    }
+
+    /// Where the word after the caret ends, like Ctrl+Right.
+    fn word_after(&self) -> usize {
+        let n = self.chars.len();
+        let mut i = self.cursor;
+        while i < n && !Self::is_word(self.chars[i]) {
+            i += 1;
+        }
+        while i < n && Self::is_word(self.chars[i]) {
+            i += 1;
+        }
+        i
+    }
+
+    pub(crate) fn word_left(&mut self) {
+        self.cursor = self.word_before();
+    }
+
+    pub(crate) fn word_right(&mut self) {
+        self.cursor = self.word_after();
+    }
+
+    /// Ctrl+Backspace: delete back to the start of the word.
+    pub(crate) fn backspace_word(&mut self) {
+        let s = self.word_before();
+        self.chars.drain(s..self.cursor);
+        self.cursor = s;
+    }
+
+    /// Ctrl+Delete: delete forward to the end of the word.
+    pub(crate) fn delete_word(&mut self) {
+        let e = self.word_after();
+        self.chars.drain(self.cursor..e);
+    }
 }
 
 #[cfg(test)]
@@ -107,6 +157,37 @@ mod tests {
         t.end();
         t.insert('!');
         assert_eq!(t.text(), "Phone!");
+    }
+
+    #[test]
+    fn ctrl_backspace_and_ctrl_delete_remove_whole_words() {
+        let mut t = typed("open the  file.txt", 64);
+        t.backspace_word();
+        assert_eq!(t.text(), "open the  file.", "the word up to the dot");
+        t.backspace_word();
+        assert_eq!(t.text(), "open the  ", "the dot goes with the next word step");
+        t.backspace_word();
+        assert_eq!(t.text(), "open ", "spaces are skipped, then the word");
+        t.home();
+        t.delete_word();
+        assert_eq!(t.text(), " ");
+        t.delete_word();
+        assert_eq!(t.text(), "", "nothing left");
+        t.delete_word();
+        t.backspace_word();
+        assert_eq!(t.text(), "");
+        let mut t = typed("one two three", 64);
+        t.word_left();
+        assert_eq!(t.cursor(), 8);
+        t.word_left();
+        t.word_left();
+        t.word_left();
+        assert_eq!(t.cursor(), 0);
+        t.word_right();
+        assert_eq!(t.cursor(), 3);
+        t.end();
+        t.word_right();
+        assert_eq!(t.cursor(), 13);
     }
 
     #[test]

@@ -51,7 +51,7 @@ impl ShelfItem {
 
 /// Ikon berwarna dari Windows Shell (sama dengan yang terlihat di Explorer).
 /// Dimuat sekali saat item dibuat, bukan setiap frame.
-fn load_file_icon(path: &str) -> Option<Pixmap> {
+pub(crate) fn load_file_icon(path: &str) -> Option<Pixmap> {
     unsafe {
         let item: IShellItem = SHCreateItemFromParsingName(&HSTRING::from(path), None::<&IBindCtx>).ok()?;
         let factory: IShellItemImageFactory = item.cast().ok()?;

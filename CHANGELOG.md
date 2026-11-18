@@ -4,6 +4,25 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/), versi mengikut
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-18
+
+### Added
+- **Settings > Shortcuts**: halaman baru berisi semua pintasan keyboard (global dan di peluncur cepat), dengan keycap. Pintasan yang dimatikan di Settings tampil redup.
+- **Peluncur cepat** (Ctrl+Alt+Spasi, bisa dimatikan di Settings > Umum): jendela melayang di tengah layar dengan kolom ketik, chip filter (Semua, Aplikasi, Perintah, Web; Tab berpindah) dan baris dua tingkat dengan ikon. Ketik beberapa huruf untuk mencari aplikasi terpasang (shortcut Start Menu), perintah notch (Pengaturan, Jangan ganggu, bisukan mikrofon, periksa pembaruan, dan semua slide), atau hitungan (`12*(3+4)`, Enter menyalin hasilnya); baris terakhir mencari di web, dan alamat yang diketik dibuka langsung. Panah memilih, Enter membuka, Esc menutup dan mengembalikan fokus ke jendela sebelumnya. Yang sering dibuka naik ke atas; riwayat pemakaian disimpan di `launcher.txt`.
+- **Do Not Disturb**: menahan sebagian besar toast tanpa harus ada aplikasi layar penuh. Nyalakan dari menu tray, hotkey **Ctrl+Alt+D** (bisa dimatikan di Settings > Notifikasi), atau Settings. Saat aktif ada ikon bulan kecil di notch dan HUD "Do Not Disturb On/Off" saat diganti lewat hotkey. Ditahan: Water, notifikasi, charger, Bluetooth, unduhan, tugas jatuh tempo, HUD volume/kecerahan/Caps Lock, pesan extension. Tetap tampil: baterai lemah, peringatan kamera/mikrofon, pengingat sholat dan rapat, timer, hasil pembaruan, dan HUD hotkey mikrofon. Status tersimpan dan berlaku lagi setelah restart. Pengingat yang ditahan tidak dihitung sudah diberikan.
+- **Mode game** (Settings > Layar, dua pengaturan baru, keduanya menyala secara default): saat aplikasi layar penuh terbuka (game, video, presentasi), **Game mode** menahan toast yang tidak mendesak (Water, notifikasi, charger, Bluetooth, unduhan, tugas jatuh tempo, HUD volume/kecerahan/Caps Lock, pesan extension). Yang tetap muncul: baterai lemah, peringatan kamera/mikrofon, pengingat sholat dan rapat, timer, hasil pembaruan, dan umpan balik hotkey mikrofon. Pengingat yang ditahan tidak dihitung sudah diberikan, jadi muncul setelah game selesai. **Lyrics in fullscreen** menjaga baris lirik tetap tampil di notch kecil di atas game (alih-alih garis tipis), dan notch tetap menepi saat kursor mendekat supaya tombol game tidak tertutup. Catatan: game dengan mode layar penuh eksklusif (D3D) bisa menutupi jendela notch; mode borderless bekerja.
+- **To-do**: tugas bisa punya tenggat dan pengingat. Ketik tenggat di akhir tugas, misalnya `telepon ibu besok 14:00`, `laporan jumat`, `bayar sewa 25/11`, `rapat hari ini jam 16:00` (Indonesia dan Inggris: `tomorrow`, `fri`, `at 9am`, `25/11/2026`). Kata tenggat dipotong dari judul, lalu muncul sebagai lencana di baris (jam, Besok, hari, tanggal, atau Telat bila lewat). Tugas yang belum selesai diurutkan dari tenggat terdekat. Saat waktunya tiba muncul satu toast (satu toast ringkasan bila beberapa jatuh bersamaan; tugas yang lewat lebih dari 2 jam tidak memunculkan toast). Saat mengedit, tenggat tampil kembali sebagai tanggal lengkap supaya bisa diubah atau dihapus. Format `todo.txt` tetap kompatibel: tenggat disimpan sebagai `	@detik` di akhir baris, dan baris lama dibaca seperti biasa.
+- **Clipboard**: item bisa disematkan (pin). Ikon pin muncul di kiri tanda x saat kursor di atas baris. Item yang disematkan tetap di atas, tidak tergeser oleh salinan baru atau batas 10 item, dan tidak ikut terhapus oleh Clear (maksimal 5 pin). Pin hanya disimpan di memori seperti riwayatnya, dan hilang saat aplikasi ditutup atau slide dimatikan.
+
+### Changed
+- **Music**: slider volume vertikal di atas tombol output dihapus. Volume tetap diatur dengan roda mouse di slide dan dengan klik pada bar volume yang muncul setelahnya.
+
+### Fixed
+- **Notch**: dengan taskbar Windows disembunyikan otomatis, jendela yang dimaksimalkan (mis. Chrome) tidak lagi dianggap layar penuh, jadi notch tidak menciut jadi garis tipis kecuali "Thin on maximize" menyala. Layar penuh sungguhan (F11, video, game) tetap terdeteksi.
+- **Clipboard**: menyalin kembali teks beberapa baris dengan klik tidak lagi menambah entri ganda (akhir baris CRLF dan LF dianggap sama).
+- **Music**: di tampilan lirik, kursor kini berubah jadi tangan di atas tombol (pin, lirik, sebelumnya/putar/berikutnya, bar waktu, kredit sumber).
+- **Music**: indikator volume dan indikator perangkat output tidak lagi berkedip. Menyentuh salah satunya saat yang lain sedang tampil (roda mouse, klik bar, tombol volume, ganti perangkat) tidak lagi memulai ulang fade-in dari nol, yang sesaat membuka tombol di bawahnya. Perubahan volume dari aplikasi sendiri juga dicatat sebelum diterapkan, supaya gema dari Windows tidak memunculkan indikator kedua.
+
 ## [0.14.0] - 2026-11-16
 
 Rilis ini membawa penyegaran tampilan dan animasi notch, dipindahkan dari prototipe desain ke kode Rust.

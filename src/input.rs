@@ -51,11 +51,6 @@ pub(crate) unsafe fn click(x: f32, y: f32) {
                     schedule(a);
                 } else if a.media.sources > 1 && a.lyric_text().is_none() && in_rect(x, y, LX, 6.0, 190.0, 24.0) {
                     let _ = a.tx.send(Cmd::CycleSource);
-                } else if a.vol_pop_hit(x, y) {
-                    a.vol_pop_set(y);
-                    a.last = Instant::now();
-                    present(a);
-                    schedule(a);
                 } else if a.vol_bar_hit(x, y) {
                     a.vol_bar_set(x);
                     a.last = Instant::now();
@@ -110,10 +105,10 @@ pub(crate) unsafe fn click(x: f32, y: f32) {
                                     schedule(a);
                                 }
                             } else {
-                                a.todos[ri].0 = !a.todos[ri].0;
-                                if a.todos[ri].0 {
+                                a.todos[ri].done = !a.todos[ri].done;
+                                if a.todos[ri].done {
                                     a.todo_pop = Some((ri, Instant::now()));
-                                    if a.todos.iter().all(|t| t.0) {
+                                    if a.todos.iter().all(|t| t.done) {
                                         a.todo_all = Some(Instant::now());
                                     }
                                     schedule(a);

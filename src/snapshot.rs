@@ -47,6 +47,10 @@ fn test_app(s: f32) -> App {
         last_min: 0,
         hover: false,
         busy: false,
+        launcher: None,
+        launcher_freq: launcher::Frecency::default(),
+        launcher_icons: HashMap::new(),
+        game_fs: false,
         minimal: false,
         toast: None,
         bt_shared: Arc::new(Mutex::new(Vec::new())),
@@ -106,7 +110,8 @@ fn test_app(s: f32) -> App {
         icon: None,
         art_key: String::new(),
         title_t0: 0.0,
-        todos: vec![(true, "Display DPI scaling".into()), (false, "Pomodoro mode".into()), (false, "Clipboard history".into())],
+        todos: vec![Todo::new(true, "Display DPI scaling"), Todo::new(false, "Pomodoro mode"), Todo::new(false, "Clipboard history")],
+        todo_fired: Vec::new(),
         todo_scroll: 0,
         edit_mode: false,
         editing: false,
@@ -2176,6 +2181,7 @@ const LOOK: usize = 1;
 const SLIDES: usize = 2;
 const SCREENS: usize = 3;
 const MUSIC: usize = 4;
+const NOTIFS: usize = 5;
 const ALERTS: usize = 6;
 const WEATHER: usize = 7;
 const CALENDAR: usize = 8;
@@ -2811,7 +2817,7 @@ fn snap_extension_slide() {
 }
 
 // ---------------------------------------------------------------- Settings > Extensions
-const EXTENSIONS: usize = 9;
+const EXTENSIONS: usize = 10;
 
 /// Three extensions: one running and talking, one off, one whose manifest is no good.
 fn ext_page_setup(a: &mut App) {
@@ -3560,3 +3566,930 @@ fn notch_song_off_keeps_the_small_notch_idle() {
         a.cfg.notch_song = false;
     });
 }
+
+#[test]
+fn touching_the_volume_overlay_again_does_not_restart_its_fade_in() {
+    let mut a = test_app(1.0);
+    music_with_outputs(&mut a);
+    a.vol_state = (30, false);
+    // nothing showing: the first overlay fades in from zero
+    a.vol_touch();
+    assert!(a.vol_overlay_alpha() < 0.5, "a fresh overlay fades in");
+    // showing at full opacity: another wheel notch, click or WM_VOLUME must not drop it back to zero
+    a.vol_t = Instant::now() - Duration::from_millis(400);
+    let before = a.vol_overlay_alpha();
+    assert!(before > 0.99, "the overlay is fully shown after 0.4 s");
+    a.vol_state = (32, false);
+    a.vol_touch();
+    assert!(a.vol_overlay_alpha() > 0.99, "touching it again keeps it at full opacity (was {before})");
+    assert!(a.vol_t.elapsed() < Duration::from_millis(300), "and it lives about as long as a new one");
+}
+
+#[test]
+fn the_volume_overlay_takes_over_from_the_device_overlay_without_a_gap() {
+    let mut a = test_app(1.0);
+    music_with_outputs(&mut a);
+    a.out_pick("hp");
+    a.out_t = Instant::now() - Duration::from_millis(400);
+    assert!(a.overlay_showing());
+    a.vol_state = (40, false);
+    a.vol_touch();
+    assert!(a.vol_t > a.out_t, "the volume overlay is the newer one");
+    assert!(a.vol_overlay_alpha() > 0.99, "it replaces the device overlay at full opacity");
+    // and the other way round
+    a.out_touch();
+    assert!(a.out_t > a.vol_t);
+    assert!(music::overlay_alpha(a.out_t.elapsed().as_secs_f32()) > 0.99);
+}
+
+#[test]
+fn overlay_alpha_fades_in_then_out_and_ends() {
+    assert_eq!(music::overlay_alpha(0.0), 0.0);
+    assert!(music::overlay_alpha(0.05) > 0.4 && music::overlay_alpha(0.05) < 0.6);
+    assert_eq!(music::overlay_alpha(0.5), 1.0);
+    assert!(music::overlay_alpha(1.35) < 0.6);
+    assert_eq!(music::overlay_alpha(1.5), 0.0);
+    assert!(!test_app(1.0).overlay_showing(), "nothing is showing at the start");
+}
+
+#[test]
+fn no_overlay_is_left_over_the_buttons_after_it_ends() {
+    let mut a = test_app(1.0);
+    music_with_outputs(&mut a);
+    a.vol_state = (64, false);
+    a.vol_t = Instant::now() - Duration::from_millis(1600);
+    assert!(!a.vol_overlay_active(), "the overlay is over after 1.5 s");
+}
+
+/// Pin zone of visible row `vi`: just left of the ×.
+fn clip_pin_x(a: &App) -> f32 {
+    LX + clipboard::row_w(a.clips.len()) - 28.0 - 12.0
+}
+
+#[test]
+fn snap_clipboard_pinned() {
+    shot("clipboard-pinned", 1.0, |a| {
+        with_clips(a, &CLIPS);
+        a.clips.toggle_pin(1);
+        a.clips.toggle_pin(3);
+        open_slide(a, SlideId::Clipboard);
+    });
+    let _lang = i18n::restore_on_drop();
+    shot("id-clipboard-pinned", 1.0, |a| {
+        a.cfg.lang = i18n::ID;
+        i18n::set(i18n::ID);
+        with_clips(a, &CLIPS);
+        a.clips.toggle_pin(2);
+        open_slide(a, SlideId::Clipboard);
+    });
+}
+
+#[test]
+fn the_pin_button_pins_and_unpins_a_row() {
+    let mut a = test_app(1.0);
+    with_clips(&mut a, &CLIPS); // rhezaardiansyah, Meeting notes, fn main, github
+    open_slide(&mut a, SlideId::Clipboard);
+    let hit = a.clip_hit(clip_pin_x(&a), clip_row_y(1)).expect("the pin of the second row");
+    assert_eq!(hit, clipboard::ClipHit::Pin(1));
+    assert_eq!(a.clip_apply(hit), None, "pinning copies nothing");
+    assert!(a.clips.items()[0].text.starts_with("Meeting notes") && a.clips.items()[0].pinned, "it moved to the top");
+    // the same button on that (now first) row unpins it again
+    let hit = a.clip_hit(clip_pin_x(&a), clip_row_y(0)).expect("the pin of the first row");
+    assert_eq!(hit, clipboard::ClipHit::Pin(0));
+    a.clip_apply(hit);
+    assert_eq!(a.clips.pinned_count(), 0);
+    // the × and the row itself still do what they did
+    assert_eq!(a.clip_hit(LX + clipboard::row_w(4) - 5.0, clip_row_y(0)), Some(clipboard::ClipHit::Remove(0)));
+    assert_eq!(a.clip_hit(LX + 60.0, clip_row_y(0)), Some(clipboard::ClipHit::Copy(0)));
+}
+
+#[test]
+fn clear_asks_twice_and_leaves_the_pins() {
+    let mut a = test_app(1.0);
+    with_clips(&mut a, &CLIPS);
+    open_slide(&mut a, SlideId::Clipboard);
+    a.clips.toggle_pin(2);
+    a.clip_apply(clipboard::ClipHit::Clear);
+    assert_eq!(a.clips.len(), 4, "the first click only asks");
+    a.clip_apply(clipboard::ClipHit::Clear);
+    assert_eq!(a.clips.len(), 1, "the second clears everything but the pin");
+    assert!(a.clips.items()[0].pinned);
+    a.clip_apply(clipboard::ClipHit::Clear);
+    assert!(a.clip_clear_t.is_none(), "with only pins left there is nothing to ask about");
+    // turning the slide off forgets the pins as well
+    set_slide(&mut a, SlideId::Clipboard, false);
+    a.on_clipboard(None, Instant::now());
+    assert!(a.clips.is_empty());
+}
+
+#[test]
+fn copying_a_pinned_row_flashes_that_row() {
+    let mut a = test_app(1.0);
+    with_clips(&mut a, &CLIPS);
+    open_slide(&mut a, SlideId::Clipboard);
+    a.clips.toggle_pin(3); // github is pinned and first
+    let text = a.clip_apply(clipboard::ClipHit::Copy(0)).expect("text");
+    assert!(text.contains("github.com"));
+    assert_eq!(a.clip_flash.map(|f| f.0), Some(0), "the pinned row keeps its place and shows \"Copied\"");
+    assert!(a.clips.items()[0].pinned);
+}
+
+// ---------------------------------------------------------------- to-do due times
+
+/// Tasks with due times spread around now, for the badges.
+fn todos_with_due(a: &mut App) {
+    let now = notif::now_unix() as i64;
+    let mk = |text: &str, due: Option<i64>| Todo { done: false, text: text.to_string(), due };
+    a.todos = vec![
+        mk("Send the invoice", Some(now - 3600)),
+        mk("Call the dentist about the appointment next week", Some(now + 1800)),
+        mk("Pick up the parcel", Some(now + 26 * 3600)),
+        mk("Renew the passport", Some(now + 4 * 86400)),
+        mk("Plan the holiday", Some(now + 40 * 86400)),
+        Todo { done: true, text: "Water the plants".into(), due: Some(now - 86400) },
+        mk("Read a book", None),
+    ];
+}
+
+#[test]
+fn snap_todo_due() {
+    for s in SCALES {
+        shot("todo-due", s, |a| {
+            todos_with_due(a);
+            open_slide(a, SlideId::Todo);
+        });
+    }
+    shot("todo-due-scrolled", 1.0, |a| {
+        todos_with_due(a);
+        open_slide(a, SlideId::Todo);
+        a.todo_scroll = 3;
+    });
+    shot("todo-due-edit-mode", 1.0, |a| {
+        todos_with_due(a);
+        open_slide(a, SlideId::Todo);
+        a.edit_mode = true;
+    });
+    shot("todo-editing-hint", 1.0, |a| {
+        open_slide(a, SlideId::Todo);
+        a.editing = true;
+        a.edit_start = Instant::now() - Duration::from_secs(1);
+    });
+    shot("todo-toast", 1.0, |a| {
+        open_slide(a, SlideId::Music);
+        let due = notif::now_unix() as i64;
+        show_toast(a, ToastKind::Todo { text: "Send the invoice to the client".into(), due, more: 0 });
+    });
+    shot("todo-toast-more", 1.0, |a| {
+        let due = notif::now_unix() as i64;
+        show_toast(a, ToastKind::Todo { text: "Send the invoice to the client and wait for the confirmation".into(), due, more: 2 });
+    });
+    let _lang = i18n::restore_on_drop();
+    let id = |a: &mut App| {
+        a.cfg.lang = i18n::ID;
+        i18n::set(i18n::ID);
+    };
+    shot("id-todo-due", 1.0, |a| {
+        id(a);
+        todos_with_due(a);
+        open_slide(a, SlideId::Todo);
+    });
+    shot("id-todo-editing-hint", 1.0, |a| {
+        id(a);
+        open_slide(a, SlideId::Todo);
+        a.editing = true;
+        a.edit_start = Instant::now() - Duration::from_secs(1);
+    });
+    shot("id-todo-toast", 1.0, |a| {
+        id(a);
+        let due = notif::now_unix() as i64;
+        show_toast(a, ToastKind::Todo { text: "Kirim faktur ke klien".into(), due, more: 1 });
+    });
+}
+
+#[test]
+fn due_times_survive_the_todo_file_and_old_lines_still_read() {
+    let todos = vec![
+        Todo { done: false, text: "buy milk".into(), due: Some(1_795_000_000) },
+        Todo { done: true, text: "a | b".into(), due: None },
+        Todo { done: false, text: "pay rent".into(), due: Some(-5) },
+    ];
+    let text = todo::format_todos(&todos);
+    assert_eq!(text, "0|buy milk\t@1795000000\n1|a | b\n0|pay rent\t@-5\n");
+    assert_eq!(todo::parse_todos(&text), todos, "what is saved is read back");
+    // a file from before due times: same lines, no due, a bar in the text is kept, a line without a bar is dropped
+    let old = "1|done thing\n0|has | a bar\nno bar here\n0|text with \t@ marker\n0|ends in \t@x\n";
+    let read = todo::parse_todos(old);
+    assert_eq!(read.len(), 4);
+    assert_eq!((read[0].done, read[0].text.as_str(), read[0].due), (true, "done thing", None));
+    assert_eq!(read[1].text, "has | a bar");
+    assert_eq!(read[2].text, "text with \t@ marker", "a mark that is not followed by a number is just text");
+    assert_eq!(read[3].text, "ends in \t@x");
+    assert!(read.iter().all(|t| t.due.is_none()));
+}
+
+#[test]
+fn open_tasks_are_ordered_by_due_time_and_done_ones_come_last() {
+    let mut a = test_app(1.0);
+    let mk = |text: &str, done: bool, due: Option<i64>| Todo { done, text: text.to_string(), due };
+    a.todos = vec![
+        mk("no due 1", false, None),
+        mk("later", false, Some(500)),
+        mk("done", true, Some(10)),
+        mk("soon", false, Some(100)),
+        mk("no due 2", false, None),
+        mk("same as soon", false, Some(100)),
+    ];
+    let names: Vec<&str> = a.todo_order().iter().map(|&i| a.todos[i].text.as_str()).collect();
+    assert_eq!(names, ["soon", "same as soon", "later", "no due 1", "no due 2", "done"]);
+    a.todos.iter_mut().for_each(|t| t.due = None);
+    let plain: Vec<usize> = a.todo_order();
+    assert_eq!(plain, [0, 1, 3, 4, 5, 2], "without due times the order is the old one: open first, then done");
+}
+
+#[test]
+fn a_due_phrase_typed_at_the_end_becomes_the_due_time() {
+    let mut a = test_app(1.0);
+    a.todos.clear();
+    a.editing = true;
+    a.input = "call mom tomorrow 14:00".into();
+    unsafe { a.finish_edit(true, false) };
+    assert_eq!(a.todos.len(), 1);
+    assert_eq!(a.todos[0].text, "call mom");
+    let due = a.todos[0].due.expect("a due time");
+    let now = notif::now_unix() as i64;
+    assert_eq!(duedate::when(due, now, calendar::local_offset()), duedate::When::Tomorrow);
+    // a plain task keeps its text exactly (inner spaces too) and has no due time
+    a.editing = true;
+    a.input = "  buy   milk ".into();
+    unsafe { a.finish_edit(true, false) };
+    assert_eq!((a.todos[1].text.as_str(), a.todos[1].due), ("buy   milk", None));
+    // editing a task replaces both its text and its due time
+    a.editing = true;
+    a.edit_idx = Some(1);
+    a.input = "buy oat milk besok".into();
+    unsafe { a.finish_edit(true, false) };
+    assert_eq!(a.todos[1].text, "buy oat milk");
+    assert!(a.todos[1].due.is_some());
+    a.editing = true;
+    a.edit_idx = Some(1);
+    a.input = "buy oat milk".into();
+    unsafe { a.finish_edit(true, false) };
+    assert_eq!(a.todos[1].due, None, "removing the phrase removes the due time");
+}
+
+#[test]
+fn a_task_raises_one_toast_when_it_comes_due() {
+    let mut a = test_app(1.0);
+    let now = notif::now_unix() as i64;
+    let mk = |text: &str, due: i64| Todo { done: false, text: text.to_string(), due: Some(due) };
+    a.todos = vec![mk("future", now + 600), mk("now", now - 30)];
+    assert!(a.todo_minute(now), "the one that came due raises a toast");
+    assert!(matches!(&a.toast.as_ref().expect("toast").kind, ToastKind::Todo { text, more: 0, .. } if text == "now"));
+    a.toast = None;
+    assert!(!a.todo_minute(now + 60), "and only once");
+    assert!(a.todo_minute(now + 601), "the other when its time comes");
+    a.toast = None;
+    // several at once: one summary toast
+    a.todos = vec![mk("a", now - 100), mk("b", now - 90), mk("c", now - 80)];
+    a.todo_fired.clear();
+    assert!(a.todo_minute(now));
+    assert!(matches!(&a.toast.as_ref().expect("toast").kind, ToastKind::Todo { text, more: 2, .. } if text == "a"));
+    a.toast = None;
+    // done tasks, tasks without a due time and tasks long overdue stay quiet
+    a.todo_fired.clear();
+    a.todos = vec![
+        Todo { done: true, text: "done".into(), due: Some(now - 10) },
+        Todo { done: false, text: "no due".into(), due: None },
+        mk("long gone", now - 3 * 3600),
+    ];
+    assert!(!a.todo_minute(now));
+    assert!(a.toast.is_none());
+    // editing the due time of a task that already fired makes it fire again at the new time
+    a.todos = vec![mk("moved", now - 10)];
+    assert!(a.todo_minute(now));
+    a.toast = None;
+    a.todos[0].due = Some(now + 120);
+    assert!(!a.todo_minute(now));
+    assert!(a.todo_minute(now + 130));
+}
+
+// ---------------------------------------------------------------- game mode
+
+/// A song with synced lyrics is playing and its first line is showing.
+fn song_with_lyric_line(a: &mut App) {
+    a.media.playing = true;
+    a.media.title = "Eiyu".into();
+    a.lyrics = lyrics::Lyrics::Synced(
+        vec![lyrics::LyricLine { at_ms: 0, text: "kokorokara sou omotta".into(), roma: String::new() }],
+        lyrics::Source::Lrclib,
+    );
+    a.lyric_update();
+    a.lyric_t = Instant::now() - Duration::from_secs(2); // faded in
+    assert!(a.lyric_text().is_some(), "the line is showing");
+}
+
+/// A fullscreen app is open on the notch's monitor.
+fn fullscreen(a: &mut App) {
+    a.busy = true;
+    a.fg = 2;
+    a.game_fs = true;
+}
+
+#[test]
+fn fullscreen_keeps_the_lyric_line_in_the_small_notch() {
+    let mut a = test_app(1.0);
+    song_with_lyric_line(&mut a);
+    fullscreen(&mut a);
+    assert!(a.game_lyrics() && !a.thin(), "the line stays over the game");
+    assert!(anim::target(&a).0 > THIN.0 + 60.0, "as the playing notch, not a thin line");
+    // each condition on its own
+    a.cfg.game_lyrics = false;
+    assert!(a.thin() && anim::target(&a) == THIN, "setting off: the thin line as before");
+    a.cfg.game_lyrics = true;
+    a.game_fs = false;
+    assert!(a.thin(), "busy for another reason (an Adobe app, a maximized window): still thin");
+    a.game_fs = true;
+    a.media.playing = false;
+    assert!(a.thin(), "no song playing: thin");
+    a.media.playing = true;
+    a.lyrics = lyrics::Lyrics::None;
+    assert!(a.thin(), "no synced lyrics: thin");
+    song_with_lyric_line(&mut a);
+    a.cfg.notch_song = false;
+    assert!(a.thin(), "the song is not shown in the small notch at all");
+    a.cfg.notch_song = true;
+    // it does not change anything off a fullscreen app
+    a.busy = false;
+    a.game_fs = false;
+    a.fg = 0;
+    assert!(!a.thin() && !a.game_lyrics());
+}
+
+#[test]
+fn the_lyric_line_over_a_game_steps_aside_for_the_pointer() {
+    let mut a = test_app(1.0);
+    song_with_lyric_line(&mut a);
+    fullscreen(&mut a);
+    (a.w, a.h) = anim::target(&a);
+    assert!(a.h > THIN.1 + 10.0);
+    // the pointer at the bottom edge of the bar: the notch turns thin so the game's own buttons are reachable
+    assert!(a.pointer_step(CX, a.h - 4.0));
+    assert!(a.dodging && a.thin() && !a.expanded());
+    // away from it: back to the lyric line
+    a.pointer_step(CX, 400.0);
+    assert!(!a.dodging && !a.thin());
+    // far to the side: nothing happens
+    assert!(!a.pointer_step(CX + 300.0, 5.0));
+    assert!(!a.dodging);
+}
+
+#[test]
+fn game_mode_holds_toasts_over_a_fullscreen_app_but_not_the_important_ones() {
+    let mut a = test_app(1.0);
+    let held = [
+        ToastKind::Charging { pct: 50 },
+        ToastKind::Unplugged { pct: 50 },
+        ToastKind::Bluetooth { name: "Buds".into(), pct: None, connected: true },
+        ToastKind::Notification { id: 1 },
+        ToastKind::Downloaded { path: "C:/a.zip".into() },
+        ToastKind::Ext { id: "x".into(), title: "t".into(), sub: "s".into(), count: 1 },
+        ToastKind::Water,
+        ToastKind::Todo { text: "t".into(), due: 0, more: 0 },
+        ToastKind::Hud { kind: HudKind::Volume(40, false), on: true },
+        ToastKind::Hud { kind: HudKind::Brightness(40), on: true },
+        ToastKind::Hud { kind: HudKind::Caps, on: true },
+    ];
+    let through = [
+        ToastKind::LowBattery { pct: 10 },
+        ToastKind::NotifOpenFailed { app: "x".into() },
+        ToastKind::Privacy { cam: true, app: "x".into() },
+        ToastKind::Prayer { idx: 0, at: 300 },
+        ToastKind::Timer { title: "t".into(), label: "l".into() },
+        ToastKind::Meeting { title: "m".into(), at: 0, link: None },
+        ToastKind::Update(update::Note::UpToDate),
+        ToastKind::Hud { kind: HudKind::Mic(Some(true)), on: true },
+    ];
+    // no fullscreen app: nothing is held
+    for k in held.iter().chain(&through) {
+        assert!(!a.quiet_blocks(k), "{k:?} outside a fullscreen app");
+    }
+    a.game_fs = true;
+    for k in &held {
+        assert!(a.quiet_blocks(k), "{k:?} is held over a fullscreen app");
+    }
+    for k in &through {
+        assert!(!a.quiet_blocks(k), "{k:?} still shows");
+    }
+    // the setting turns it off
+    a.cfg.game_mode = false;
+    assert!(held.iter().all(|k| !a.quiet_blocks(k)));
+    a.cfg.game_mode = true;
+    // a held toast is not started and not queued; one that shows is
+    a.push_toast(ToastKind::Charging { pct: 50 });
+    assert!(a.toast.is_none() && a.toast_q.is_empty());
+    a.push_toast(ToastKind::LowBattery { pct: 10 });
+    assert!(a.toast.is_some());
+}
+
+#[test]
+fn queued_toasts_are_dropped_when_the_game_starts() {
+    let mut a = test_app(1.0);
+    a.toast_q = vec![ToastKind::Charging { pct: 50 }, ToastKind::Timer { title: "t".into(), label: "l".into() }, ToastKind::Water];
+    a.game_fs = true;
+    a.drop_held_toasts();
+    assert_eq!(a.toast_q.len(), 1);
+    assert!(matches!(a.toast_q[0], ToastKind::Timer { .. }));
+}
+
+#[test]
+fn a_held_reminder_is_not_counted_as_given() {
+    let mut a = test_app(1.0);
+    let now = notif::now_unix() as i64;
+    a.todos = vec![Todo { done: false, text: "call mom".into(), due: Some(now - 20) }];
+    a.game_fs = true;
+    assert!(!a.todo_minute(now), "held during the game");
+    assert!(a.todo_fired.is_empty() && a.toast.is_none(), "and not marked as shown");
+    a.game_fs = false;
+    assert!(a.todo_minute(now + 60), "it comes when the game is over");
+    assert!(matches!(a.toast.as_ref().map(|t| &t.kind), Some(ToastKind::Todo { .. })));
+}
+
+#[test]
+fn game_mode_settings_flip_in_the_settings_window() {
+    let mut a = test_app(1.0);
+    assert!(a.cfg.game_mode && a.cfg.game_lyrics, "both on by default");
+    a.opt_press(opts::Rid::GameMode);
+    a.opt_press(opts::Rid::GameLyrics);
+    assert!(!a.cfg.game_mode && !a.cfg.game_lyrics);
+    assert!(!a.opt_on(opts::Rid::GameMode) && !a.opt_on(opts::Rid::GameLyrics));
+    a.opt_press(opts::Rid::GameMode);
+    assert!(a.opt_on(opts::Rid::GameMode));
+}
+
+#[test]
+fn snap_game_lyrics() {
+    shot("game-lyrics", 1.0, |a| {
+        song_with_lyric_line(a);
+        fullscreen(a);
+    });
+    shot("game-lyrics-off", 1.0, |a| {
+        song_with_lyric_line(a);
+        fullscreen(a);
+        a.cfg.game_lyrics = false;
+    });
+    let _lang = i18n::restore_on_drop();
+    sw_shot("settingswin-screens", page(SCREENS));
+    sw_shot("id-settingswin-screens", |a| {
+        a.cfg.lang = i18n::ID;
+        i18n::set(i18n::ID);
+        a.sw_show_page(SCREENS);
+    });
+}
+
+// ---------------------------------------------------------------- do not disturb
+
+#[test]
+fn do_not_disturb_holds_the_same_toasts_as_game_mode_but_not_its_own_hud() {
+    let mut a = test_app(1.0);
+    let held = [
+        ToastKind::Water,
+        ToastKind::Notification { id: 1 },
+        ToastKind::Charging { pct: 50 },
+        ToastKind::Bluetooth { name: "Buds".into(), pct: None, connected: false },
+        ToastKind::Todo { text: "t".into(), due: 0, more: 0 },
+        ToastKind::Hud { kind: HudKind::Caps, on: true },
+        ToastKind::Hud { kind: HudKind::Volume(10, false), on: true },
+    ];
+    let through = [
+        ToastKind::LowBattery { pct: 10 },
+        ToastKind::Privacy { cam: false, app: "x".into() },
+        ToastKind::Prayer { idx: 1, at: 700 },
+        ToastKind::Meeting { title: "m".into(), at: 0, link: None },
+        ToastKind::Timer { title: "t".into(), label: "l".into() },
+        ToastKind::Hud { kind: HudKind::Mic(Some(true)), on: true },
+        ToastKind::Hud { kind: HudKind::Dnd, on: true },
+        ToastKind::Hud { kind: HudKind::Dnd, on: false },
+    ];
+    assert!(held.iter().chain(&through).all(|k| !a.quiet_blocks(k)), "off: nothing is held");
+    a.cfg.dnd = true;
+    assert!(held.iter().all(|k| a.quiet_blocks(k)), "on: these are held, without any fullscreen app");
+    assert!(through.iter().all(|k| !a.quiet_blocks(k)), "on: these still show");
+    a.push_toast(ToastKind::Water);
+    assert!(a.toast.is_none() && a.toast_q.is_empty());
+    a.push_toast(ToastKind::Meeting { title: "Standup".into(), at: 0, link: None });
+    assert!(a.toast.is_some(), "a meeting still shows");
+}
+
+#[test]
+fn turning_do_not_disturb_on_clears_what_it_holds() {
+    let mut a = test_app(1.0);
+    a.push_toast(ToastKind::Charging { pct: 80 });
+    assert!(a.toast.is_some());
+    a.toast_q = vec![ToastKind::Water, ToastKind::Timer { title: "t".into(), label: "l".into() }];
+    a.set_dnd(true);
+    assert!(a.cfg.dnd);
+    assert!(a.toast.is_none(), "the charger toast that was showing is gone");
+    assert_eq!(a.toast_q.len(), 1, "and so is the water reminder that was waiting");
+    assert!(matches!(a.toast_q[0], ToastKind::Timer { .. }), "the timer stays");
+    // a toast that is not held keeps showing when it is turned on
+    a.toast_q.clear();
+    a.push_toast(ToastKind::LowBattery { pct: 10 });
+    a.set_dnd(true);
+    assert!(a.toast.is_some());
+    a.set_dnd(false);
+    assert!(!a.cfg.dnd);
+}
+
+#[test]
+fn the_hotkey_toggles_do_not_disturb_and_says_so() {
+    let mut a = test_app(1.0);
+    a.dnd_hotkey();
+    assert!(a.cfg.dnd);
+    assert!(matches!(a.toast.as_ref().map(|t| &t.kind), Some(ToastKind::Hud { kind: HudKind::Dnd, on: true })), "the HUD says on");
+    a.end_toast();
+    a.dnd_hotkey();
+    assert!(!a.cfg.dnd);
+    assert!(matches!(a.toast.as_ref().map(|t| &t.kind), Some(ToastKind::Hud { kind: HudKind::Dnd, on: false })), "and off");
+}
+
+#[test]
+fn a_task_that_comes_due_during_do_not_disturb_is_shown_after_it() {
+    let mut a = test_app(1.0);
+    let now = notif::now_unix() as i64;
+    a.todos = vec![Todo { done: false, text: "call mom".into(), due: Some(now - 60) }];
+    a.cfg.dnd = true;
+    assert!(!a.todo_minute(now));
+    assert!(a.todo_fired.is_empty() && a.toast.is_none());
+    a.cfg.dnd = false;
+    assert!(a.todo_minute(now + 60));
+}
+
+#[test]
+fn the_moon_shows_in_the_small_notch_while_do_not_disturb_is_on() {
+    let mut a = test_app(1.0);
+    assert!(!a.priv_marks().contains(&privacy::Mark::Dnd([176, 166, 255])));
+    assert_eq!(a.priv_extra(), 0.0);
+    a.cfg.dnd = true;
+    assert!(a.priv_marks().iter().any(|m| matches!(m, privacy::Mark::Dnd(_))));
+    assert!(a.priv_extra() > 0.0, "the notch makes room for it");
+    // the privacy dots stay at the edge: the moon comes after them
+    a.cfg.privacy_dot = true;
+    a.priv_cam = vec!["Zoom".into()];
+    let marks = a.priv_marks();
+    assert!(matches!(marks.first(), Some(privacy::Mark::Dot(_))) && matches!(marks.last(), Some(privacy::Mark::Dnd(_))));
+}
+
+#[test]
+fn snap_do_not_disturb() {
+    shot("dnd-moon", 1.0, |a| {
+        a.cfg.dnd = true;
+        a.priv_t = Instant::now() - Duration::from_secs(2);
+    });
+    shot("dnd-hud-on", 1.0, |a| show_toast(a, ToastKind::Hud { kind: HudKind::Dnd, on: true }));
+    shot("dnd-hud-off", 1.0, |a| show_toast(a, ToastKind::Hud { kind: HudKind::Dnd, on: false }));
+    sw_shot("settingswin-notifs-dnd", |a| {
+        a.cfg.dnd = true;
+        a.sw_show_page(NOTIFS);
+    });
+    let _lang = i18n::restore_on_drop();
+    shot("id-dnd-hud-on", 1.0, |a| {
+        a.cfg.lang = i18n::ID;
+        i18n::set(i18n::ID);
+        show_toast(a, ToastKind::Hud { kind: HudKind::Dnd, on: true });
+    });
+    sw_shot("id-settingswin-notifs-dnd", |a| {
+        a.cfg.lang = i18n::ID;
+        i18n::set(i18n::ID);
+        a.sw_show_page(NOTIFS);
+    });
+}
+
+#[test]
+fn do_not_disturb_settings_flip_in_the_settings_window() {
+    let mut a = test_app(1.0);
+    a.opt_press(opts::Rid::Dnd);
+    assert!(a.cfg.dnd && a.opt_on(opts::Rid::Dnd));
+    a.opt_press(opts::Rid::Dnd);
+    assert!(!a.cfg.dnd);
+    assert!(a.opt_on(opts::Rid::DndHotkey), "the key is on by default");
+    a.opt_press(opts::Rid::DndHotkey);
+    assert!(!a.opt_on(opts::Rid::DndHotkey));
+}
+
+// ---------------------------------------------------------------- quick launcher
+fn launcher_apps() {
+    let app = |n: &str| (n.to_string(), format!("C:/Start/{n}.lnk"));
+    launcher::set_test_apps(vec![
+        app("Notepad"),
+        app("Notes"),
+        app("Visual Studio Code"),
+        app("Google Chrome"),
+        app("Calculator"),
+        app("A very long application name that cannot possibly fit in one row of the launcher"),
+    ]);
+}
+
+fn type_in(a: &mut App, s: &str) {
+    for c in s.chars() {
+        a.launcher_char(c as u32);
+    }
+}
+
+/// Draw the open launcher at scale `s`, check it has content, and save it as `<name>@<percent>.png` when asked.
+fn launcher_shot(name: &str, s: f32, setup: impl FnOnce(&mut App)) {
+    let mut a = test_app(s);
+    launcher_apps();
+    a.launcher_open_now();
+    a.launcher.as_mut().unwrap().scale = s;
+    setup(&mut a);
+    launcher::launcher_render(&mut a);
+    let g = a.launcher.as_ref().unwrap().gfx.as_ref().expect("launcher canvas");
+    let opaque = g.pm.data().chunks_exact(4).filter(|p| p[3] == 255).count();
+    assert!(opaque as f32 > (g.pm.width() * g.pm.height()) as f32 * 0.98, "{name}: the window is drawn ({opaque} opaque pixels)");
+    let Some(dir) = std::env::var_os("SNAPSHOT_DIR") else { return };
+    std::fs::create_dir_all(&dir).expect("create snapshot folder");
+    let file = std::path::Path::new(&dir).join(format!("{name}@{}.png", (s * 100.0).round() as u32));
+    g.pm.save_png(&file).expect("save png");
+}
+
+#[test]
+fn snap_launcher() {
+    for s in SCALES {
+        launcher_shot("launcher-empty", s, |_| {});
+        launcher_shot("launcher-results", s, |a| {
+            type_in(a, "note");
+            a.launcher_key(0x28, false, false);
+        });
+        launcher_shot("launcher-commands", s, |a| type_in(a, "s"));
+        launcher_shot("launcher-calc", s, |a| type_in(a, "12*(3+4)"));
+        launcher_shot("launcher-long", s, |a| {
+            type_in(a, "a very long");
+            a.launcher_key(0x28, false, false);
+        });
+        launcher_shot("launcher-long-query", s, |a| {
+            type_in(a, "how to center a div in css when the parent is a flex container and more");
+        });
+        launcher_shot("launcher-apps-only", s, |a| {
+            type_in(a, "no");
+            a.launcher_key(0x09, false, false);
+        });
+        launcher_shot("launcher-no-results", s, |a| {
+            type_in(a, "zzz");
+            a.launcher_key(0x09, false, false);
+            a.launcher_key(0x09, false, false);
+        });
+    }
+    let _lang = i18n::restore_on_drop();
+    let id = |a: &mut App| {
+        a.cfg.lang = i18n::ID;
+        i18n::set(i18n::ID);
+    };
+    // the language is set before the window is built, so the labels are Indonesian
+    let mut a = test_app(1.0);
+    id(&mut a);
+    launcher_shot("id-launcher-results", 1.0, |a| type_in(a, "not"));
+    launcher_shot("id-launcher-empty", 1.0, |_| {});
+}
+
+#[test]
+fn the_launcher_is_its_own_window_and_closes_on_escape() {
+    let mut a = test_app(1.0);
+    launcher_apps();
+    assert!(!a.expanded());
+    a.launcher_toggle();
+    assert!(a.launcher.is_some());
+    assert!(!a.expanded(), "the notch does not open for it");
+    a.launcher_toggle();
+    assert!(a.launcher.is_none(), "the hotkey again closes it");
+    a.launcher_toggle();
+    type_in(&mut a, "abc");
+    a.launcher_char(27);
+    assert!(a.launcher.is_none(), "Esc closes it");
+    a.cfg.launcher = false;
+    a.launcher_toggle();
+    assert!(a.launcher.is_none(), "off in Settings: the hotkey does nothing");
+}
+
+#[test]
+fn the_window_is_just_the_input_until_there_is_something_to_show() {
+    let mut a = test_app(1.0);
+    launcher_apps();
+    a.launcher_toggle();
+    assert_eq!(a.launcher.as_ref().unwrap().hits.len(), 0);
+    launcher::launcher_render(&mut a);
+    let h = |a: &App| a.launcher.as_ref().unwrap().gfx.as_ref().unwrap().pm.height();
+    assert_eq!(h(&a), launcher::BAR_H as u32, "only the input");
+    type_in(&mut a, "note");
+    launcher::launcher_render(&mut a);
+    let rows = a.launcher.as_ref().unwrap().hits.len();
+    assert!(h(&a) > launcher::BAR_H as u32 + 100, "chips and {rows} results");
+    type_in(&mut a, "zzzz");
+    launcher::launcher_render(&mut a);
+    assert!(h(&a) > launcher::BAR_H as u32, "the chips stay while there is text");
+}
+
+#[test]
+fn the_chips_filter_the_results_and_tab_goes_through_them() {
+    use launcher::{Act, Filter};
+    let mut a = test_app(1.0);
+    launcher_apps();
+    a.launcher_toggle();
+    type_in(&mut a, "s");
+    let kinds = |a: &App| a.launcher.as_ref().unwrap().hits.iter().map(|h| std::mem::discriminant(&h.act)).collect::<std::collections::HashSet<_>>().len();
+    assert!(kinds(&a) >= 2, "all: commands and the web row at least");
+    a.launcher_key(0x09, false, false); // Tab: Apps
+    assert_eq!(a.launcher.as_ref().unwrap().filter, Filter::Apps);
+    assert!(a.launcher.as_ref().unwrap().hits.iter().all(|h| matches!(h.act, Act::Open(_))));
+    a.launcher_key(0x09, false, false); // Commands
+    assert!(a.launcher.as_ref().unwrap().hits.iter().all(|h| matches!(h.act, Act::Cmd(_))));
+    a.launcher_key(0x09, false, false); // Web
+    assert!(a.launcher.as_ref().unwrap().hits.iter().all(|h| matches!(h.act, Act::Url(_) | Act::Copy(_))));
+    a.launcher_key(0x09, false, false); // around to All
+    assert_eq!(a.launcher.as_ref().unwrap().filter, Filter::All);
+    a.launcher_key(0x09, false, true); // Shift+Tab: back to Web
+    assert_eq!(a.launcher.as_ref().unwrap().filter, Filter::Web);
+    // a click on a chip does the same
+    launcher::launcher_render(&mut a);
+    let (cx, cw) = a.launcher.as_ref().unwrap().chip_rects()[1];
+    a.launcher_click(cx + cw / 2.0, launcher::CHIP_Y + 5.0);
+    assert_eq!(a.launcher.as_ref().unwrap().filter, Filter::Apps);
+}
+
+#[test]
+fn enter_opens_the_chosen_app_and_remembers_it() {
+    let mut a = test_app(1.0);
+    launcher_apps();
+    launcher::done();
+    a.launcher_toggle();
+    type_in(&mut a, "note");
+    assert_eq!(a.launcher.as_ref().unwrap().hits[0].title, "Notes");
+    a.launcher_key(0x28, false, false); // down: Notepad
+    a.launcher_char(13);
+    assert_eq!(launcher::done(), ["open:C:/Start/Notepad.lnk"]);
+    assert!(a.launcher.is_none(), "it closes after running");
+    assert_eq!(a.launcher_freq.count("Notepad"), 1);
+    // next time, with no text, it is offered first
+    a.launcher_toggle();
+    assert_eq!(a.launcher.as_ref().unwrap().hits[0].title, "Notepad");
+    type_in(&mut a, "no");
+    assert_eq!(a.launcher.as_ref().unwrap().hits[0].title, "Notepad", "and ahead of Notes");
+}
+
+#[test]
+fn the_arrows_move_the_selection_and_the_list_scrolls_with_it() {
+    let mut a = test_app(1.0);
+    launcher::set_test_apps((0..9).map(|i| (format!("App {i}"), format!("{i}.lnk"))).collect());
+    a.launcher_toggle();
+    type_in(&mut a, "app");
+    let n = a.launcher.as_ref().unwrap().hits.len();
+    assert_eq!(n, 8);
+    assert_eq!(a.launcher.as_ref().unwrap().first(), 0);
+    for _ in 0..20 {
+        a.launcher_key(0x28, false, false);
+    }
+    let l = a.launcher.as_ref().unwrap();
+    assert_eq!(l.sel, n - 1, "stops at the last one");
+    assert_eq!(l.first(), n - launcher::VISIBLE, "the selected row is on the canvas");
+    for _ in 0..20 {
+        a.launcher_key(0x26, false, false);
+    }
+    assert_eq!(a.launcher.as_ref().unwrap().sel, 0);
+    assert!(!a.launcher_key(0x41, false, false), "other keys are not used");
+    // editing keys
+    a.launcher_key(0x24, false, false); // Home
+    a.launcher_key(0x2E, false, false); // Delete the first letter
+    assert_eq!(a.launcher.as_ref().unwrap().field.text(), "pp");
+    a.launcher_char(8); // Backspace at the start: nothing
+    assert_eq!(a.launcher.as_ref().unwrap().field.text(), "pp");
+    // Ctrl+Backspace (127) and Ctrl+Delete remove whole words
+    a.launcher_key(0x23, false, false); // End
+    a.launcher_char(' ' as u32);
+    type_in(&mut a, "one two");
+    a.launcher_char(127);
+    assert_eq!(a.launcher.as_ref().unwrap().field.text(), "pp one ");
+    a.launcher_key(0x24, false, false);
+    a.launcher_key(0x2E, true, false);
+    assert_eq!(a.launcher.as_ref().unwrap().field.text(), " one ");
+}
+
+#[test]
+fn a_calculation_is_copied_and_the_web_row_opens_a_search() {
+    let mut a = test_app(1.0);
+    launcher_apps();
+    launcher::done();
+    sys::opened();
+    a.launcher_toggle();
+    type_in(&mut a, "2+2*3");
+    a.launcher_char(13);
+    assert_eq!(launcher::done(), ["copy:8"]);
+    assert_eq!(a.launcher_freq.count("= 8"), 0, "results are not remembered");
+    a.launcher_toggle();
+    type_in(&mut a, "rust lang");
+    let n = a.launcher.as_ref().unwrap().hits.len();
+    a.launcher_key(0x28, false, false);
+    assert_eq!(a.launcher.as_ref().unwrap().sel, n - 1.min(n), "the web row is the only result");
+    a.launcher_char(13);
+    assert_eq!(sys::opened(), ["https://www.google.com/search?q=rust+lang"]);
+    // a typed address is opened as it is
+    a.launcher_toggle();
+    type_in(&mut a, "example.com");
+    a.launcher_char(13);
+    assert_eq!(sys::opened(), ["https://example.com"]);
+}
+
+#[test]
+fn clicking_a_result_runs_it_and_a_click_elsewhere_does_nothing() {
+    let mut a = test_app(1.0);
+    launcher_apps();
+    launcher::done();
+    a.launcher_toggle();
+    type_in(&mut a, "calc");
+    a.launcher_click(100.0, 20.0);
+    assert!(a.launcher.is_some() && launcher::done().is_empty(), "a click on the input does not run anything");
+    assert_eq!(a.launcher_cursor(100.0, 20.0), 2, "an I-beam over the input");
+    assert_eq!(a.launcher_cursor(100.0, launcher::ROWS_Y + 5.0), 1, "a hand over a result");
+    a.launcher_click(100.0, launcher::ROWS_Y + 5.0);
+    assert_eq!(launcher::done(), ["open:C:/Start/Calculator.lnk"]);
+    assert!(a.launcher.is_none());
+}
+
+#[test]
+fn commands_run_from_the_launcher() {
+    let mut a = test_app(1.0);
+    launcher_apps();
+    a.launcher_toggle();
+    type_in(&mut a, "do not dist");
+    assert_eq!(a.launcher.as_ref().unwrap().hits[0].act, launcher::Act::Cmd(launcher::Cmd::Dnd));
+    assert!(!a.cfg.dnd);
+    a.launcher_char(13);
+    assert!(a.cfg.dnd, "Do Not Disturb is on");
+    a.cfg.dnd = false;
+    // a slide by name
+    a.launcher_toggle();
+    type_in(&mut a, "water");
+    a.launcher_char(13);
+    assert_eq!(a.cur_id(), SlideId::Water);
+    assert!(a.expanded(), "the slide is shown for a while");
+    assert!(a.launcher.is_none());
+}
+
+#[test]
+fn the_lyrics_view_shows_a_hand_over_its_buttons() {
+    let mut a = test_app(1.0);
+    open_slide(&mut a, SlideId::Music);
+    a.lyric_mode = true;
+    a.media.title = "Song".into();
+    a.media.dur = 200;
+    let hand = |a: &App, x: f32, y: f32| a.cursor_kind(x, y) == 1;
+    assert!(hand(&a, lyricview::X_PIN, lyricview::Y_PIN), "the pin");
+    assert!(hand(&a, LX + 14.0, lyricview::LM_CY), "the lyrics button");
+    assert!(hand(&a, LX + 100.0, lyricview::LM_CY), "play");
+    assert!(!hand(&a, LX + 60.0, 4.0), "empty space is an arrow");
+}
+
+#[test]
+fn the_same_text_with_other_line_endings_is_one_entry() {
+    let mut h = clipboard::History::default();
+    let t0 = Instant::now();
+    assert!(h.push("one\r\ntwo", t0));
+    assert!(!h.push("one\ntwo", t0), "copied back with other line ends: nothing new");
+    assert!(!h.push("one\r\ntwo", t0));
+    assert_eq!(h.len(), 1);
+}
+
+#[test]
+fn snap_launcher_do_not_disturb_icon() {
+    for s in SCALES {
+        launcher_shot("launcher-dnd-icon", s, |a| type_in(a, "do not"));
+    }
+}
+
+#[test]
+fn the_shortcuts_page_lists_every_hotkey_and_dims_the_ones_that_are_off() {
+    let mut cfg = settings::Settings::default();
+    let g = settingswin::shortcut_groups(&cfg);
+    let flat: Vec<_> = g.iter().flat_map(|(_, r)| r.iter()).collect();
+    assert!(flat.iter().all(|r| r.2), "all on by default");
+    for k in ["Space", "M", "D", "H"] {
+        assert!(flat.iter().any(|r| r.1.contains(&k)), "{k} is listed");
+    }
+    cfg.launcher = false;
+    cfg.dnd_hotkey = false;
+    let off: Vec<_> = settingswin::shortcut_groups(&cfg).into_iter().flat_map(|(_, r)| r).filter(|r| !r.2).map(|r| r.1.last().copied().unwrap()).collect();
+    assert_eq!(off, ["Space", "D"]);
+}
+
+#[test]
+fn snap_shortcuts_page() {
+    let a = sw_shot("settingswin-shortcuts", page(SECS_SHORTCUTS));
+    assert!(settingswin::cut(&a).is_empty(), "cut: {:?}", settingswin::cut(&a));
+    let _lang = i18n::restore_on_drop();
+    let a = sw_shot("id-settingswin-shortcuts", |a| {
+        a.cfg.lang = i18n::ID;
+        i18n::set(i18n::ID);
+        a.sw_show_page(SECS_SHORTCUTS);
+    });
+    assert!(settingswin::cut(&a).is_empty(), "cut (id): {:?}", settingswin::cut(&a));
+}
+
+const SECS_SHORTCUTS: usize = 9;

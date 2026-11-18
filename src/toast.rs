@@ -25,6 +25,8 @@ pub(crate) enum HudKind {
     Brightness(u8),
     /// Microphone mute from Ctrl+Alt+M: muted, on, or None when there is no microphone.
     Mic(Option<bool>),
+    /// Do Not Disturb was turned on or off.
+    Dnd,
 }
 
 impl HudKind {
@@ -38,6 +40,7 @@ impl HudKind {
             HudKind::Volume(..) => "Volume",
             HudKind::Brightness(..) => tr("Brightness"),
             HudKind::Mic(..) => tr("Microphone"),
+            HudKind::Dnd => tr("Do Not Disturb"),
             HudKind::Caps => "Caps Lock",
             HudKind::Num => "Num Lock",
             HudKind::Scroll => "Scroll Lock",
@@ -51,6 +54,7 @@ impl HudKind {
             HudKind::Volume(..) => "V",
             HudKind::Brightness(..) => "B",
             HudKind::Mic(..) => "M",
+            HudKind::Dnd => "D",
         }
     }
 }
@@ -77,6 +81,8 @@ pub(crate) enum ToastKind {
     Timer { title: String, label: String },
     /// A meeting starts now: title, start (unix seconds) and its Join link.
     Meeting { title: String, at: i64, link: Option<String> },
+    /// A task with a due time came due: its text, the due time (unix seconds) and how many more came due with it.
+    Todo { text: String, due: i64, more: u32 },
     /// A newer release is out, or the answer to "Check for updates".
     Update(update::Note),
     /// A download finished: full path of the file, with Open / Show in folder (downloads.rs).
@@ -105,9 +111,65 @@ pub(crate) fn pop(t: f32) -> f32 {
     1.0 - (-8.0 * t).exp() * (14.0 * t).cos()
 }
 
+/// Quiet times (Do Not Disturb, game mode over a fullscreen app) hold back these toasts. What stays: low battery, the
+/// privacy warning, a failed app launch (the user just clicked), prayer and meeting reminders, timers, update results,
+/// and the feedback of the microphone and Do Not Disturb hotkeys.
+fn quiet_holds(kind: &ToastKind) -> bool {
+    match kind {
+        ToastKind::Charging { .. }
+        | ToastKind::Unplugged { .. }
+        | ToastKind::Bluetooth { .. }
+        | ToastKind::Notification { .. }
+        | ToastKind::Downloaded { .. }
+        | ToastKind::Ext { .. }
+        | ToastKind::Water
+        | ToastKind::Todo { .. } => true,
+        ToastKind::Hud { kind, .. } => !matches!(kind, HudKind::Mic(..) | HudKind::Dnd),
+        ToastKind::LowBattery { .. }
+        | ToastKind::NotifOpenFailed { .. }
+        | ToastKind::Privacy { .. }
+        | ToastKind::Prayer { .. }
+        | ToastKind::Timer { .. }
+        | ToastKind::Meeting { .. }
+        | ToastKind::Update(_) => false,
+    }
+}
+
 impl App {
+    /// Is this toast held back right now (Do Not Disturb, or game mode over a fullscreen app)? Whoever raises a reminder
+    /// checks this before it counts the reminder as given, so a held one is not lost.
+    pub(crate) fn quiet_blocks(&self, kind: &ToastKind) -> bool {
+        (self.cfg.dnd || (self.cfg.game_mode && self.game_fs)) && quiet_holds(kind)
+    }
+
+    /// Turn Do Not Disturb on or off (settings, tray menu or hotkey). Turning it on drops what is queued and what is
+    /// showing, if that is held. Saves.
+    pub(crate) fn set_dnd(&mut self, on: bool) {
+        self.cfg.dnd = on;
+        self.priv_t = Instant::now(); // the moon pops in
+        if on {
+            self.drop_held_toasts();
+            if self.toast.as_ref().is_some_and(|t| self.quiet_blocks(&t.kind)) {
+                self.end_toast();
+            }
+        }
+        self.save_settings();
+    }
+
+    /// Ctrl+Alt+D: toggle Do Not Disturb and say so (that HUD is never held back itself).
+    pub(crate) fn dnd_hotkey(&mut self) {
+        self.set_dnd(!self.cfg.dnd);
+        self.push_toast(ToastKind::Hud { kind: HudKind::Dnd, on: self.cfg.dnd });
+    }
+
+    /// Forget the queued toasts that a quiet time holds back (it just started).
+    pub(crate) fn drop_held_toasts(&mut self) {
+        let queued = std::mem::take(&mut self.toast_q);
+        self.toast_q = queued.into_iter().filter(|k| !self.quiet_blocks(k)).collect();
+    }
+
     pub(crate) fn push_toast(&mut self, kind: ToastKind) {
-        if self.display_off {
+        if self.display_off || self.quiet_blocks(&kind) {
             return;
         }
         // HUD beruntun (mis. Caps Lock ditekan dua kali) menggantikan HUD yang sedang tampil, tanpa antre.
@@ -146,6 +208,7 @@ impl App {
             ToastKind::Water => 12.0,
             ToastKind::Timer { .. } => 6.0,
             ToastKind::Meeting { .. } => 15.0,
+            ToastKind::Todo { .. } => 8.0,
             ToastKind::Update(update::Note::Available(_)) => 10.0,
             ToastKind::Update(update::Note::Downloading(_)) => 20.0,
             ToastKind::Update(update::Note::DownloadFailed(_)) => 12.0,
@@ -268,6 +331,10 @@ impl App {
             ToastKind::LowBattery { pct } => (ACCENT, tr("Battery low").to_string(), tr("Plug in your charger").to_string(), *pct as f32 / 100.0, Some(format!("{}%", pct))),
             ToastKind::Timer { title, label } => ([255, 170, 60], title.clone(), label.clone(), 1.0, None),
             ToastKind::Ext { title, sub, count, .. } => (g.acc.bright, title.clone(), sub.clone(), 1.0, (*count > 1).then(|| count.to_string())),
+            ToastKind::Todo { text, due, more } => {
+                let sub = fill(tr("Due \u{b7} {}"), &[&calendar::hhmm(*due, calendar::local_offset())]);
+                (g.acc.bright, text.clone(), sub, 1.0, (*more > 0).then(|| format!("+{more}")))
+            }
             ToastKind::NotifOpenFailed { app } => (GREY, tr("Couldn't open app").to_string(), app.clone(), 1.0, None),
             ToastKind::Bluetooth { name, pct, connected } => {
                 let s = match (connected, pct) {
@@ -311,6 +378,11 @@ impl App {
             ToastKind::Prayer { .. } => g.icon_crescent(rcx, cy, 18.0 * sc, &ic),
             ToastKind::Timer { .. } => g.icon_bell(rcx, cy, 17.0 * sc, (t * 22.0).sin() * (1.0 - t / 1.5).max(0.0), &ic),
             ToastKind::Ext { .. } => g.slide_icon(SlideId::Ext(0), rcx, cy, 17.0 * sc, &ic),
+            ToastKind::Todo { .. } => {
+                // a check mark
+                g.line(rcx - 5.5 * sc, cy + 0.5 * sc, rcx - 1.5 * sc, cy + 4.2 * sc, 2.3, &ic);
+                g.line(rcx - 1.5 * sc, cy + 4.2 * sc, rcx + 5.8 * sc, cy - 4.2 * sc, 2.3, &ic);
+            }
             ToastKind::NotifOpenFailed { .. } => g.icon_bell(rcx, cy, 17.0 * sc, 0.0, &ic),
             ToastKind::Notification { .. } | ToastKind::Hud { .. } | ToastKind::Privacy { .. } | ToastKind::Water | ToastKind::Meeting { .. } | ToastKind::Update(_) | ToastKind::Downloaded { .. } => {}
         }
@@ -417,7 +489,11 @@ impl App {
         let sweep = 1.0 - (1.0 - ((t - 0.05) / 0.35).clamp(0.0, 1.0)).powi(3);
         let frac = if on { sweep } else { 0.0 };
         g.ring(rcx, cy, r, frac, 3.0, &paint(col[0], col[1], col[2], 0.28 * al), &paint(col[0], col[1], col[2], al));
-        g.txt_c(kind.glyph(), rcx, cy - 7.0 * sc, 13.0 * sc, [255, 255, 255], al * if on { 1.0 } else { 0.55 }, 20.0, true);
+        if let HudKind::Dnd = kind {
+            g.icon_crescent(rcx, cy, 15.0 * sc, &paint(255, 255, 255, al * if on { 1.0 } else { 0.55 }));
+        } else {
+            g.txt_c(kind.glyph(), rcx, cy - 7.0 * sc, 13.0 * sc, [255, 255, 255], al * if on { 1.0 } else { 0.55 }, 20.0, true);
+        }
         let k = ss(0.08, 0.32, t);
         g.txtb(kind.label(), x0 + 54.0 + (1.0 - k) * 6.0, cy - 9.0, 14.0, [255, 255, 255], al * k, 120.0);
         let state = if on { tr("On") } else { tr("Off") };

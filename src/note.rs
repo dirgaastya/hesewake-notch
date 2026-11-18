@@ -322,7 +322,7 @@ pub(crate) unsafe fn clip_set(hwnd: HWND, text: &str) {
         return;
     }
     let _ = EmptyClipboard();
-    let wide: Vec<u16> = text.replace('\n', "\r\n").encode_utf16().chain(std::iter::once(0)).collect();
+    let wide: Vec<u16> = text.replace("\r\n", "\n").replace('\n', "\r\n").encode_utf16().chain(std::iter::once(0)).collect();
     if let Ok(h) = GlobalAlloc(GMEM_MOVEABLE, wide.len() * 2) {
         let p = GlobalLock(h) as *mut u16;
         if p.is_null() {

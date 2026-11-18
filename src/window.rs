@@ -250,7 +250,7 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                             if let Some((vol, muted)) = audio::adjust(audio::wheel_step(d)) {
                                 // Notch sedang terbuka: indikator di dalam slide (toast dibatalkan saat hover).
                                 a.vol_state = ((vol * 100.0).round() as u8, muted);
-                                a.vol_t = Instant::now();
+                                a.vol_touch();
                                 a.last = Instant::now();
                                 present(a);
                                 schedule(a);
@@ -364,7 +364,7 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                     }
                     c if c >= 32 => {
                         if let Some(ch) = char::from_u32(c) {
-                            if a.input.chars().count() < 60 {
+                            if a.input.chars().count() < 80 {
                                 a.input.push(ch);
                             }
                         }
@@ -470,7 +470,7 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
             with_app(|a| {
                 // indikator di slide Music (bila terbuka) + HUD di notch kecil
                 a.vol_state = (pct, muted);
-                a.vol_t = Instant::now();
+                a.vol_touch();
                 if a.cfg.hud_volume {
                     a.push_toast(ToastKind::Hud { kind: HudKind::Volume(pct, muted), on: true });
                 }
@@ -592,14 +592,15 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
         sys::WM_TRAY => {
             match (lp.0 & 0xffff) as u32 {
                 WM_RBUTTONUP | WM_CONTEXTMENU => {
-                    let (mut minimal, mut notif_on, mut update) = (false, true, None);
+                    let (mut minimal, mut notif_on, mut dnd, mut update) = (false, true, false, None);
                     with_app(|a| {
                         a.menu_open = true;
                         minimal = a.minimal;
                         notif_on = a.notif_on;
+                        dnd = a.cfg.dnd;
                         update = a.update.as_ref().map(|r| r.version.clone());
                     });
-                    let cmd = sys::tray_menu(hwnd, sys::autostart_enabled(), minimal, notif_on, update.as_deref());
+                    let cmd = sys::tray_menu(hwnd, sys::autostart_enabled(), minimal, notif_on, dnd, update.as_deref());
                     run_command(hwnd, cmd);
                 }
                 WM_LBUTTONUP => {
@@ -682,6 +683,20 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
             let id = wp.0 as i32;
             if id == HOTKEY_ID {
                 with_app(|a| toggle_idle_phase(a));
+            } else if id == hotkeys::LAUNCHER_ID {
+                with_app(|a| {
+                    a.launcher_toggle();
+                    a.last = Instant::now();
+                    present(a);
+                    schedule(a);
+                });
+            } else if id == hotkeys::DND_ID {
+                with_app(|a| {
+                    a.dnd_hotkey();
+                    a.last = Instant::now();
+                    present(a);
+                    schedule(a);
+                });
             } else if id == hotkeys::MIC_ID {
                 with_app(|a| {
                     a.mic_hotkey();
@@ -785,6 +800,7 @@ unsafe fn run_command(hwnd: HWND, cmd: i32) {
                 }
             }
             sys::CMD_NOTIF_ACCESS => sys::open_notification_settings(),
+            sys::CMD_DND => a.set_dnd(!a.cfg.dnd),
             _ => {}
         }
         a.last = Instant::now();

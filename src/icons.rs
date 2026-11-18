@@ -359,6 +359,7 @@ pub(crate) enum OutlineIcon {
     Speaker,
     Cloud,
     Info,
+    Keyboard,
 }
 
 /// Outline icons in a unit box (-1..1 on both axes), drawn with round caps.
@@ -525,6 +526,13 @@ impl Gfx {
                     }
                 }
                 pen.polyline(&pts, true);
+            }
+            OutlineIcon::Keyboard => {
+                pen.rrect(-0.98, -0.62, 1.96, 1.24, 0.25);
+                for x in [-0.6, -0.2, 0.2, 0.6] {
+                    pen.dot(x, -0.24, 0.07);
+                }
+                pen.polyline(&[(-0.5, 0.26), (0.5, 0.26)], false);
             }
             OutlineIcon::Info => {
                 pen.circle(0.0, 0.0, 0.9);

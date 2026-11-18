@@ -1,6 +1,7 @@
 //! Clipboard history: the last few texts copied in any app, shown on the Clipboard slide. Click one to copy it again.
 //! Text only, kept in memory (never written to disk), and entries that ask not to be recorded (password managers) are
-//! skipped.
+//! skipped. An entry can be pinned: it stays at the top, survives "Clear" and is never pushed out by newer copies
+//! (still memory only, so pins are gone when the app closes).
 
 use super::*;
 use windows::Win32::Foundation::HGLOBAL;
@@ -12,6 +13,8 @@ use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 
 /// Most entries kept; the oldest is dropped first.
 pub(crate) const MAX_ITEMS: usize = 10;
+/// Most entries that can be pinned at once (they count towards `MAX_ITEMS`).
+pub(crate) const MAX_PINS: usize = 5;
 /// Longer copies (e.g. a whole file) are not kept.
 pub(crate) const MAX_CHARS: usize = 100_000;
 /// Standard clipboard format for UTF-16 text.
@@ -21,9 +24,11 @@ pub(crate) struct Clip {
     pub(crate) text: String,
     /// When it was copied (last time, if it was copied more than once).
     pub(crate) at: Instant,
+    /// Pinned entries come first in the list and are kept through "Clear" and the `MAX_ITEMS` limit.
+    pub(crate) pinned: bool,
 }
 
-/// Newest first.
+/// Pinned entries first (in the order they were pinned), then the others, newest first.
 #[derive(Default)]
 pub(crate) struct History {
     items: Vec<Clip>,
@@ -42,23 +47,54 @@ impl History {
         self.items.is_empty()
     }
 
-    /// Add `text` as the newest entry. Blank or very long text is ignored; text already in the list moves to the top.
-    /// True if the list changed.
+    /// How many entries at the top are pinned.
+    pub(crate) fn pinned_count(&self) -> usize {
+        self.items.iter().take_while(|c| c.pinned).count()
+    }
+
+    /// Add `text` as the newest entry (below the pinned ones). Blank or very long text is ignored; text already in the
+    /// list moves to the top, except a pinned entry, which keeps its place and only gets a fresh time. True if the list
+    /// changed.
     pub(crate) fn push(&mut self, text: &str, now: Instant) -> bool {
         if text.trim().is_empty() || text.chars().count() > MAX_CHARS {
             return false;
         }
-        match self.items.iter().position(|c| c.text == text) {
-            Some(0) => return false,
+        let p = self.pinned_count();
+        match self.items.iter().position(|c| same_text(&c.text, text)) {
+            Some(i) if self.items[i].pinned => self.items[i].at = now,
+            Some(i) if i == p => return false,
             Some(i) => {
                 let mut c = self.items.remove(i);
                 c.at = now;
-                self.items.insert(0, c);
+                self.items.insert(p, c);
             }
             None => {
-                self.items.insert(0, Clip { text: text.to_string(), at: now });
+                self.items.insert(p, Clip { text: text.to_string(), at: now, pinned: false });
+                // the pinned ones are first and there are fewer of them than `MAX_ITEMS`, so only unpinned entries go
                 self.items.truncate(MAX_ITEMS);
             }
+        }
+        true
+    }
+
+    /// Pin entry `i`, or unpin it if it is pinned. A pin is refused (false) when `MAX_PINS` are already pinned.
+    pub(crate) fn toggle_pin(&mut self, i: usize) -> bool {
+        if i >= self.items.len() {
+            return false;
+        }
+        let p = self.pinned_count();
+        let mut c = self.items.remove(i);
+        if c.pinned {
+            c.pinned = false;
+            // back among the others, where its time puts it
+            let at = (p - 1..self.items.len()).find(|&k| self.items[k].at < c.at).unwrap_or(self.items.len());
+            self.items.insert(at, c);
+        } else if p >= MAX_PINS {
+            self.items.insert(i, c);
+            return false;
+        } else {
+            c.pinned = true;
+            self.items.insert(p, c);
         }
         true
     }
@@ -69,9 +105,21 @@ impl History {
         }
     }
 
+    /// Remove every entry that is not pinned.
     pub(crate) fn clear(&mut self) {
+        self.items.retain(|c| c.pinned);
+    }
+
+    /// Remove everything, pins included (the slide was turned off).
+    pub(crate) fn clear_all(&mut self) {
         self.items.clear();
     }
+}
+
+/// The same text, ignoring CRLF against LF (copying an entry back may change the line ends).
+fn same_text(a: &str, b: &str) -> bool {
+    let lf = |s: &str| s.replace("\r\n", "\n");
+    a == b || lf(a) == lf(b)
 }
 
 /// One row of text: every run of whitespace (newlines, tabs) becomes one space.
@@ -174,6 +222,8 @@ pub(crate) const CLEAR_BTN: (f32, f32, f32, f32) = (RX - 56.0, 9.0, 56.0, 24.0);
 const FLASH_SECS: f32 = 1.2;
 /// Width of the × area at a row's right end.
 const X_W: f32 = 28.0;
+/// Width of the pin area just left of the ×.
+const PIN_W: f32 = 24.0;
 
 /// Row width for `n` entries (narrower when the scrollbar shows).
 pub(crate) fn row_w(n: usize) -> f32 {
@@ -203,6 +253,8 @@ pub(crate) enum ClipHit {
     Copy(usize),
     /// The × on entry `i`.
     Remove(usize),
+    /// The pin on entry `i`.
+    Pin(usize),
     Clear,
 }
 
@@ -226,7 +278,13 @@ impl App {
                 break;
             }
             if in_rect(x, y, LX, ROW_Y0 + vi as f32 * ROW_P, w, ROW_H) {
-                return Some(if x > LX + w - X_W { ClipHit::Remove(i) } else { ClipHit::Copy(i) });
+                return Some(if x > LX + w - X_W {
+                    ClipHit::Remove(i)
+                } else if x > LX + w - X_W - PIN_W {
+                    ClipHit::Pin(i)
+                } else {
+                    ClipHit::Copy(i)
+                });
             }
         }
         None
@@ -239,8 +297,14 @@ impl App {
                 let text = self.clips.items().get(i)?.text.clone();
                 self.clips.push(&text, Instant::now());
                 self.clip_scroll = 0;
-                self.clip_flash = Some(Instant::now());
+                // an unpinned entry moved to the top of its group; a pinned one stayed where it was
+                let at = self.clips.items().iter().position(|c| c.text == text).unwrap_or(0);
+                self.clip_flash = Some((at, Instant::now()));
                 Some(text)
+            }
+            ClipHit::Pin(i) => {
+                self.clips.toggle_pin(i);
+                None
             }
             ClipHit::Remove(i) => {
                 if let Some(c) = self.clips.items().get(i) {
@@ -252,7 +316,10 @@ impl App {
             }
             ClipHit::Clear => {
                 // dua langkah: klik pertama meminta konfirmasi ("Sure?"), klik kedua dalam 2,5 detik menghapus
-                if self.clip_clear_t.is_some_and(|t| t.elapsed().as_secs_f32() < 2.5) {
+                if self.clips.len() == self.clips.pinned_count() {
+                    // only pins left: nothing to clear
+                    self.clip_clear_t = None;
+                } else if self.clip_clear_t.is_some_and(|t| t.elapsed().as_secs_f32() < 2.5) {
                     self.clips.clear();
                     self.clip_clear_t = None;
                 } else {
@@ -273,7 +340,7 @@ impl App {
     /// The clipboard changed to `text` (None: no text, or not allowed to be recorded). True if the list changed.
     pub(crate) fn on_clipboard(&mut self, text: Option<String>, now: Instant) -> bool {
         if !self.clip_enabled() {
-            self.clips.clear();
+            self.clips.clear_all();
             self.clip_scroll = 0;
             return false;
         }
@@ -287,7 +354,7 @@ impl App {
     }
 
     fn clip_flashing(&self) -> bool {
-        self.clip_flash.is_some_and(|t| t.elapsed().as_secs_f32() < FLASH_SECS)
+        self.clip_flash.is_some_and(|(_, t)| t.elapsed().as_secs_f32() < FLASH_SECS)
     }
 
     pub(crate) fn clip_animating(&self) -> bool {
@@ -296,7 +363,7 @@ impl App {
             && (self.clip_flashing()
                 || self.clip_clear_t.is_some_and(|t| t.elapsed().as_secs_f32() < 2.6)
                 || self.clip_gone.iter().any(|g| g.2.elapsed().as_secs_f32() < 0.3)
-                || self.clips.items().first().is_some_and(|c| c.at.elapsed().as_secs_f32() < 0.35))
+                || self.clips.items().get(self.clips.pinned_count()).is_some_and(|c| c.at.elapsed().as_secs_f32() < 0.35))
     }
 
     pub(crate) fn slide_clipboard(&self, g: &mut Gfx, ox: f32, al: f32) {
@@ -337,10 +404,11 @@ impl App {
             }
         }
         let flashing = self.clip_flashing();
+        let pins = self.clips.pinned_count();
         for (vi, c) in self.clips.items().iter().skip(self.clip_scroll).take(ROWS).enumerate() {
             let i = self.clip_scroll + vi;
-            // item yang baru disalin meluncur masuk dari atas sambil memudar
-            let born = (i == 0).then(|| (c.at.elapsed().as_secs_f32() / 0.3).clamp(0.0, 1.0)).unwrap_or(1.0);
+            // item yang baru disalin meluncur masuk dari atas (di bawah yang disematkan) sambil memudar
+            let born = (i == pins && !c.pinned).then(|| (c.at.elapsed().as_secs_f32() / 0.3).clamp(0.0, 1.0)).unwrap_or(1.0);
             let born = born * born * (3.0 - 2.0 * born);
             let al = al * born;
             let shift: f32 = self
@@ -350,9 +418,15 @@ impl App {
                 .map(|(_, _, t)| (1.0 - (t.elapsed().as_secs_f32() / 0.25).clamp(0.0, 1.0)) * ROW_P)
                 .sum();
             let y = ROW_Y0 + vi as f32 * ROW_P - (1.0 - born) * 10.0 + shift;
-            let copied = i == 0 && flashing;
+            let copied = flashing && self.clip_flash.is_some_and(|(fi, _)| fi == i);
             let hover = cur.is_some_and(|(hx, hy)| in_rect(hx, hy, x, y, w, ROW_H));
-            let bg = if copied { g.sacc(0.30 * al) } else { paint(255, 255, 255, if hover { 0.13 } else { 0.08 } * al) };
+            let bg = if copied {
+                g.sacc(0.30 * al)
+            } else if c.pinned {
+                g.sacc(if hover { 0.22 } else { 0.14 } * al)
+            } else {
+                paint(255, 255, 255, if hover { 0.13 } else { 0.08 } * al)
+            };
             g.fill(&rrect(x, y, w, ROW_H, 10.0), &bg);
             let (right, rcol) = if copied {
                 (tr("Copied").to_string(), g.acc.bright)
@@ -362,14 +436,14 @@ impl App {
                 (ago(c.at.elapsed().as_secs()), TEXT_FAINT)
             };
             let rw = g.width(&right, 11.0);
-            g.txt(&right, x + w - X_W - rw, y + ty(ROW_H, 11.0), 11.0, rcol, al, 60.0);
+            g.txt(&right, x + w - X_W - PIN_W - rw, y + ty(ROW_H, 11.0), 11.0, rcol, al, 60.0);
             let kind = clip_kind(&c.text);
             clip_tile(g, kind, x + 8.0, y + 4.0, al);
             let tx = x + 38.0;
             let trimmed = c.text.trim();
             let extra = trimmed.lines().count().saturating_sub(1);
             let first = trimmed.lines().next().unwrap_or("");
-            let maxw = w - 38.0 - X_W - rw - 10.0 - if extra > 0 { 30.0 } else { 0.0 };
+            let maxw = w - 38.0 - X_W - PIN_W - rw - 10.0 - if extra > 0 { 30.0 } else { 0.0 };
             let ry = y + ty(ROW_H, 13.0);
             let used = if let ClipKind::Url = kind {
                 // alamat: domain tebal, sisanya redup
@@ -396,6 +470,17 @@ impl App {
                 let bx = tx + used + 6.0;
                 g.fill(&rrect(bx, y + 8.0, 24.0, 14.0, 7.0), &paint(255, 255, 255, 0.16 * al));
                 g.txt_c(&format!("+{extra}"), bx + 12.0, y + 8.0 + ty(14.0, 10.0), 10.0, [225, 225, 232], al, 24.0, true);
+            }
+            // the pin: always on a pinned row, on hover for the others (dim when all the pins are taken)
+            if c.pinned || hover {
+                let (px, py) = (x + w - X_W - PIN_W / 2.0, y + ROW_H / 2.0);
+                if c.pinned {
+                    let b = g.acc.bright;
+                    g.icon_pin(px, py, 13.0, &paint(b[0], b[1], b[2], al), true);
+                } else {
+                    let full = pins >= MAX_PINS;
+                    g.icon_pin(px, py, 13.0, &paint(255, 255, 255, (if full { 0.2 } else { 0.5 }) * al), false);
+                }
             }
             let (cx, cy) = (x + w - X_W / 2.0, y + ROW_H / 2.0);
             let xp = paint(255, 255, 255, 0.45 * al);
@@ -678,5 +763,84 @@ mod tests {
         assert!(!allowed(false, true, None), "Clipboard Viewer Ignore");
         assert!(!allowed(false, false, Some(Some(0))), "CanIncludeInClipboardHistory = 0");
         assert!(!allowed(false, false, Some(None)), "CanIncludeInClipboardHistory present but unreadable: do not keep");
+    }
+
+    fn filled(n: usize) -> History {
+        let mut h = History::default();
+        let t = Instant::now();
+        for i in 0..n {
+            h.push(&format!("item {i}"), t + Duration::from_secs(i as u64));
+        }
+        h
+    }
+
+    #[test]
+    fn a_pinned_entry_moves_to_the_top_and_new_copies_go_below_it() {
+        let mut h = filled(3); // item 2, item 1, item 0
+        assert!(h.toggle_pin(2));
+        assert_eq!(at(&h), ["item 0", "item 2", "item 1"]);
+        assert_eq!(h.pinned_count(), 1);
+        h.push("fresh", Instant::now() + Duration::from_secs(60));
+        assert_eq!(at(&h), ["item 0", "fresh", "item 2", "item 1"], "the pin stays first");
+    }
+
+    #[test]
+    fn pins_are_not_pushed_out_by_newer_copies() {
+        let mut h = filled(MAX_ITEMS);
+        let oldest = h.items().last().unwrap().text.clone();
+        assert!(h.toggle_pin(MAX_ITEMS - 1));
+        for i in 0..MAX_ITEMS * 2 {
+            h.push(&format!("later {i}"), Instant::now() + Duration::from_secs(100 + i as u64));
+        }
+        assert_eq!(h.len(), MAX_ITEMS);
+        assert_eq!(h.items()[0].text, oldest, "the oldest entry survived because it is pinned");
+        assert!(h.items()[0].pinned);
+    }
+
+    #[test]
+    fn clear_keeps_the_pins_and_clear_all_does_not() {
+        let mut h = filled(4);
+        h.toggle_pin(0);
+        h.toggle_pin(3);
+        h.clear();
+        assert_eq!(h.len(), 2);
+        assert!(h.items().iter().all(|c| c.pinned));
+        h.clear_all();
+        assert!(h.is_empty());
+    }
+
+    #[test]
+    fn only_so_many_entries_can_be_pinned() {
+        let mut h = filled(MAX_PINS + 2);
+        for _ in 0..MAX_PINS {
+            assert!(h.toggle_pin(MAX_PINS + 1));
+        }
+        assert_eq!(h.pinned_count(), MAX_PINS);
+        let before: Vec<String> = h.items().iter().map(|c| c.text.clone()).collect();
+        assert!(!h.toggle_pin(MAX_PINS), "one more is refused");
+        let after: Vec<String> = h.items().iter().map(|c| c.text.clone()).collect();
+        assert_eq!(before, after, "and nothing moved");
+        assert!(!h.toggle_pin(99), "out of range is ignored");
+    }
+
+    #[test]
+    fn unpinning_puts_the_entry_back_where_its_time_belongs() {
+        let mut h = filled(4); // item 3 (newest) .. item 0 (oldest)
+        h.toggle_pin(3); // item 0 pinned
+        assert_eq!(at(&h), ["item 0", "item 3", "item 2", "item 1"]);
+        assert!(h.toggle_pin(0));
+        assert_eq!(at(&h), ["item 3", "item 2", "item 1", "item 0"]);
+        assert_eq!(h.pinned_count(), 0);
+    }
+
+    #[test]
+    fn copying_a_pinned_text_again_keeps_its_place() {
+        let mut h = filled(3);
+        h.toggle_pin(2);
+        h.toggle_pin(2); // pins: item 0, item 1
+        assert_eq!(at(&h)[..2], ["item 0", "item 1"]);
+        h.push("item 1", Instant::now() + Duration::from_secs(50));
+        assert_eq!(at(&h), ["item 0", "item 1", "item 2"], "no duplicate and no move");
+        assert_eq!(h.len(), 3);
     }
 }

@@ -132,7 +132,6 @@ pub(crate) fn in_panel(x: f32, y: f32) -> bool {
 /// The volume and "switched to" overlays over the controls row: wide enough to cover the output and lyrics buttons.
 pub(crate) const OVERLAY: (f32, f32, f32, f32) = (MCX - 108.0, 110.0, 216.0, 36.0);
 /// Seconds the "switched to" overlay stays, like the volume overlay.
-const OVERLAY_SECS: f32 = 1.5;
 
 #[cfg(not(test))]
 fn backend() -> Sys {
@@ -246,7 +245,7 @@ impl App {
         }
         if switch(&backend(), id) {
             self.outs.cur = Some(id.to_string());
-            self.out_t = Instant::now();
+            self.out_touch();
         } else {
             sys::open_url("ms-settings:sound");
             self.out_refresh(); // some roles may have switched
@@ -315,7 +314,7 @@ impl App {
         match self.outs.next(dir).map(|d| d.id.clone()) {
             Some(id) => self.out_pick(&id),
             // only one device: show which one plays
-            None if self.outs.current().is_some() => self.out_t = Instant::now(),
+            None if self.outs.current().is_some() => self.out_touch(),
             None => {}
         }
         true
@@ -341,8 +340,7 @@ impl App {
 
     /// Overlay over the controls row after a switch: device icon and name.
     pub(crate) fn draw_out_overlay(&self, g: &mut Gfx, ox: f32, al: f32) {
-        let e = self.out_t.elapsed().as_secs_f32();
-        let a = al * (e / 0.1).min(1.0) * (1.0 - ((e - (OVERLAY_SECS - 0.3)) / 0.3).clamp(0.0, 1.0));
+        let a = al * music::overlay_alpha(self.out_t.elapsed().as_secs_f32());
         let Some(d) = self.outs.current() else { return };
         if a <= 0.01 {
             return;
