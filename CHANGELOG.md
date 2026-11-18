@@ -17,6 +17,7 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/), versi mengikut
 - **Music**: slider volume vertikal di atas tombol output dihapus. Volume tetap diatur dengan roda mouse di slide dan dengan klik pada bar volume yang muncul setelahnya.
 
 ### Fixed
+- **Notch**: dengan taskbar Windows disembunyikan otomatis, jendela yang dimaksimalkan (mis. Chrome) tidak lagi dianggap layar penuh, jadi notch tidak menciut jadi garis tipis kecuali "Thin on maximize" menyala. Layar penuh sungguhan (F11, video, game) tetap terdeteksi.
 - **Clipboard**: menyalin kembali teks beberapa baris dengan klik tidak lagi menambah entri ganda (akhir baris CRLF dan LF dianggap sama).
 - **Music**: di tampilan lirik, kursor kini berubah jadi tangan di atas tombol (pin, lirik, sebelumnya/putar/berikutnya, bar waktu, kredit sumber).
 - **Music**: indikator volume dan indikator perangkat output tidak lagi berkedip. Menyentuh salah satunya saat yang lain sedang tampil (roda mouse, klik bar, tombol volume, ganti perangkat) tidak lagi memulai ulang fade-in dari nol, yang sesaat membuka tombol di bawahnya. Perubahan volume dari aplikasi sendiri juga dicatat sebelum diterapkan, supaya gema dari Windows tidak memunculkan indikator kedua.
