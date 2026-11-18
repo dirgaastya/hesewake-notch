@@ -63,11 +63,12 @@ pub(crate) enum Sec {
     Alerts,
     Weather,
     Calendar,
+    Shortcuts,
     Extensions,
     About,
 }
 
-pub(crate) const SECS: [Sec; 11] = [
+pub(crate) const SECS: [Sec; 12] = [
     Sec::General,
     Sec::Look,
     Sec::Slides,
@@ -77,6 +78,7 @@ pub(crate) const SECS: [Sec; 11] = [
     Sec::Alerts,
     Sec::Weather,
     Sec::Calendar,
+    Sec::Shortcuts,
     Sec::Extensions,
     Sec::About,
 ];
@@ -93,6 +95,7 @@ impl Sec {
             Sec::Alerts => tr("HUD & alerts"),
             Sec::Weather => tr("Weather & prayer"),
             Sec::Calendar => tr("Calendar"),
+            Sec::Shortcuts => tr("Shortcuts"),
             Sec::Extensions => tr("Extensions"),
             Sec::About => tr("About"),
         }
@@ -110,6 +113,7 @@ impl Sec {
             Sec::Alerts => tr("HUD & |Alerts"),
             Sec::Weather => tr("Weather & |Prayer"),
             Sec::Calendar => tr("Calen|dar"),
+            Sec::Shortcuts => tr("Short|cuts"),
             Sec::Extensions => tr("Ext|ensions"),
             Sec::About => tr("Ab|out"),
         }
@@ -126,6 +130,7 @@ impl Sec {
             Sec::Alerts => tr("Small popups for things that change around you."),
             Sec::Weather => tr("Calculated on this PC, no account needed."),
             Sec::Calendar => tr("Your next meeting from a secret ICS link. No sign-in."),
+            Sec::Shortcuts => tr("Every keyboard shortcut in one place. Dimmed ones are off in Settings."),
             Sec::Extensions => tr("Programs that add slides and alerts to the notch."),
             Sec::About => tr("A personal fork of Poch by Commonly Works (MIT)."),
         }
@@ -142,6 +147,7 @@ impl Sec {
             Sec::Alerts => g.icon_outline(OutlineIcon::Speaker, cx, cy, s, p),
             Sec::Weather => g.icon_outline(OutlineIcon::Cloud, cx, cy, s, p),
             Sec::Calendar => g.slide_icon(SlideId::Agenda, cx, cy, s, p),
+            Sec::Shortcuts => g.icon_outline(OutlineIcon::Keyboard, cx, cy, s, p),
             Sec::Extensions => g.slide_icon(SlideId::Ext(0), cx, cy, s, p),
             Sec::About => g.icon_outline(OutlineIcon::Info, cx, cy, s, p),
         }
@@ -307,6 +313,36 @@ impl Win {
     fn seg(&self, o: Rid, cur: usize) -> f32 {
         self.segs.get(&o).map_or(cur as f32, |v| v.0)
     }
+}
+
+/// Height of a row on the shortcuts page.
+const KEY_ROW_H: f32 = 46.0;
+
+/// (label, keys, is it on) for the cheat sheet, in two groups. A shortcut that Settings can turn off is dimmed when it is.
+pub(crate) fn shortcut_groups(cfg: &settings::Settings) -> Vec<(&'static str, Vec<(&'static str, Vec<&'static str>, bool)>)> {
+    vec![
+        (
+            tr("Anywhere in Windows"),
+            vec![
+                (tr("Quick launcher"), vec!["Ctrl", "Alt", "Space"], cfg.launcher),
+                (tr("Open slide 1 to 10"), vec!["Ctrl", "Alt", "1 - 0"], cfg.slide_hotkeys),
+                (tr("Mute microphone"), vec!["Ctrl", "Alt", "M"], cfg.mic_hotkey),
+                (tr("Do Not Disturb"), vec!["Ctrl", "Alt", "D"], cfg.dnd_hotkey),
+                (tr("Switch clock and eyes"), vec!["Ctrl", "Alt", "H"], true),
+            ],
+        ),
+        (
+            tr("In the quick launcher"),
+            vec![
+                (tr("Choose a result"), vec!["Up", "Down"], true),
+                (tr("Run the result"), vec!["Enter"], true),
+                (tr("Close"), vec!["Esc"], true),
+                (tr("Next filter"), vec!["Tab"], true),
+                (tr("Previous filter"), vec!["Shift", "Tab"], true),
+                (tr("Delete a word"), vec!["Ctrl", "Backspace"], true),
+            ],
+        ),
+    ]
 }
 
 fn nav_y(i: usize) -> f32 {
@@ -507,7 +543,7 @@ impl App {
                 tr("Calendar link"),
                 vec![row(Rid::Calendar, tr("Calendar"), self.cal_sub(), Ctl::Button(self.cal_button_text().into(), self.cal_link.is_some()))],
             )],
-            Sec::Slides | Sec::Extensions | Sec::About => Vec::new(),
+            Sec::Slides | Sec::Shortcuts | Sec::Extensions | Sec::About => Vec::new(),
         }
     }
 
@@ -1266,6 +1302,7 @@ impl Draw {
 
         match sec {
             Sec::Slides => y = self.slides(a, g, y),
+            Sec::Shortcuts => y = self.shortcuts(a, g, y),
             Sec::Extensions => y = self.extensions(a, g, y),
             Sec::About => {
                 y = self.about(a, g, y);
@@ -1477,6 +1514,38 @@ impl Draw {
             g.txt(&sub, X0 + 60.0, cy + 2.0, 11.5, TEXT_FAINT, 1.0, tw + 2.0);
         }
         y + h + 22.0
+    }
+
+    /// The shortcut cheat sheet: what each key does, with the ones turned off in Settings dimmed.
+    fn shortcuts(&mut self, a: &App, g: &mut Gfx, y: f32) -> f32 {
+        let mut y = y;
+        for (head, rows) in shortcut_groups(&a.cfg) {
+            Self::header(g, head, y);
+            y += 22.0;
+            let h = rows.len() as f32 * KEY_ROW_H;
+            Self::card(g, y, h);
+            for (i, (label, keys, on)) in rows.iter().enumerate() {
+                let ry = y + i as f32 * KEY_ROW_H;
+                if i > 0 {
+                    g.rect(X0 + 16.0, ry, X1 - X0 - 32.0, 1.0, &paint(255, 255, 255, 0.07));
+                }
+                let al = if *on { 1.0 } else { 0.4 };
+                // the key caps, right-aligned
+                let caps: Vec<f32> = keys.iter().map(|k| g.width_ex(k, 11.5, true).ceil() + 16.0).collect();
+                let total: f32 = caps.iter().sum::<f32>() + 5.0 * (keys.len() as f32 - 1.0);
+                let mut x = X1 - 16.0 - total;
+                for (k, cw) in keys.iter().zip(&caps) {
+                    g.fill(&rrect(x, ry + (KEY_ROW_H - 24.0) / 2.0, *cw, 24.0, 7.0), &paint(255, 255, 255, 0.11 * al));
+                    g.txt_c(k, x + cw / 2.0, ry + (KEY_ROW_H - 24.0) / 2.0 + ty(24.0, 11.5), 11.5, [255, 255, 255], al, *cw, true);
+                    x += cw + 5.0;
+                }
+                let room = x.min(X1 - 16.0 - total) - (X0 + 16.0) - 12.0;
+                self.check(g, label, 13.5, false, room);
+                g.txt(label, X0 + 16.0, ry + ty(KEY_ROW_H, 13.5), 13.5, [255, 255, 255], al, room);
+            }
+            y += h + 22.0;
+        }
+        y
     }
 
     fn extensions(&mut self, a: &App, g: &mut Gfx, y: f32) -> f32 {

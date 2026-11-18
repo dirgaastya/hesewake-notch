@@ -2817,7 +2817,7 @@ fn snap_extension_slide() {
 }
 
 // ---------------------------------------------------------------- Settings > Extensions
-const EXTENSIONS: usize = 9;
+const EXTENSIONS: usize = 10;
 
 /// Three extensions: one running and talking, one off, one whose manifest is no good.
 fn ext_page_setup(a: &mut App) {
@@ -4463,3 +4463,33 @@ fn snap_launcher_do_not_disturb_icon() {
         launcher_shot("launcher-dnd-icon", s, |a| type_in(a, "do not"));
     }
 }
+
+#[test]
+fn the_shortcuts_page_lists_every_hotkey_and_dims_the_ones_that_are_off() {
+    let mut cfg = settings::Settings::default();
+    let g = settingswin::shortcut_groups(&cfg);
+    let flat: Vec<_> = g.iter().flat_map(|(_, r)| r.iter()).collect();
+    assert!(flat.iter().all(|r| r.2), "all on by default");
+    for k in ["Space", "M", "D", "H"] {
+        assert!(flat.iter().any(|r| r.1.contains(&k)), "{k} is listed");
+    }
+    cfg.launcher = false;
+    cfg.dnd_hotkey = false;
+    let off: Vec<_> = settingswin::shortcut_groups(&cfg).into_iter().flat_map(|(_, r)| r).filter(|r| !r.2).map(|r| r.1.last().copied().unwrap()).collect();
+    assert_eq!(off, ["Space", "D"]);
+}
+
+#[test]
+fn snap_shortcuts_page() {
+    let a = sw_shot("settingswin-shortcuts", page(SECS_SHORTCUTS));
+    assert!(settingswin::cut(&a).is_empty(), "cut: {:?}", settingswin::cut(&a));
+    let _lang = i18n::restore_on_drop();
+    let a = sw_shot("id-settingswin-shortcuts", |a| {
+        a.cfg.lang = i18n::ID;
+        i18n::set(i18n::ID);
+        a.sw_show_page(SECS_SHORTCUTS);
+    });
+    assert!(settingswin::cut(&a).is_empty(), "cut (id): {:?}", settingswin::cut(&a));
+}
+
+const SECS_SHORTCUTS: usize = 9;
