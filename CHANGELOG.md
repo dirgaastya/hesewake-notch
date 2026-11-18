@@ -4,6 +4,8 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/), versi mengikut
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-18
+
 ### Added
 - **Peluncur cepat** (Ctrl+Alt+Spasi, bisa dimatikan di Settings > Umum): notch terbuka dengan kolom ketik. Ketik beberapa huruf untuk mencari aplikasi terpasang (shortcut Start Menu), perintah notch (Pengaturan, Jangan ganggu, bisukan mikrofon, periksa pembaruan, dan semua slide), atau hitungan (`12*(3+4)`, Enter menyalin hasilnya); baris terakhir mencari di web, dan alamat yang diketik dibuka langsung. Panah memilih, Enter membuka, Esc menutup dan mengembalikan fokus ke jendela sebelumnya. Yang sering dibuka naik ke atas; riwayat pemakaian disimpan di `launcher.txt`.
 - **Do Not Disturb**: menahan sebagian besar toast tanpa harus ada aplikasi layar penuh. Nyalakan dari menu tray, hotkey **Ctrl+Alt+D** (bisa dimatikan di Settings > Notifikasi), atau Settings. Saat aktif ada ikon bulan kecil di notch dan HUD "Do Not Disturb On/Off" saat diganti lewat hotkey. Ditahan: Water, notifikasi, charger, Bluetooth, unduhan, tugas jatuh tempo, HUD volume/kecerahan/Caps Lock, pesan extension. Tetap tampil: baterai lemah, peringatan kamera/mikrofon, pengingat sholat dan rapat, timer, hasil pembaruan, dan HUD hotkey mikrofon. Status tersimpan dan berlaku lagi setelah restart. Pengingat yang ditahan tidak dihitung sudah diberikan.
