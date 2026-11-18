@@ -356,23 +356,7 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                     a.note_char(c);
                     return;
                 }
-                match c {
-                    13 => a.finish_edit(true, true),
-                    27 => a.finish_edit(false, true),
-                    8 => {
-                        a.input.pop();
-                    }
-                    c if c >= 32 => {
-                        if let Some(ch) = char::from_u32(c) {
-                            if a.input.chars().count() < 80 {
-                                a.input.push(ch);
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-                a.edit_start = Instant::now();
-                a.caret_on = true;
+                a.todo_char(c);
                 a.last = Instant::now();
                 present(a);
                 schedule(a);

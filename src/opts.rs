@@ -24,6 +24,8 @@ pub(crate) enum Rid {
     LyricTiming,
     NotchSize,
     IdleDisplay,
+    /// The idle eye's mood and glow colour.
+    EyeMoods,
     Notifications,
     ContactPhotos,
     Autostart,
@@ -69,7 +71,7 @@ pub(crate) enum Rid {
 impl Rid {
     /// Every setting (a test checks each one has a row in the Settings window).
     #[cfg(test)]
-    pub(crate) const ALL: [Rid; 40] = [
+    pub(crate) const ALL: [Rid; 41] = [
         Rid::Minimal,
         Rid::Glow,
         Rid::NotchSong,
@@ -80,6 +82,7 @@ impl Rid {
         Rid::LyricTiming,
         Rid::NotchSize,
         Rid::IdleDisplay,
+        Rid::EyeMoods,
         Rid::Notifications,
         Rid::ContactPhotos,
         Rid::Autostart,
@@ -137,6 +140,7 @@ impl App {
             Rid::Weather => self.cfg.weather_on,
             Rid::Prayer => self.cfg.prayer_on,
             Rid::Glow => self.cfg.glow,
+            Rid::EyeMoods => self.cfg.eye_moods,
             Rid::NotchSong => self.cfg.notch_song,
             Rid::Romaji => self.cfg.romaji_lyrics,
             Rid::Downloads => self.cfg.downloads,
@@ -240,6 +244,7 @@ impl App {
                 self.weather_apply();
             }
             Rid::Glow => self.cfg.glow = !self.cfg.glow,
+            Rid::EyeMoods => self.cfg.eye_moods = !self.cfg.eye_moods,
             Rid::NotchSong => self.cfg.notch_song = !self.cfg.notch_song,
             Rid::Prayer => {
                 self.cfg.prayer_on = !self.cfg.prayer_on;

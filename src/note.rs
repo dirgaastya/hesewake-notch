@@ -392,6 +392,7 @@ impl App {
         self.note_mode = true;
         self.caret_on = true;
         self.edit_start = Instant::now();
+        self.caret_t = self.edit_start;
         self.nv.focus = Some(Instant::now());
         let n = self.note.chars().count();
         self.nv.cur = n;
@@ -424,7 +425,7 @@ impl App {
     /// Common tail of every editing action: keep caret visible, restart blink, repaint.
     unsafe fn note_refresh(&mut self) {
         self.note_ensure_visible();
-        self.edit_start = Instant::now();
+        self.caret_t = Instant::now();
         self.caret_on = true;
         self.last = Instant::now();
         present(self);
@@ -1082,7 +1083,7 @@ impl App {
                     _ => target,
                 };
                 self.nv.glide.set(Some((gx, gy)));
-                let e = self.edit_start.elapsed().as_secs_f32();
+                let e = self.caret_t.elapsed().as_secs_f32();
                 let ka = if e < 0.5 { 1.0 } else { 0.5 + 0.5 * ((e - 0.5) * std::f32::consts::TAU / 1.1).cos() };
                 g.rect(gx, gy, 1.5, 15.0, &paint(255, 255, 255, ka * al));
             }

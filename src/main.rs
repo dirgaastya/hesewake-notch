@@ -21,8 +21,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tiny_skia::{
-    Color, FillRule, FilterQuality, GradientStop, LineCap, LinearGradient, Mask, Paint, Path, PathBuilder, Pattern,
-    Pixmap, Point, Rect, SpreadMode, Stroke, Transform,
+    BlendMode, Color, FillRule, FilterQuality, GradientStop, LineCap, LinearGradient, Mask, Paint, Path, PathBuilder,
+    Pattern, Pixmap, PixmapPaint, Point, Rect, SpreadMode, Stroke, Transform,
 };
 use windows::core::{w, Result, HSTRING, PCWSTR, PWSTR};
 use windows::Foundation::Uri;
@@ -270,6 +270,8 @@ struct App {
     input: String,
     caret_on: bool,
     edit_start: Instant,
+    /// When the caret last restarted its blink (every key press); `edit_start` stays the moment the input opened.
+    caret_t: Instant,
     prev_fg: isize,
     shelf: Vec<ShelfItem>,
     shelf_flash: Option<Instant>,
@@ -722,6 +724,7 @@ fn main() -> Result<()> {
             input: String::new(),
             caret_on: true,
             edit_start: Instant::now(),
+            caret_t: Instant::now(),
             prev_fg: 0,
             shelf: load_shelf(),
             shelf_flash: None,

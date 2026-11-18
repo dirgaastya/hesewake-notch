@@ -359,7 +359,7 @@ unsafe fn poll(a: &mut App) {
         }
     }
     if a.editing {
-        let on = (a.edit_start.elapsed().as_millis() / 500) % 2 == 0;
+        let on = (a.caret_t.elapsed().as_millis() / 500) % 2 == 0;
         if on != a.caret_on {
             a.caret_on = on;
             redraw = true;
@@ -405,9 +405,11 @@ pub(crate) unsafe fn tick(id: usize) {
         a.timer_ind_step(dt);
         a.notif_ui_step();
 
+        a.eye_mood_step();
         // Only advance the eye once the notch is back to its small size, so the pop-open is actually seen.
         let eye_on = (a.splash_t().is_some() && !a.now_playing_bar()) || (a.idle() && a.idle_phase() == IdlePhase::Eye);
         if eye_on && a.h < IDLE.1 + 10.0 {
+            a.eye.follow = a.eye_follow_target();
             a.eye.update(clock_dt);
         }
 
