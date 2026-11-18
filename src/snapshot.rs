@@ -49,6 +49,7 @@ fn test_app(s: f32) -> App {
         busy: false,
         launcher: None,
         launcher_freq: launcher::Frecency::default(),
+        launcher_icons: HashMap::new(),
         game_fs: false,
         minimal: false,
         toast: None,

@@ -197,6 +197,8 @@ struct App {
     /// The quick launcher while it is open (it replaces the slides), and what was opened from it most.
     launcher: Option<launcher::Launcher>,
     launcher_freq: launcher::Frecency,
+    /// App icons seen in the launcher, by shortcut path (None: Windows had none).
+    launcher_icons: HashMap<String, Option<Pixmap>>,
     /// A fullscreen app is open (Windows says so, or it covers the notch's monitor): drives game mode.
     game_fs: bool,
     /// Mode "Minimal notch": garis tipis saat tidak ada musik, buka dengan hover.
@@ -650,6 +652,7 @@ fn main() -> Result<()> {
             busy: is_busy(hwnd, cfg.busy_on_maximized, &mon),
             launcher: None,
             launcher_freq: launcher::Frecency::load(),
+            launcher_icons: HashMap::new(),
             game_fs: false,
             minimal: cfg.minimal,
             toast: None,

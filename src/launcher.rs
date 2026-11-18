@@ -402,6 +402,15 @@ fn copy_text(hwnd: isize, text: &str) {
     unsafe { note::clip_set(HWND(hwnd as _), text) };
 }
 
+fn app_icon(path: &str) -> Option<Pixmap> {
+    if cfg!(test) {
+        let mut pm = Pixmap::new(48, 48)?;
+        pm.fill(Color::from_rgba8(230, 120, 60, 255));
+        return Some(pm);
+    }
+    shelf::load_file_icon(path)
+}
+
 // ---------------------------------------------------------------- the open launcher
 pub(crate) struct Launcher {
     pub(crate) field: TextField,
@@ -445,6 +454,12 @@ impl App {
     fn launcher_refresh(&mut self) {
         let Some(q) = self.launcher.as_ref().map(|l| l.field.text()) else { return };
         let hits = search(&q, &self.launcher_items(), &self.launcher_freq, tr("Search the web for {}"), tr("Open"), tr("Copy"), tr("Web"));
+        // icons of the apps in the list: read once from Windows (a plain colored tile in tests)
+        for h in &hits {
+            if let Act::Open(p) = &h.act {
+                self.launcher_icons.entry(p.clone()).or_insert_with(|| app_icon(p));
+            }
+        }
         if let Some(l) = self.launcher.as_mut() {
             l.hits = hits;
             l.sel = 0;
@@ -604,10 +619,31 @@ impl App {
                 paint(255, 255, 255, if hover { 0.13 } else { 0.07 } * al)
             };
             g.fill(&rrect(LX, y, CW, ROW_H, 9.0), &bg);
+            // icon: the app's own, or a tile with a letter for everything else
+            let (ix, iy, isz) = (LX + 8.0, y + (ROW_H - 18.0) / 2.0, 18.0);
+            match &h.act {
+                Act::Open(p) if self.launcher_icons.get(p).is_some_and(|i| i.is_some()) => {
+                    let pm = self.launcher_icons[p].as_ref().unwrap();
+                    let k = isz / pm.width() as f32;
+                    let mut pt = Paint::default();
+                    pt.shader = Pattern::new(pm.as_ref(), SpreadMode::Pad, FilterQuality::Bilinear, al, Transform::from_row(k, 0.0, 0.0, k, ix, iy));
+                    pt.anti_alias = true;
+                    g.fill(&rrect(ix, iy, isz, isz, 4.0), &pt);
+                }
+                act => {
+                    let glyph = match act {
+                        Act::Copy(_) => "=".to_string(),
+                        Act::Url(_) => "W".to_string(),
+                        _ => h.title.chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default(),
+                    };
+                    g.fill(&rrect(ix, iy, isz, isz, 5.0), &g.sacc(0.35 * al));
+                    g.txt_c(&glyph, ix + isz / 2.0, iy + ty(isz, 12.0), 12.0, [255, 255, 255], al, isz, true);
+                }
+            }
             let sw = g.width(h.sub, 11.0);
             g.txt(h.sub, LX + CW - 10.0 - sw, y + ty(ROW_H, 11.0), 11.0, if i == l.sel { g.acc.bright } else { TEXT_FAINT }, al, 80.0);
-            let title = clipboard::row_text(g, &h.title, CW - 34.0 - sw);
-            g.txt(&title, LX + 10.0, y + ty(ROW_H, 13.0), 13.0, [242, 242, 242], al, CW - 30.0 - sw);
+            let title = clipboard::row_text(g, &h.title, CW - 60.0 - sw);
+            g.txt(&title, LX + 34.0, y + ty(ROW_H, 13.0), 13.0, [242, 242, 242], al, CW - 56.0 - sw);
         }
     }
 }
