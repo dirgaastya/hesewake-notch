@@ -4206,7 +4206,12 @@ fn snap_launcher() {
             launcher_apps();
             a.launcher_open_now();
             type_in(a, "note");
-            a.launcher_key(0x28);
+            a.launcher_key(0x28, false);
+        });
+        shot("launcher-commands", s, |a| {
+            launcher_apps();
+            a.launcher_open_now();
+            type_in(a, "s");
         });
         shot("launcher-calc", s, |a| {
             launcher_apps();
@@ -4217,7 +4222,7 @@ fn snap_launcher() {
             launcher_apps();
             a.launcher_open_now();
             type_in(a, "a very long");
-            a.launcher_key(0x28);
+            a.launcher_key(0x28, false);
         });
         shot("launcher-long-query", s, |a| {
             launcher_apps();
@@ -4267,7 +4272,7 @@ fn enter_opens_the_chosen_app_and_remembers_it() {
     a.launcher_toggle();
     type_in(&mut a, "note");
     assert_eq!(a.launcher.as_ref().unwrap().hits[0].title, "Notes");
-    a.launcher_key(0x28); // down: Notepad
+    a.launcher_key(0x28, false); // down: Notepad
     a.launcher_char(13);
     assert_eq!(launcher::done(), ["open:C:/Start/Notepad.lnk"]);
     assert!(a.launcher.is_none(), "it closes after running");
@@ -4289,22 +4294,31 @@ fn the_arrows_move_the_selection_and_the_list_scrolls_with_it() {
     assert_eq!(n, 8);
     assert_eq!(a.launcher.as_ref().unwrap().first(), 0);
     for _ in 0..20 {
-        a.launcher_key(0x28);
+        a.launcher_key(0x28, false);
     }
     let l = a.launcher.as_ref().unwrap();
     assert_eq!(l.sel, n - 1, "stops at the last one");
     assert_eq!(l.first(), n - launcher::VISIBLE, "the selected row is on the canvas");
     for _ in 0..20 {
-        a.launcher_key(0x26);
+        a.launcher_key(0x26, false);
     }
     assert_eq!(a.launcher.as_ref().unwrap().sel, 0);
-    assert!(!a.launcher_key(0x41), "other keys are not used");
+    assert!(!a.launcher_key(0x41, false), "other keys are not used");
     // editing keys
-    a.launcher_key(0x24); // Home
-    a.launcher_key(0x2E); // Delete the first letter
+    a.launcher_key(0x24, false); // Home
+    a.launcher_key(0x2E, false); // Delete the first letter
     assert_eq!(a.launcher.as_ref().unwrap().field.text(), "pp");
     a.launcher_char(8); // Backspace at the start: nothing
     assert_eq!(a.launcher.as_ref().unwrap().field.text(), "pp");
+    // Ctrl+Backspace (127) and Ctrl+Delete remove whole words
+    a.launcher_key(0x23, false); // End
+    a.launcher_char(' ' as u32);
+    type_in(&mut a, "one two");
+    a.launcher_char(127);
+    assert_eq!(a.launcher.as_ref().unwrap().field.text(), "pp one ");
+    a.launcher_key(0x24, false);
+    a.launcher_key(0x2E, true);
+    assert_eq!(a.launcher.as_ref().unwrap().field.text(), " one ");
 }
 
 #[test]
@@ -4321,7 +4335,7 @@ fn a_calculation_is_copied_and_the_web_row_opens_a_search() {
     a.launcher_toggle();
     type_in(&mut a, "rust lang");
     let n = a.launcher.as_ref().unwrap().hits.len();
-    a.launcher_key(0x28);
+    a.launcher_key(0x28, false);
     assert_eq!(a.launcher.as_ref().unwrap().sel, n - 1.min(n), "the web row is the only result");
     a.launcher_char(13);
     assert_eq!(sys::opened(), ["https://www.google.com/search?q=rust+lang"]);

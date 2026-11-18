@@ -348,7 +348,7 @@ unsafe fn wndproc_inner(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
             let mut handled = false;
             with_app(|a| {
                 if a.launcher.is_some() {
-                    handled = a.launcher_key(vk);
+                    handled = a.launcher_key(vk, ctrl);
                     if handled {
                         a.last = Instant::now();
                         present(a);

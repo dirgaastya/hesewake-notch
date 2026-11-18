@@ -411,6 +411,34 @@ fn app_icon(path: &str) -> Option<Pixmap> {
     shelf::load_file_icon(path)
 }
 
+/// The small picture of a result that is not an app: what it does, drawn with lines.
+fn row_icon(g: &mut Gfx, act: &Act, cx: f32, cy: f32, s: f32, p: &Paint) {
+    let lw = (s * 0.14).max(1.3);
+    match act {
+        Act::Cmd(Cmd::Settings) => g.icon_gear(cx, cy, s, p),
+        Act::Cmd(Cmd::Dnd) => g.icon_crescent(cx, cy, s, p),
+        Act::Cmd(Cmd::Mic) => g.icon_mic_off(cx, cy, s, p),
+        Act::Cmd(Cmd::Slide(id)) => g.slide_icon(*id, cx, cy, s, p),
+        Act::Cmd(Cmd::Update) => {
+            g.line(cx, cy - s * 0.45, cx, cy + s * 0.2, lw, p);
+            g.line(cx - s * 0.3, cy - s * 0.1, cx, cy + s * 0.22, lw, p);
+            g.line(cx + s * 0.3, cy - s * 0.1, cx, cy + s * 0.22, lw, p);
+            g.line(cx - s * 0.4, cy + s * 0.5, cx + s * 0.4, cy + s * 0.5, lw, p);
+        }
+        // an equals sign
+        Act::Copy(_) => {
+            g.line(cx - s * 0.4, cy - s * 0.17, cx + s * 0.4, cy - s * 0.17, lw, p);
+            g.line(cx - s * 0.4, cy + s * 0.17, cx + s * 0.4, cy + s * 0.17, lw, p);
+        }
+        // an arrow going out: open in the browser
+        Act::Url(_) | Act::Open(_) => {
+            g.line(cx - s * 0.4, cy + s * 0.4, cx + s * 0.4, cy - s * 0.4, lw, p);
+            g.line(cx - s * 0.05, cy - s * 0.4, cx + s * 0.4, cy - s * 0.4, lw, p);
+            g.line(cx + s * 0.4, cy - s * 0.4, cx + s * 0.4, cy + s * 0.05, lw, p);
+        }
+    }
+}
+
 // ---------------------------------------------------------------- the open launcher
 pub(crate) struct Launcher {
     pub(crate) field: TextField,
@@ -514,7 +542,14 @@ impl App {
                 }
                 self.launcher_refresh();
             }
-            c if c >= 32 && c != 127 => {
+            // Ctrl+Backspace arrives as 127
+            127 => {
+                if let Some(l) = self.launcher.as_mut() {
+                    l.field.backspace_word();
+                }
+                self.launcher_refresh();
+            }
+            c if c >= 32 => {
                 let Some(ch) = char::from_u32(c) else { return };
                 if self.launcher.as_mut().is_some_and(|l| l.field.insert(ch)) {
                     self.launcher_refresh();
@@ -524,19 +559,25 @@ impl App {
         }
     }
 
-    /// Arrows, Home, End, Delete, Tab. True if the key was used.
-    pub(crate) fn launcher_key(&mut self, vk: u32) -> bool {
+    /// Arrows, Home, End, Delete, Tab (with Ctrl: by word). True if the key was used.
+    pub(crate) fn launcher_key(&mut self, vk: u32, ctrl: bool) -> bool {
         let Some(l) = self.launcher.as_mut() else { return false };
         let last = l.hits.len().saturating_sub(1);
         match vk {
             0x26 => l.sel = l.sel.saturating_sub(1),
             0x28 | 0x09 => l.sel = (l.sel + 1).min(last),
+            0x25 if ctrl => l.field.word_left(),
+            0x27 if ctrl => l.field.word_right(),
             0x25 => l.field.left(),
             0x27 => l.field.right(),
             0x24 => l.field.home(),
             0x23 => l.field.end(),
             0x2E => {
-                l.field.delete();
+                if ctrl {
+                    l.field.delete_word();
+                } else {
+                    l.field.delete();
+                }
                 self.launcher_refresh();
             }
             _ => return false,
@@ -631,13 +672,8 @@ impl App {
                     g.fill(&rrect(ix, iy, isz, isz, 4.0), &pt);
                 }
                 act => {
-                    let glyph = match act {
-                        Act::Copy(_) => "=".to_string(),
-                        Act::Url(_) => "W".to_string(),
-                        _ => h.title.chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default(),
-                    };
                     g.fill(&rrect(ix, iy, isz, isz, 5.0), &g.sacc(0.35 * al));
-                    g.txt_c(&glyph, ix + isz / 2.0, iy + ty(isz, 12.0), 12.0, [255, 255, 255], al, isz, true);
+                    row_icon(g, act, ix + isz / 2.0, iy + isz / 2.0, 11.0, &paint(255, 255, 255, al));
                 }
             }
             let sw = g.width(h.sub, 11.0);
