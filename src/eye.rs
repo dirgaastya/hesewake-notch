@@ -59,6 +59,116 @@ const EYE_PAL: [[f32; 3]; 5] = [
     [20.0, 70.0, 190.0],   // deep blue
     [70.0, 140.0, 255.0],  // blue
 ];
+type Pal = [[f32; 3]; 5];
+
+// Moods. The pose eases toward the mood's target (`EyeAnim::update`); the glow palette and strength do the same.
+/// The user is away this long (no keyboard or mouse): the eye gets sleepy.
+pub(crate) const EYE_SLEEPY_AFTER_SECS: f32 = 120.0;
+/// After a notification-like toast ends the eye is surprised this long; after a good-news toast it is happy this long.
+const EYE_SURPRISE_SECS: f32 = 1.2;
+const EYE_HAPPY_SECS: f32 = 2.6;
+const EYE_LOOK_Y_MAX: f32 = 0.8; // vertical glance range in px
+const EYE_FOLLOW_X: f32 = 4.0; // glance range while following the cursor (wider than the random glances)
+const EYE_FOLLOW_Y: f32 = 1.6;
+const EYE_SLEEPY_HOLD: f32 = 0.30; // a sleepy blink stays closed longer
+const EYE_ARC_W: f32 = 2.8; // stroke of the happy "^ ^" eyes
+const EYE_BOX: f32 = 34.0; // logical box around one eye for the lid cut
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum EyeMood {
+    Normal,
+    Sleepy,
+    Happy,
+    Focus,
+    Surprised,
+}
+
+/// How the eyes look in a mood. `lid`: fraction of the eye hidden from the top, `tilt`: how much lower the lid is on the
+/// inner side (focused look), `hap`: 0..1 cross-fade to the happy arcs, `sc`: size, `op`: how open (height).
+#[derive(Clone, Copy)]
+struct Pose {
+    lid: f32,
+    tilt: f32,
+    hap: f32,
+    sc: f32,
+    op: f32,
+}
+
+impl Pose {
+    fn ease_to(&mut self, t: &Pose, k: f32) {
+        self.lid += (t.lid - self.lid) * k;
+        self.tilt += (t.tilt - self.tilt) * k;
+        self.hap += (t.hap - self.hap) * k;
+        self.sc += (t.sc - self.sc) * k;
+        self.op += (t.op - self.op) * k;
+    }
+
+    fn near(&self, t: &Pose) -> bool {
+        const E: f32 = 0.004;
+        (self.lid - t.lid).abs() < E && (self.tilt - t.tilt).abs() < E && (self.hap - t.hap).abs() < E && (self.sc - t.sc).abs() < E && (self.op - t.op).abs() < E
+    }
+}
+
+impl EyeMood {
+    fn pose(self) -> Pose {
+        let p = |lid, tilt, hap, sc, op| Pose { lid, tilt, hap, sc, op };
+        match self {
+            EyeMood::Normal => p(0.0, 0.0, 0.0, 1.0, 1.0),
+            EyeMood::Sleepy => p(0.36, -0.1, 0.0, 0.96, 0.92),
+            EyeMood::Happy => p(0.0, 0.0, 1.0, 1.0, 1.0),
+            EyeMood::Focus => p(0.04, 1.5, 0.0, 1.0, 1.0),
+            EyeMood::Surprised => p(0.0, 0.0, 0.0, 1.2, 1.08),
+        }
+    }
+
+    /// Glow strength and palette.
+    fn glow(self) -> (f32, Pal) {
+        match self {
+            EyeMood::Normal => (1.0, EYE_PAL),
+            EyeMood::Sleepy => (0.5, [[70.0, 90.0, 170.0], [50.0, 65.0, 135.0], [95.0, 115.0, 185.0], [40.0, 55.0, 115.0], [62.0, 82.0, 155.0]]),
+            EyeMood::Happy => (1.0, [[70.0, 210.0, 140.0], [40.0, 180.0, 120.0], [120.0, 230.0, 170.0], [30.0, 150.0, 110.0], [60.0, 200.0, 150.0]]),
+            EyeMood::Focus => (1.0, [[150.0, 110.0, 255.0], [110.0, 70.0, 230.0], [180.0, 150.0, 255.0], [80.0, 50.0, 190.0], [130.0, 100.0, 245.0]]),
+            EyeMood::Surprised => (1.0, [[255.0, 190.0, 80.0], [255.0, 150.0, 50.0], [255.0, 220.0, 130.0], [230.0, 120.0, 40.0], [255.0, 170.0, 70.0]]),
+        }
+    }
+}
+
+/// Glance toward the cursor at (`x`, `y`) in canvas coordinates; None when it is not over the canvas.
+pub(crate) fn follow_look(x: f32, y: f32, h: f32) -> Option<(f32, f32)> {
+    if !(0.0..W as f32).contains(&x) || !(0.0..H as f32).contains(&y) {
+        return None;
+    }
+    // tanh: the eyes turn quickly while the cursor is close and ease into the end of their range, with no hard stop
+    Some((((x - CX) / 70.0).tanh() * EYE_FOLLOW_X, ((y - h / 2.0) / 45.0).tanh() * EYE_FOLLOW_Y))
+}
+
+/// Which mood wins: a short event (surprise, then happy) over a lasting state (focus work, then away).
+pub(crate) fn pick_mood(surprised: bool, happy: bool, focus: bool, input_idle_secs: f32) -> EyeMood {
+    if surprised {
+        EyeMood::Surprised
+    } else if happy {
+        EyeMood::Happy
+    } else if focus {
+        EyeMood::Focus
+    } else if input_idle_secs >= EYE_SLEEPY_AFTER_SECS {
+        EyeMood::Sleepy
+    } else {
+        EyeMood::Normal
+    }
+}
+
+/// Centre and size of each eye in SVG units (same order as `build_eye_paths`), and which side is the inner one.
+struct EyeGeo {
+    cx: f32,
+    cy: f32,
+    w: f32,
+    h: f32,
+    inner: f32,
+}
+const EYE_GEO: [EyeGeo; 2] = [
+    EyeGeo { cx: 337.4, cy: 498.1, w: 254.8, h: 340.6, inner: 1.0 },
+    EyeGeo { cx: 705.3, cy: 508.1, w: 169.6, h: 182.1, inner: -1.0 },
+];
 
 // ---------------------------------------------------------------- idle animation
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -102,6 +212,22 @@ pub(crate) struct EyeAnim {
     pub(crate) look_wait: f32,
     pub(crate) boost: f32,
     pub(crate) rng: u64,
+    pub(crate) look_y: f32,
+    look_y_to: f32,
+    /// Where the eyes look while the cursor is near: (x, y) glance in px (`follow_look`); None = glance around by themselves.
+    pub(crate) follow: Option<(f32, f32)>,
+    /// Mood to ease toward (set by `App::eye_mood_step`), the pose, glow strength and palette right now.
+    pub(crate) mood: EyeMood,
+    pose: Pose,
+    gs: f32,
+    pal: Pal,
+    /// A toast is showing: whether it is good news. When it ends the eye reacts (surprised or happy for a moment).
+    pending_toast: Option<bool>,
+    pub(crate) surprised_until: Option<Instant>,
+    pub(crate) happy_until: Option<Instant>,
+    /// The daily water goal was just reached: the eye turns happy once the notch is small again (`seen_goal`: the one already counted).
+    pending_goal: bool,
+    seen_goal: Option<Instant>,
 }
 
 impl EyeAnim {
@@ -123,6 +249,18 @@ impl EyeAnim {
             look_wait: 2.0,
             boost: 0.0,
             rng: 0x9E37_79B9_7F4A_7C15,
+            look_y: 0.0,
+            look_y_to: 0.0,
+            follow: None,
+            mood: EyeMood::Normal,
+            pose: EyeMood::Normal.pose(),
+            gs: 1.0,
+            pal: EYE_PAL,
+            pending_toast: None,
+            surprised_until: None,
+            happy_until: None,
+            pending_goal: false,
+            seen_goal: None,
         };
         e.set_pose(EYE_CLOSED_SY);
         e
@@ -166,7 +304,18 @@ impl EyeAnim {
 
     /// Blinking, fading in, or a glance not yet within `px` of its target (or faster than `v` px/s).
     fn moving(&self, px: f32, v: f32) -> bool {
-        self.blinking || self.age < EYE_FADE_IN + 0.1 || (self.look - self.look_to).abs() > px || self.look_v.abs() > v
+        self.blinking
+            || self.age < EYE_FADE_IN + 0.1
+            || (self.look - self.look_to).abs() > px
+            || (self.look_y - self.look_y_to).abs() > px
+            || self.look_v.abs() > v
+            || !self.mood_settled()
+    }
+
+    /// The pose, glow strength and palette have reached the current mood.
+    fn mood_settled(&self) -> bool {
+        let (gs, pal) = self.mood.glow();
+        self.pose.near(&self.mood.pose()) && (self.gs - gs).abs() < 0.004 && self.pal.iter().zip(pal.iter()).all(|(a, b)| (0..3).all(|i| (a[i] - b[i]).abs() < 0.5))
     }
 
     /// A blink or a glance starts within `EYE_SOON_SECS`.
@@ -205,6 +354,22 @@ impl EyeAnim {
             self.look_v += (EYE_LOOK_K * (self.look_to - self.look) - EYE_LOOK_C * self.look_v) * sdt;
             self.look += self.look_v * sdt;
         }
+        self.look_y += (self.look_y_to - self.look_y) * (1.0 - (-dt * 10.0).exp());
+        let k = 1.0 - (-dt * if self.mood == EyeMood::Surprised { 20.0 } else { 8.0 }).exp();
+        self.pose.ease_to(&self.mood.pose(), k);
+        let (gs, pal) = self.mood.glow();
+        let kg = 1.0 - (-dt * 5.0).exp();
+        self.gs += (gs - self.gs) * kg;
+        for (c, t) in self.pal.iter_mut().zip(pal.iter()) {
+            for i in 0..3 {
+                c[i] += (t[i] - c[i]) * kg;
+            }
+        }
+        let sleepy = self.mood == EyeMood::Sleepy;
+        if let Some((fx, fy)) = self.follow {
+            (self.look_to, self.look_y_to) = (fx, fy);
+            self.look_wait = 1.0; // when the cursor leaves, the eyes glance around again after a moment
+        }
         if self.blinking {
             self.bt += dt;
             if self.bt >= self.total() {
@@ -214,6 +379,8 @@ impl EyeAnim {
                 if self.double_next {
                     self.double_next = false;
                     self.wait = 0.09 + self.rand() * 0.07;
+                } else if sleepy {
+                    self.wait = 4.0 + self.rand() * 3.0;
                 } else {
                     self.wait = 2.4 + self.rand() * 3.8;
                     if self.rand() < 0.16 {
@@ -228,14 +395,16 @@ impl EyeAnim {
             self.wait -= dt;
             self.set_pose(1.0 + 0.012 * (self.age * 2.1).sin());
             self.look_wait -= dt;
-            if self.look_wait <= 0.0 {
-                self.look_to = if self.rand() < 0.65 { (self.rand() * 2.0 - 1.0) * EYE_LOOK_MAX } else { 0.0 };
+            if self.look_wait <= 0.0 && self.follow.is_none() {
+                let calm = if sleepy { 0.3 } else { 1.0 };
+                self.look_to = if self.rand() < 0.65 { (self.rand() * 2.0 - 1.0) * EYE_LOOK_MAX * calm } else { 0.0 };
+                self.look_y_to = if self.rand() < 0.65 { (self.rand() * 2.0 - 1.0) * EYE_LOOK_Y_MAX * calm } else { 0.0 };
                 self.look_wait = 1.8 + self.rand() * 3.2;
             }
             if self.wait <= 0.0 {
                 self.blinking = true;
                 self.bt = 0.0;
-                self.hold = BLINK_HOLD;
+                self.hold = if sleepy { EYE_SLEEPY_HOLD } else { BLINK_HOLD };
             }
         }
     }
@@ -285,7 +454,7 @@ const GLOW_COLS: usize = W as usize * scale::MAX as usize + 2;
 /// Running gradient behind the eye: a palette (shades of blue) flows along X while the
 /// alpha fades to transparent towards the top. Written straight into the pixmap, limited to the notch
 /// rectangle (about 150x32 px), no allocations, no shaders -> negligible CPU.
-fn eye_glow(g: &mut Gfx, w: f32, h: f32, t: f32, strength: f32) {
+fn eye_glow(g: &mut Gfx, w: f32, h: f32, t: f32, strength: f32, pal: &Pal) {
     let strength = strength.clamp(0.0, 1.0);
     if strength <= 0.01 {
         return;
@@ -302,7 +471,7 @@ fn eye_glow(g: &mut Gfx, w: f32, h: f32, t: f32, strength: f32) {
     }
     // Per-column colour and horizontal intensity (computed once, reused for every row).
     let mut cols = [[0.0f32; 4]; GLOW_COLS];
-    let np = EYE_PAL.len();
+    let np = pal.len();
     for x in x0..x1 {
         let xf = (x as f32 + 0.5) / k;
         let pos = (xf - CX) * 0.0042 - t * GLOW_FLOW;
@@ -310,7 +479,7 @@ fn eye_glow(g: &mut Gfx, w: f32, h: f32, t: f32, strength: f32) {
         let i = (f.floor() as usize) % np;
         let fr = f - f.floor();
         let sm = fr * fr * (3.0 - 2.0 * fr);
-        let (c0, c1) = (EYE_PAL[i], EYE_PAL[(i + 1) % np]);
+        let (c0, c1) = (pal[i], pal[(i + 1) % np]);
         let hl = 0.78 + 0.22 * (std::f32::consts::TAU * (xf * 0.0065 - t * 0.35)).sin();
         cols[x] = [
             c0[0] + (c1[0] - c0[0]) * sm,
@@ -387,6 +556,34 @@ pub(crate) unsafe fn toggle_idle_phase(a: &mut App) {
     schedule(a);
 }
 
+/// Draws one eye with its top part (the lid) cut away: the eye goes into a small scratch pixmap, the lid area is cleared there
+/// (so the glow behind stays untouched) and the result is composited. `tr` is the eye transform, `(ex, ey)` its centre, `sy` the
+/// vertical scale (px per SVG unit), `lid` the fraction hidden and `tilt` how much lower the lid sits on the inner side.
+fn fill_eye_under_lid(g: &mut Gfx, path: &Path, tr: Transform, (ex, ey): (f32, f32), geo: &EyeGeo, sy: f32, lid: f32, tilt: f32, a: f32) {
+    let s = g.s;
+    let n = (EYE_BOX * s).ceil() as u32;
+    let Some(mut sp) = Pixmap::new(n, n) else { return };
+    let (ox, oy) = (((ex - EYE_BOX / 2.0) * s).floor(), ((ey - EYE_BOX / 2.0) * s).floor());
+    sp.fill_path(path, &paint(255, 255, 255, 1.0), FillRule::Winding, tr.post_translate(-ox, -oy), None);
+    let hgt = geo.h * sy;
+    let top = ey - hgt / 2.0;
+    let (xo, xi) = (ex - geo.inner * 30.0, ex + geo.inner * 30.0);
+    let mut pb = PathBuilder::new();
+    pb.move_to(xo, top - 40.0);
+    pb.line_to(xi, top - 40.0);
+    pb.line_to(xi, top + (lid + tilt * 0.35) * hgt);
+    pb.line_to(xo, top + lid * hgt);
+    pb.close();
+    if let Some(lid_path) = pb.finish() {
+        let mut clear = Paint::default();
+        clear.blend_mode = BlendMode::Clear;
+        clear.anti_alias = true;
+        sp.fill_path(&lid_path, &clear, FillRule::Winding, g.ts.post_translate(-ox, -oy), None);
+    }
+    let pp = PixmapPaint { opacity: a.clamp(0.0, 1.0), ..PixmapPaint::default() };
+    g.pm.draw_pixmap(ox as i32, oy as i32, sp.as_ref(), &pp, Transform::identity(), None);
+}
+
 impl App {
     /// Seconds spent idle inside the current clock+eye cycle. Wall-clock based (not tied to timer ticks),
     /// frozen while the notch is not idle.
@@ -430,16 +627,87 @@ impl App {
             return;
         }
 
-        eye_glow(g, w, h, self.t, al * (1.0 + e.boost));
+        eye_glow(g, w, h, self.t, al * e.gs * (1.0 + e.boost), &e.pal);
 
+        let p = e.pose;
+        let sleepy = e.mood == EyeMood::Sleepy;
+        // A sleepy eye droops a little and its lid nods slowly.
+        let lid = (p.lid + if sleepy { 0.1 * (0.5 + 0.5 * (e.age * 0.8).sin()) } else { 0.0 }).clamp(0.0, 0.9);
         let k = EYE_H_PX / EYE_SVG_H;
-        let (sx, sy) = (k * e.sx, k * e.sy);
-        let (cx, cy) = (CX + e.look, h / 2.0 + e.dy);
+        let (sx, sy) = (k * e.sx * p.sc, k * e.sy * p.sc * p.op);
+        let (cx, cy) = (CX + e.look, h / 2.0 + e.dy + e.look_y + if sleepy { 1.0 } else { 0.0 } - 1.2 * p.hap);
         let tr = g.ts.pre_concat(Transform::from_row(sx, 0.0, 0.0, sy, cx - EYE_PIVOT.0 * sx, cy - EYE_PIVOT.1 * sy));
-        let white = paint(255, 255, 255, al);
-        for p in &self.eye_paths {
-            g.pm.fill_path(p, &white, FillRule::Winding, tr, None);
+        let eye_a = al * (1.0 - p.hap);
+        let white = paint(255, 255, 255, eye_a);
+        for (path, geo) in self.eye_paths.iter().zip(EYE_GEO.iter()) {
+            let (ex, ey) = (cx + (geo.cx - EYE_PIVOT.0) * sx, cy + (geo.cy - EYE_PIVOT.1) * sy);
+            if eye_a > 0.01 {
+                if lid > 0.01 {
+                    fill_eye_under_lid(g, path, tr, (ex, ey), geo, sy, lid, p.tilt, eye_a);
+                } else {
+                    g.pm.fill_path(path, &white, FillRule::Winding, tr, None);
+                }
+            }
+            if p.hap > 0.01 {
+                // happy: the eye turns into an arc "^"
+                let hw = geo.w * sx * 0.5 * 0.85;
+                let mut pb = PathBuilder::new();
+                pb.move_to(ex - hw, ey + hw * 0.5);
+                pb.quad_to(ex, ey - hw * 1.05, ex + hw, ey + hw * 0.5);
+                if let Some(arc) = pb.finish() {
+                    let stroke = Stroke { width: EYE_ARC_W, line_cap: LineCap::Round, ..Stroke::default() };
+                    g.pm.stroke_path(&arc, &paint(255, 255, 255, al * p.hap), &stroke, g.ts, None);
+                }
+            }
         }
+    }
+
+    /// The glance toward the cursor, when it is over the notch canvas (and the moods are on in Settings).
+    pub(crate) unsafe fn eye_follow_target(&self) -> Option<(f32, f32)> {
+        if !self.cfg.eye_moods || self.menu_open {
+            return None;
+        }
+        let mut p = POINT::default();
+        GetCursorPos(&mut p).ok()?;
+        follow_look((p.x - self.wx) as f32 / self.scale, (p.y - self.wy) as f32 / self.scale, self.h)
+    }
+
+    /// Settles the eye's mood for this frame. A toast makes no difference while it shows (the notch is open then); when it ends
+    /// the eye reacts for a moment: happy after good news (timer done, download finished, charging), surprised after the rest.
+    pub(crate) fn eye_mood_step(&mut self) {
+        if !self.cfg.eye_moods {
+            self.eye.mood = EyeMood::Normal;
+            self.eye.pending_toast = None;
+            return;
+        }
+        let now = Instant::now();
+        match &self.toast {
+            Some(t) => self.eye.pending_toast = Some(matches!(t.kind, ToastKind::Timer { .. } | ToastKind::Downloaded { .. } | ToastKind::Charging { .. })),
+            None => {
+                if let Some(good) = self.eye.pending_toast.take() {
+                    if good {
+                        self.eye.happy_until = Some(now + Duration::from_secs_f32(EYE_HAPPY_SECS));
+                    } else {
+                        self.eye.surprised_until = Some(now + Duration::from_secs_f32(EYE_SURPRISE_SECS));
+                    }
+                }
+            }
+        }
+        // The water goal is reached with the Water slide open; the eye cheers once the notch has closed again.
+        let goal = self.water_goal_t.filter(|t| t.elapsed().as_secs() < 30);
+        if goal.is_some() && goal != self.eye.seen_goal {
+            self.eye.seen_goal = goal;
+            self.eye.pending_goal = true;
+        }
+        if self.eye.pending_goal && !self.expanded() && self.toast.is_none() {
+            self.eye.pending_goal = false;
+            self.eye.happy_until = Some(now + Duration::from_secs_f32(EYE_HAPPY_SECS));
+        }
+        let live = |u: Option<Instant>| u.is_some_and(|t| now < t);
+        let (surprised, happy) = (live(self.eye.surprised_until), live(self.eye.happy_until));
+        let focus = self.tm.mode == timer::TMode::Pomodoro && self.tm.running() && self.tm.phase == timer::Phase::Focus;
+        let idle = if surprised || happy || focus { 0.0 } else { sys::input_idle_secs() };
+        self.eye.mood = pick_mood(surprised, happy, focus, idle);
     }
 }
 
@@ -559,5 +827,74 @@ mod tests {
         e.wait = 0.0;
         e.update(1.0 / 60.0);
         assert_eq!(e.frame_ms(EYE_STILL_AFTER_SECS + 1.0), 16, "a blink in progress finishes first");
+    }
+
+    #[test]
+    fn the_eyes_follow_the_cursor_only_over_the_canvas() {
+        assert_eq!(follow_look(-5.0, 10.0, 32.0), None);
+        assert_eq!(follow_look(100.0, H as f32 + 1.0, 32.0), None);
+        let (x, y) = follow_look(CX + 200.0, 16.0, 32.0).unwrap();
+        assert!((x - EYE_FOLLOW_X).abs() < 0.05 && y.abs() < 1e-4, "far right, level: all the way right ({x}, {y})");
+        let (x, y) = follow_look(CX - 30.0, 100.0, 32.0).unwrap();
+        assert!(x < 0.0 && x > -EYE_FOLLOW_X && y > 0.9 * EYE_FOLLOW_Y && y < EYE_FOLLOW_Y, "left and below ({x}, {y})");
+        // the range grows smoothly with the distance: no hard stop
+        let step = |d: f32| follow_look(CX + d, 16.0, 32.0).unwrap().0;
+        assert!(step(20.0) < step(60.0) && step(60.0) < step(120.0) && step(120.0) < step(240.0));
+        assert!(step(20.0) > 0.0 && step(240.0) > EYE_LOOK_MAX, "reaches further than a random glance");
+    }
+
+    #[test]
+    fn following_the_cursor_replaces_the_random_glances() {
+        let mut e = resting();
+        e.follow = Some((2.0, 1.0));
+        e.look_wait = 0.0;
+        for _ in 0..120 {
+            e.update(1.0 / 60.0);
+        }
+        assert!((e.look - 2.0).abs() < 0.2 && (e.look_y - 1.0).abs() < 0.2, "looks at the cursor ({}, {})", e.look, e.look_y);
+        e.follow = None;
+        e.look_wait = 0.0;
+        e.update(1.0 / 60.0);
+        assert!(e.look_wait > 1.0, "glances around again once the cursor is gone");
+    }
+
+    #[test]
+    fn a_short_event_beats_a_lasting_state() {
+        assert_eq!(pick_mood(false, false, false, 0.0), EyeMood::Normal);
+        assert_eq!(pick_mood(false, false, false, EYE_SLEEPY_AFTER_SECS), EyeMood::Sleepy);
+        assert_eq!(pick_mood(false, false, true, EYE_SLEEPY_AFTER_SECS), EyeMood::Focus, "working is not sleeping");
+        assert_eq!(pick_mood(false, true, true, 0.0), EyeMood::Happy);
+        assert_eq!(pick_mood(true, true, true, EYE_SLEEPY_AFTER_SECS), EyeMood::Surprised);
+    }
+
+    #[test]
+    fn the_mood_eases_in_and_then_costs_no_extra_frames() {
+        let mut e = resting();
+        assert!(!e.moving(LOOK_SETTLE_PX, LOOK_SETTLE_V), "normal mood at rest: nothing moves");
+        e.mood = EyeMood::Happy;
+        assert!(e.moving(LOOK_SETTLE_PX, LOOK_SETTLE_V), "a new mood is animated at full rate");
+        let mut frames = 0;
+        while !e.mood_settled() && frames < 600 {
+            e.update(1.0 / 60.0);
+            frames += 1;
+        }
+        assert!(frames < 240, "settled after {frames} frames");
+        assert!(e.pose.hap > 0.99 && e.gs > 0.99);
+        assert!((e.pal[0][1] - 210.0).abs() < 1.0, "glow palette turned green");
+    }
+
+    #[test]
+    fn a_sleepy_eye_blinks_slowly_and_rarely() {
+        let mut e = resting();
+        e.mood = EyeMood::Sleepy;
+        e.wait = 0.0;
+        e.update(1.0 / 60.0);
+        assert!(e.blinking);
+        assert!(e.hold >= EYE_SLEEPY_HOLD);
+        while e.blinking {
+            e.update(1.0 / 60.0);
+        }
+        assert!(e.wait >= 4.0, "next blink in {} s", e.wait);
+        assert!(!e.double_next);
     }
 }

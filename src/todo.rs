@@ -150,10 +150,33 @@ impl App {
             .unwrap_or_default();
         self.caret_on = true;
         self.edit_start = Instant::now();
+        self.caret_t = self.edit_start;
         self.prev_fg = GetForegroundWindow().0 as isize;
         let hwnd = HWND(self.hwnd as *mut c_void);
         let _ = SetForegroundWindow(hwnd);
         let _ = SetFocus(hwnd);
+    }
+
+    /// A key in the todo input (Enter, Esc, Backspace or a character). Only the caret blink restarts: `edit_start` is when the input
+    /// opened and drives its fade-in and the left panel's fade-out, so restarting it on every key made both flicker while typing.
+    pub(crate) unsafe fn todo_char(&mut self, c: u32) {
+        match c {
+            13 => self.finish_edit(true, true),
+            27 => self.finish_edit(false, true),
+            8 => {
+                self.input.pop();
+            }
+            c if c >= 32 => {
+                if let Some(ch) = char::from_u32(c) {
+                    if self.input.chars().count() < 80 {
+                        self.input.push(ch);
+                    }
+                }
+            }
+            _ => {}
+        }
+        self.caret_t = Instant::now();
+        self.caret_on = true;
     }
 
     pub(crate) unsafe fn finish_edit(&mut self, commit: bool, restore: bool) {

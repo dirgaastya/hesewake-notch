@@ -430,6 +430,7 @@ impl App {
                             tr("Cycle: clock/eyes"),
                             Ctl::Seg((0..settings::IDLE_DISPLAY_LABELS.len()).map(|i| settings::idle_display_label(i).to_string()).collect(), false),
                         ),
+                        toggle(Rid::EyeMoods, tr("Eye moods"), tr("Mood, glow, follows cursor")),
                         toggle(Rid::Minimal, tr("Minimal notch"), tr("Thin line while idle")),
                         toggle(Rid::Glow, tr("Background glow"), tr("Off: plain black")),
                     ],

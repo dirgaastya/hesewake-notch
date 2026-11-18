@@ -488,6 +488,8 @@ const ID_TEXT: &[(&str, &str)] = &[
     ("Downloads", "Unduhan"),
     ("Checking\u{2026}", "Memeriksa\u{2026}"),
     ("Checks GitHub for a newer release", "Memeriksa GitHub untuk rilis yang lebih baru"),
+    ("Eye moods", "Suasana mata"),
+    ("Mood, glow, follows cursor", "Mood, glow, ikut kursor"),
     ("Background glow", "Cahaya latar"),
     ("Off: plain black", "Mati: hitam polos"),
     ("Song in the notch", "Lagu di notch"),

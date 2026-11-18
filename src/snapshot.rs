@@ -119,6 +119,7 @@ fn test_app(s: f32) -> App {
         input: String::new(),
         caret_on: true,
         edit_start: Instant::now(),
+        caret_t: Instant::now(),
         prev_fg: 0,
         shelf: Vec::new(),
         shelf_flash: None,
@@ -292,6 +293,97 @@ fn snap_idle_eye() {
         }
         a.t = 3.0;
     });
+}
+
+#[test]
+fn snap_idle_eye_moods() {
+    use eye::EyeMood;
+    for (name, mood) in [("normal", EyeMood::Normal), ("sleepy", EyeMood::Sleepy), ("happy", EyeMood::Happy), ("focus", EyeMood::Focus), ("surprised", EyeMood::Surprised)] {
+        for s in [1.0, 2.0] {
+            shot(&format!("idle-eye-{name}"), s, |a| {
+                a.cfg.idle_display = 2;
+                a.eye.mood = mood;
+                for _ in 0..240 {
+                    a.eye.update(1.0 / 60.0);
+                }
+                // the mood has settled; wait out a blink that happens to be running so the picture is the open eye
+                for _ in 0..90 {
+                    if !a.eye.blinking {
+                        break;
+                    }
+                    a.eye.update(1.0 / 60.0);
+                }
+                a.t = 3.0;
+            });
+        }
+    }
+}
+
+#[test]
+fn eye_mood_follows_the_app_state() {
+    use eye::EyeMood;
+    let mut a = test_app(1.0);
+    a.cfg.eye_moods = false;
+    pomo(&mut a, 0, timer::Phase::Focus, 10);
+    a.eye_mood_step();
+    assert_eq!(a.eye.mood, EyeMood::Normal, "off in Settings: always the plain eye");
+
+    a.cfg.eye_moods = true;
+    a.eye_mood_step();
+    assert_eq!(a.eye.mood, EyeMood::Focus, "a Pomodoro focus session is running");
+
+    // a toast does nothing while it shows; when it ends the eye reacts
+    show_toast(&mut a, ToastKind::NotifOpenFailed { app: "App".into() });
+    a.eye_mood_step();
+    assert_eq!(a.eye.mood, EyeMood::Focus);
+    a.toast = None;
+    a.eye_mood_step();
+    assert_eq!(a.eye.mood, EyeMood::Surprised);
+
+    a.eye.surprised_until = None;
+    show_toast(&mut a, ToastKind::Timer { title: "Time's up".into(), label: "5 min timer".into() });
+    a.eye_mood_step();
+    a.toast = None;
+    a.eye_mood_step();
+    assert_eq!(a.eye.mood, EyeMood::Happy, "good news makes it happy");
+}
+
+/// Every key used to restart `edit_start`, which times the input bar's fade-in and the left panel's fade-out: the bar went
+/// invisible and the panel came back on each key press (flicker while typing).
+#[test]
+fn typing_in_the_todo_input_does_not_restart_its_fade() {
+    let mut a = test_app(1.0);
+    open_slide(&mut a, SlideId::Todo);
+    a.editing = true;
+    a.edit_start = Instant::now() - Duration::from_secs(2);
+    a.caret_t = Instant::now() - Duration::from_secs(2);
+    a.caret_on = false;
+    for c in "buy milk".chars() {
+        unsafe { a.todo_char(c as u32) };
+    }
+    assert_eq!(a.input, "buy milk");
+    assert!(a.edit_start.elapsed().as_secs_f32() >= 2.0, "the fade must not start over");
+    assert!(a.caret_t.elapsed().as_secs_f32() < 0.5 && a.caret_on, "the caret is solid right after a key");
+    unsafe { a.todo_char(8) };
+    assert_eq!(a.input, "buy mil");
+}
+
+#[test]
+fn the_eye_cheers_when_the_water_goal_is_reached() {
+    use eye::EyeMood;
+    let mut a = test_app(1.0);
+    open_slide(&mut a, SlideId::Water);
+    a.water_goal_t = Some(Instant::now());
+    a.eye_mood_step();
+    assert!(a.eye.happy_until.is_none(), "not while the Water slide is still open");
+    a.hover = false;
+    a.eye_mood_step();
+    assert_eq!(a.eye.mood, EyeMood::Happy, "happy once the notch is small again");
+    // a goal reached long ago (a new eye phase) does not cheer again
+    let mut b = test_app(1.0);
+    b.water_goal_t = Some(Instant::now() - Duration::from_secs(120));
+    b.eye_mood_step();
+    assert!(b.eye.happy_until.is_none());
 }
 
 #[test]

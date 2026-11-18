@@ -4,6 +4,16 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/), versi mengikut
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-18
+
+### Added
+- **Mata idle**: mata kini punya suasana (mood) dan glow-nya ikut berubah warna. **Fokus** (kelopak miring, glow ungu) saat sesi fokus Pomodoro berjalan; **ngantuk** (kelopak turun, glow redup, kedip pelan dan jarang) setelah 2 menit tanpa keyboard atau mouse; **senang** (mata melengkung, glow hijau) sebentar setelah toast kabar baik selesai (timer selesai, unduhan selesai, charger terpasang) atau setelah target air minum harian tercapai dan notch menutup lagi; **kaget** (mata membesar, glow oranye) sebentar setelah toast lain selesai. Peralihan antar suasana halus dan tidak menambah frame saat mata diam.
+- **Mata mengikuti kursor**: selama kursor ada di area notch, mata melirik ke arahnya (kiri, kanan, atas, bawah) dengan jangkauan lebih lebar dari lirikan acak dan berhenti halus di ujungnya; bila kursor pergi, mata kembali melirik sendiri. Lirikan acak juga kini sedikit bergerak vertikal.
+- **Settings > Look**: pengaturan baru **Eye moods** (menyala secara default) untuk suasana mata, warna glow, dan mata mengikuti kursor. Dimatikan, mata tampil seperti sebelumnya.
+
+### Fixed
+- **To-do**: kolom input dan panel kiri (angka selesai dan tombol) tidak lagi berkedip saat mengetik. Tiap ketikan sebelumnya memulai ulang animasi buka input (bilah memudar keluar, panel muncul lagi selama 0,2 detik); kini hanya kedip kursor yang diulang.
+
 ## [0.15.0] - 2026-11-18
 
 ### Added

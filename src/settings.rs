@@ -59,6 +59,8 @@ pub(crate) struct Settings {
     pub(crate) weather_city: usize,
     /// Colour glow at the bottom of the open notch (artwork colours on Music, the accent elsewhere). Off: plain black.
     pub(crate) glow: bool,
+    /// The idle eye changes mood (sleepy, happy, focused, surprised) and its glow changes colour with it. Off: always the plain eye.
+    pub(crate) eye_moods: bool,
     /// The small notch shows the playing song (artwork, title or lyrics). Off: it stays idle (clock / eyes) while music
     /// plays, and shows lyrics only while the lyrics view is open.
     pub(crate) notch_song: bool,
@@ -134,6 +136,7 @@ impl Default for Settings {
             monitor: 0,
             weather_city: 0,
             glow: true,
+            eye_moods: true,
             notch_song: true,
             prayer_on: true,
             imsak_terbit: true,
@@ -185,6 +188,7 @@ impl Settings {
                 "hud_brightness" => s.hud_brightness = flag,
                 "weather" => s.weather_on = flag,
                 "glow" => s.glow = flag,
+                "eye_moods" => s.eye_moods = flag,
                 "notch_song" => s.notch_song = flag,
                 "prayer" => s.prayer_on = flag,
                 "imsak_terbit" => s.imsak_terbit = flag,
@@ -249,7 +253,7 @@ impl Settings {
 
     pub(crate) fn serialize(&self) -> String {
         format!(
-            "minimal={}\nnotifications={}\nbusy_on_maximized={}\ngame_mode={}\ngame_lyrics={}\nlyric_lead_ms={}\nromaji_lyrics={}\nnotif_avatar={}\nlock_toast={}\nprivacy_dot={}\nslide_hotkeys={}\nmic_hotkey={}\ndnd={}\ndnd_hotkey={}\nlauncher={}\ndownloads={}\nlink_titles={}\nhud_volume={}\nhud_brightness={}\nweather={}\nweather_city={}\nglow={}\nnotch_song={}\nprayer={}\nimsak_terbit={}\nramadan={}\nadhan={}\nadhan_file={}\nwibu={}\nwibu_file={}\nwibu_dim={}\next_on={}\next_mute={}\nmonitor={}\nnotch_size={}\nidle_display={}\naccent={}\nlang={}\nupdate_check={}\nupdate_seen={}\nslides={}\n",
+            "minimal={}\nnotifications={}\nbusy_on_maximized={}\ngame_mode={}\ngame_lyrics={}\nlyric_lead_ms={}\nromaji_lyrics={}\nnotif_avatar={}\nlock_toast={}\nprivacy_dot={}\nslide_hotkeys={}\nmic_hotkey={}\ndnd={}\ndnd_hotkey={}\nlauncher={}\ndownloads={}\nlink_titles={}\nhud_volume={}\nhud_brightness={}\nweather={}\nweather_city={}\nglow={}\nnotch_song={}\nprayer={}\nimsak_terbit={}\nramadan={}\nadhan={}\nadhan_file={}\nwibu={}\nwibu_file={}\nwibu_dim={}\next_on={}\next_mute={}\nmonitor={}\nnotch_size={}\nidle_display={}\naccent={}\nlang={}\nupdate_check={}\nupdate_seen={}\nslides={}\neye_moods={}\n",
             self.minimal as u8,
             self.notifications as u8,
             self.busy_on_maximized as u8,
@@ -291,6 +295,7 @@ impl Settings {
             self.update_check as u8,
             self.update_seen,
             slides::format_slides(&self.slides),
+            self.eye_moods as u8,
         )
     }
 
@@ -525,6 +530,15 @@ mod tests {
         let mut s = Settings::default();
         s.slide_hotkeys = false;
         assert!(!Settings::parse(&s.serialize()).slide_hotkeys);
+    }
+
+    #[test]
+    fn eye_moods_roundtrip_and_default_on() {
+        assert!(Settings::parse("minimal=0\n").eye_moods, "old file = moods on");
+        let mut s = Settings::default();
+        s.eye_moods = false;
+        assert!(!Settings::parse(&s.serialize()).eye_moods);
+        assert!(Settings::parse(&Settings::default().serialize()).eye_moods);
     }
 
     #[test]
