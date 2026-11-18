@@ -98,7 +98,7 @@ fn app_target(aumid: &str) -> Option<String> {
 // ---------------------------------------------------------------- mencari activator
 static LNK: Mutex<Option<HashMap<String, GUID>>> = Mutex::new(None);
 
-fn walk(dir: &std::path::Path, depth: u8, out: &mut Vec<std::path::PathBuf>) {
+pub(crate) fn walk(dir: &std::path::Path, depth: u8, out: &mut Vec<std::path::PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
     for e in rd.flatten() {
         if out.len() >= MAX_LNK {

@@ -373,7 +373,13 @@ impl App {
                     tr("Language"),
                     vec![row(Rid::Language, tr("Language"), tr("Menus and slides"), Ctl::Seg(i18n::LANGS.iter().map(|s| s.to_string()).collect(), false))],
                 ),
-                ("Keyboard", vec![toggle(Rid::SlideHotkeys, tr("Slide hotkeys"), tr("Ctrl+Alt + slide no."))]),
+                (
+                    "Keyboard",
+                    vec![
+                        toggle(Rid::SlideHotkeys, tr("Slide hotkeys"), tr("Ctrl+Alt + slide no.")),
+                        toggle(Rid::Launcher, tr("Quick launcher"), tr("Ctrl+Alt+Space")),
+                    ],
+                ),
                 (tr("Updates"), vec![toggle(Rid::UpdateCheck, tr("Update notice"), tr("When a new version is out"))]),
             ],
             Sec::Look => vec![
